@@ -1,0 +1,14 @@
+.env
+*.session
+*.pid
+logs/
+output_to_user/
+telegram_files/
+__pycache__/
+*.pyc
+sessions.json
+cron_jobs.json
+webhooks.json
+inflight_turns.json
+startup_state.json
+agents.json
