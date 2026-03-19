@@ -1,0 +1,29 @@
+# Runtime
+logs/
+*.pid
+*.session
+sessions.json
+inflight_turns.json
+startup_state.json
+tasks.json
+bot.pid
+
+# Output & temp
+workspace/output_to_user/
+workspace/telegram_files/
+workspace/tasks/
+
+# Secrets
+.env
+agents.json
+config/config.json
+cron_jobs.json
+webhooks.json
+
+# Memory (personal)
+workspace/memory_system/MAINMEMORY.md
+SHAREDMEMORY.md
+
+# Python
+__pycache__/
+*.pyc
