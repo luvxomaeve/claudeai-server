@@ -7,18 +7,20 @@ inflight_turns.json
 startup_state.json
 tasks.json
 bot.pid
+cron_jobs.json
+webhooks.json
 
 # Output & temp
 workspace/output_to_user/
 workspace/telegram_files/
 workspace/tasks/
+output_to_user/
+telegram_files/
 
 # Secrets
 .env
 agents.json
 config/config.json
-cron_jobs.json
-webhooks.json
 
 # Memory (personal)
 workspace/memory_system/MAINMEMORY.md
