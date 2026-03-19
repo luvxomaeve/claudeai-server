@@ -18,15 +18,13 @@
   "cli_timeout": 600.0,
   "reasoning_effort": "medium",
   "file_access": "all",
-  "gemini_api_key": "null",
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
   "transport": "telegram",
   "transports": [
     "telegram"
   ],
-  "telegram_token": "YOUR_TELEGRAM_BOT_TOKEN",
-  "allowed_user_ids": [
-    0
-  ],
+  "telegram_token": "YOUR_TELEGRAM_TOKEN",
+  "allowed_user_ids": [],
   "allowed_group_ids": [],
   "group_mention_only": false,
   "matrix": {
