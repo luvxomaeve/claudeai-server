@@ -1,5 +1,5 @@
 ---
-name: gemini-generate
+name: gen
 description: Generate images and videos using Google Gemini API (Imagen, Veo). Trigger when user asks to generate, create, draw, or make an image/picture/photo/video, or mentions Imagen/Veo/Gemini generation. Also trigger on commands like /img, /image, /video, /gen.
 allowed-tools: Bash,Read,Write,Edit
 ---

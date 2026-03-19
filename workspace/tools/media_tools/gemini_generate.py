@@ -88,7 +88,6 @@ def generate_video(client, prompt, model="veo-3", aspect_ratio="16:9",
 
     config_kwargs = {
         "aspect_ratio": aspect_ratio,
-        "output_mime_type": "video/mp4",
     }
 
     if duration_seconds:
@@ -101,7 +100,14 @@ def generate_video(client, prompt, model="veo-3", aspect_ratio="16:9",
     }
 
     if reference_path and os.path.exists(reference_path):
-        ref_image = types.Image.from_file(reference_path)
+        with open(reference_path, "rb") as f:
+            ref_bytes = f.read()
+        mime = "image/jpeg"
+        if reference_path.lower().endswith(".png"):
+            mime = "image/png"
+        elif reference_path.lower().endswith(".webp"):
+            mime = "image/webp"
+        ref_image = types.Image(image_bytes=ref_bytes, mime_type=mime)
         generate_kwargs["image"] = ref_image
 
     # Video generation is async — returns an operation to poll
