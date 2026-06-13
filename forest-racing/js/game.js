@@ -61,12 +61,27 @@ const JUMP_VELOCITY = 13;       // начальная вертикальная �
 const GRAVITY = 26;             // притяжение вниз
 const AIR_CLEAR_Y = 1.2;        // выше этой высоты препятствия пролетаем насквозь
 
-// Биомы — меняются по мере прохождения дистанции (каждые BIOME_LEN метров)
-const BIOME_LEN = 900;
+// Монеты и комбо-серия
+const COIN_VALUE = 10;          // базовые очки за монетку (умножаются на множитель)
+const COMBO_WINDOW = 6;         // сек на поддержание серии без сбора — иначе сброс
+
+// Бонусы-усиления
+const SHIELD_TIME = 6;          // щит: неуязвимость, сек
+const MAGNET_TIME = 7;          // магнит: притягивает монеты и заправку, сек
+const SLOW_TIME = 5;            // замедление времени, сек
+const SLOW_SCALE = 0.55;        // во сколько раз медленнее мир при замедлении
+const POWERUP_KINDS = ['shield', 'magnet', 'slow'];
+const POWERUP_ICON = { shield: '🛡️', magnet: '🧲', slow: '⏳' };
+const POWERUP_COLOR = { shield: 0x3fa9ff, magnet: 0xff4d4d, slow: 0xb06bff };
+
+// Биомы и погода — меняются по мере прохождения дистанции (каждые BIOME_LEN метров)
+const BIOME_LEN = 750;
 const BIOMES = [
-  { name: 'Лес',    sky: 0x9fd3e0, fog: 0x9fd3e0, grass: 0x4f7a3a, leaf: 0x2f6b34, leaf2: 0x3f8b44, trunk: 0x6b4a2b, snow: false },
-  { name: 'Закат',  sky: 0xf6b26b, fog: 0xe8a06a, grass: 0x6a6a3a, leaf: 0x4a5a2a, leaf2: 0x6a7a3a, trunk: 0x5a3a2b, snow: false },
-  { name: 'Зима',   sky: 0xdfeefc, fog: 0xeaf3ff, grass: 0xeef4f8, leaf: 0x6f9bb0, leaf2: 0x9fc4d6, trunk: 0x5a4636, snow: true },
+  { name: 'Лес',   sky: 0x9fd3e0, fog: 0x9fd3e0, grass: 0x4f7a3a, leaf: 0x2f6b34, leaf2: 0x3f8b44, trunk: 0x6b4a2b, snow: false, rain: false, night: false, hemiI: 0.9,  sunI: 1.1 },
+  { name: 'Закат', sky: 0xf6b26b, fog: 0xe8a06a, grass: 0x6a6a3a, leaf: 0x4a5a2a, leaf2: 0x6a7a3a, trunk: 0x5a3a2b, snow: false, rain: false, night: false, hemiI: 0.8,  sunI: 1.0 },
+  { name: 'Дождь', sky: 0x6b727a, fog: 0x646b73, grass: 0x3c5230, leaf: 0x274a28, leaf2: 0x356b38, trunk: 0x4a3422, snow: false, rain: true,  night: false, hemiI: 0.55, sunI: 0.4 },
+  { name: 'Зима',  sky: 0xdfeefc, fog: 0xeaf3ff, grass: 0xeef4f8, leaf: 0x6f9bb0, leaf2: 0x9fc4d6, trunk: 0x5a4636, snow: true,  rain: false, night: false, hemiI: 0.95, sunI: 0.9 },
+  { name: 'Ночь',  sky: 0x0c1430, fog: 0x10183a, grass: 0x1f3326, leaf: 0x16331c, leaf2: 0x1f4326, trunk: 0x2a1f15, snow: false, rain: false, night: true,  hemiI: 0.3,  sunI: 0.2 },
 ];
 
 // ---------- Состояние ----------
@@ -80,12 +95,21 @@ const state = {
   score: 0,
   steer: 0,          // -1..1 текущее направление руля
   carX: 0,
+  vx: 0,             // боковая скорость (для скольжения в дождь)
   boostTime: 0,      // остаток времени ускорения
   hits: 0,           // сколько ударов подряд набрано
   hitTimer: 0,       // время с последнего удара (для восстановления)
   carY: 0,           // высота машины над дорогой (прыжок)
   vy: 0,             // вертикальная скорость
   airborne: false,   // машина в воздухе?
+  coins: 0,          // монеты за забег
+  combo: 0,          // длина серии без аварий
+  comboTimer: 0,     // остаток времени серии
+  shieldTime: 0,     // остаток щита
+  magnetTime: 0,     // остаток магнита
+  slowTime: 0,       // остаток замедления
+  rain: false,       // идёт дождь (скользко)
+  night: false,      // ночь
   biomeIndex: 0,
   muted: loadMuted(),
   bestScore: loadBest(),
@@ -148,6 +172,9 @@ const obstacles = [];   // деревья/пни на дороге (препят
 const pickups = [];     // заправка
 const boosts = [];      // бонусы-ускорители
 const ramps = [];       // трамплины
+const coins = [];       // монетки
+const powerups = [];    // усиления (щит/магнит/замедление)
+const traffic = [];     // встречные машины
 
 function makeRoadSegment(z) {
   const group = new THREE.Group();
@@ -291,22 +318,119 @@ function makeRamp() {
 }
 function addRamp() { const r = makeRamp(); ramps.push(r); return r; }
 
-// ---------- Снег (для зимнего биома) ----------
-let snow = null;
-function buildSnow() {
-  const count = 600;
+// Монетка — золотой диск, вращается
+const coinGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.1, 16);
+const coinMat = new THREE.MeshStandardMaterial({ color: 0xffd23f, emissive: 0xffae00, emissiveIntensity: 0.6, metalness: 0.8, roughness: 0.25 });
+function makeCoin() {
+  const m = new THREE.Mesh(coinGeo, coinMat);
+  m.rotation.x = Math.PI / 2; // ставим «на ребро» к камере
+  m.position.y = 1.1;
+  m.castShadow = true;
+  scene.add(m);
+  return m;
+}
+function addCoin() { const c = makeCoin(); coins.push(c); return c; }
+
+// Усиление — светящийся предмет, форма/цвет зависят от вида
+const powerGeo = {
+  shield: new THREE.IcosahedronGeometry(0.75, 0),
+  magnet: new THREE.TorusGeometry(0.55, 0.22, 10, 18),
+  slow: new THREE.ConeGeometry(0.7, 1.3, 14),
+};
+const powerMat = {
+  shield: new THREE.MeshStandardMaterial({ color: 0x3fa9ff, emissive: 0x1f7fff, emissiveIntensity: 0.7, metalness: 0.4, roughness: 0.3 }),
+  magnet: new THREE.MeshStandardMaterial({ color: 0xff4d4d, emissive: 0xd11f1f, emissiveIntensity: 0.7, metalness: 0.4, roughness: 0.3 }),
+  slow: new THREE.MeshStandardMaterial({ color: 0xb06bff, emissive: 0x7a2fff, emissiveIntensity: 0.7, metalness: 0.4, roughness: 0.3 }),
+};
+function makePowerup() {
+  const g = new THREE.Group();
+  const core = new THREE.Mesh(powerGeo.shield, powerMat.shield);
+  core.castShadow = true;
+  g.add(core);
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(1.1, 0.1, 8, 20),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 })
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = -0.6;
+  g.add(ring);
+  g.userData.core = core;
+  g.userData.ring = ring;
+  scene.add(g);
+  return g;
+}
+function addPowerup() { const p = makePowerup(); powerups.push(p); return p; }
+function setPowerupKind(p, kind) {
+  p.userData.kind = kind;
+  p.userData.core.geometry = powerGeo[kind];
+  p.userData.core.material = powerMat[kind];
+  p.userData.ring.material.color.setHex(POWERUP_COLOR[kind]);
+}
+
+// Встречная машина — простой кузов другого цвета
+const trafficColors = [0xe23b3b, 0x3b7be2, 0xe2b53b, 0x8a3be2, 0x2bbf6a];
+const trafficBodyGeo = new THREE.BoxGeometry(2, 0.7, 3.8);
+const trafficCabinGeo = new THREE.BoxGeometry(1.7, 0.6, 1.8);
+const trafficWheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 10);
+const trafficWheelMat = new THREE.MeshLambertMaterial({ color: 0x14151a });
+function makeTrafficCar() {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0xe23b3b, metalness: 0.5, roughness: 0.4 });
+  const base = new THREE.Mesh(trafficBodyGeo, mat);
+  base.position.y = 0.75; base.castShadow = true;
+  g.add(base);
+  const cabin = new THREE.Mesh(trafficCabinGeo, new THREE.MeshStandardMaterial({ color: 0x222831, metalness: 0.3, roughness: 0.6 }));
+  cabin.position.set(0, 1.3, -0.1); cabin.castShadow = true;
+  g.add(cabin);
+  for (const [x, z] of [[-0.95, 1.3], [0.95, 1.3], [-0.95, -1.3], [0.95, -1.3]]) {
+    const w = new THREE.Mesh(trafficWheelGeo, trafficWheelMat);
+    w.rotation.z = Math.PI / 2; w.position.set(x, 0.45, z); g.add(w);
+  }
+  // задние габариты (смотрят на игрока)
+  const tailMat = new THREE.MeshBasicMaterial({ color: 0xff4444 });
+  for (const x of [-0.7, 0.7]) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.1), tailMat);
+    t.position.set(x, 0.85, 1.95); g.add(t);
+  }
+  g.userData.body = base;
+  scene.add(g);
+  return g;
+}
+function addTrafficCar() { const t = makeTrafficCar(); traffic.push(t); return t; }
+
+// ---------- Осадки и звёзды ----------
+let snow = null, rain = null, stars = null;
+function buildParticles(count, spreadY, color, size, opacity) {
   const pos = new Float32Array(count * 3);
   for (let i = 0; i < count; i++) {
     pos[i * 3] = (Math.random() * 2 - 1) * 60;
-    pos[i * 3 + 1] = Math.random() * 40;
+    pos[i * 3 + 1] = Math.random() * spreadY;
     pos[i * 3 + 2] = -Math.random() * 120;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.5, transparent: true, opacity: 0.85 });
-  snow = new THREE.Points(geo, mat);
-  snow.visible = false;
-  scene.add(snow);
+  const mat = new THREE.PointsMaterial({ color, size, transparent: true, opacity });
+  const p = new THREE.Points(geo, mat);
+  p.visible = false;
+  scene.add(p);
+  return p;
+}
+function buildSnow() { snow = buildParticles(600, 40, 0xffffff, 0.5, 0.85); }
+function buildRain() { rain = buildParticles(700, 45, 0xaccbff, 0.32, 0.55); }
+function buildStars() {
+  const count = 260;
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    pos[i * 3] = (Math.random() * 2 - 1) * 120;
+    pos[i * 3 + 1] = 20 + Math.random() * 60;
+    pos[i * 3 + 2] = -40 - Math.random() * 220;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.7, transparent: true, opacity: 0.9 });
+  stars = new THREE.Points(geo, mat);
+  stars.visible = false;
+  scene.add(stars);
 }
 
 // ---------- Машина игрока ----------
@@ -384,6 +508,9 @@ let nextPickupZ = -40;
 let nextObstacleZ = -55;
 let nextBoostZ = -120;
 let nextRampZ = -55;
+let nextCoinZ = -30;
+let nextPowerupZ = -160;
+let nextTrafficZ = -90;
 
 function spawnAhead(frontZ) {
   // пикапы
@@ -418,6 +545,38 @@ function spawnAhead(frontZ) {
     r.userData.used = false;
     nextRampZ -= 70 + Math.random() * 60;
   }
+  // монетки — часто, дорожками по одной полосе
+  while (nextCoinZ > frontZ - SPAWN_AHEAD) {
+    const laneX = (Math.random() * 2 - 1) * ROAD_HALF;
+    const run = 3 + Math.floor(Math.random() * 4); // цепочка из 3-6 монет
+    for (let i = 0; i < run; i++) {
+      const c = coins.find((m) => !m.visible) || addCoin();
+      c.visible = true;
+      c.position.set(laneX, 1.1, nextCoinZ);
+      c.userData.taken = false;
+      nextCoinZ -= 5;
+    }
+    nextCoinZ -= 14 + Math.random() * 20;
+  }
+  // усиления (редко)
+  while (nextPowerupZ > frontZ - SPAWN_AHEAD) {
+    const p = powerups.find((m) => !m.visible) || addPowerup();
+    p.visible = true;
+    p.position.set((Math.random() * 2 - 1) * ROAD_HALF, 1.2, nextPowerupZ);
+    p.userData.taken = false;
+    setPowerupKind(p, POWERUP_KINDS[Math.floor(Math.random() * POWERUP_KINDS.length)]);
+    nextPowerupZ -= 200 + Math.random() * 160;
+  }
+  // встречные машины (изредка)
+  while (nextTrafficZ > frontZ - SPAWN_AHEAD) {
+    const t = traffic.find((m) => !m.visible) || addTrafficCar();
+    t.visible = true;
+    t.position.set((Math.random() * 2 - 1) * ROAD_HALF, 0, nextTrafficZ);
+    t.userData.hit = false;
+    t.userData.speed = 8 + Math.random() * 10; // как быстро едет навстречу
+    t.userData.body.material.color.setHex(trafficColors[Math.floor(Math.random() * trafficColors.length)]);
+    nextTrafficZ -= 90 + Math.random() * 110;
+  }
 }
 
 function addPickup() { const p = makePickup(); pickups.push(p); return p; }
@@ -433,6 +592,12 @@ function applyBiome(idx) {
   leafMat2.color.setHex(b.leaf2);
   trunkMat.color.setHex(b.trunk);
   if (snow) snow.visible = b.snow;
+  if (rain) rain.visible = b.rain;
+  if (stars) stars.visible = b.night;
+  hemi.intensity = b.hemiI;
+  sun.intensity = b.sunI;
+  state.rain = b.rain;
+  state.night = b.night;
   state.biomeIndex = idx % BIOMES.length;
 }
 
@@ -444,6 +609,42 @@ function refreshPickupColors() {
     }
     p.children[1].material.color.setHex(state.cfg.pickupColor);
   }
+}
+
+// Комбо-серия: множитель растёт с длиной серии, обрывается аварией/паузой
+function comboMult() { return Math.min(5, 1 + Math.floor(state.combo / 3)); }
+function bumpCombo() { state.combo++; state.comboTimer = COMBO_WINDOW; }
+
+// Удар о препятствие/машину. Возвращает false, если забег окончен.
+function hitObstacle() {
+  if (state.shieldTime > 0) {           // щит — пробиваем без урона
+    state.score += 15;
+    flash(0x3fa9ff);
+    audio.shieldHit();
+    return true;
+  }
+  state.speed *= 0.4;
+  state.fuel -= 8;
+  state.hits++;
+  state.hitTimer = 0;
+  state.combo = 0;                       // серия обрывается
+  flash(0xff2b2b);
+  shakeDamage();
+  audio.crash();
+  if (state.hits >= MAX_HITS) { gameOver('crash'); return false; }
+  if (state.fuel <= 0) { state.fuel = 0; gameOver('fuel'); return false; }
+  return true;
+}
+
+// Включаем подобранное усиление
+function activatePowerup(kind) {
+  if (kind === 'shield') state.shieldTime = SHIELD_TIME;
+  else if (kind === 'magnet') state.magnetTime = MAGNET_TIME;
+  else if (kind === 'slow') state.slowTime = SLOW_TIME;
+  bumpCombo();
+  state.score += 80 * comboMult();
+  flash(POWERUP_COLOR[kind]);
+  audio.power();
 }
 
 // ---------- Игровой цикл ----------
@@ -465,8 +666,18 @@ function update(dt) {
 
   // разгон
   state.speed = Math.min(maxSpeed, state.speed + accel * dt);
-  const move = state.speed * dt;
+  let move = state.speed * dt;
+  // замедление времени (усиление): мир едет медленнее, управлять легче
+  if (state.slowTime > 0) { state.slowTime -= dt; move *= SLOW_SCALE; }
   state.distance += move;
+
+  // таймеры усилений и серии
+  if (state.shieldTime > 0) state.shieldTime -= dt;
+  if (state.magnetTime > 0) state.magnetTime -= dt;
+  if (state.combo > 0) {
+    state.comboTimer -= dt;
+    if (state.comboTimer <= 0) state.combo = 0;
+  }
 
   // смена биома по дистанции
   const targetBiome = Math.floor(state.distance / BIOME_LEN) % BIOMES.length;
@@ -502,10 +713,13 @@ function update(dt) {
     }
   }
 
-  // руль
+  // руль (в дождь — пониженное сцепление, машину сносит)
   const steerSpeed = 18;
-  state.carX += state.steer * steerSpeed * dt;
-  state.carX = Math.max(-ROAD_HALF, Math.min(ROAD_HALF, state.carX));
+  const grip = state.rain ? 0.07 : 0.32;
+  state.vx = THREE.MathUtils.lerp(state.vx, state.steer * steerSpeed, grip);
+  state.carX += state.vx * dt;
+  if (state.carX < -ROAD_HALF) { state.carX = -ROAD_HALF; state.vx = 0; }
+  if (state.carX > ROAD_HALF) { state.carX = ROAD_HALF; state.vx = 0; }
   car.position.x = state.carX;
   car.position.z = 0;
   car.position.y = state.carY;
@@ -533,21 +747,67 @@ function update(dt) {
     }
   }
 
-  // пикапы
+  // пикапы (заправка)
   for (const p of pickups) {
     if (!p.visible) continue;
     p.position.z += move;
     p.rotation.y += dt * 2;
     if (p.userData.body) p.userData.body.position.y = Math.sin(clock.elapsedTime * 3) * 0.15;
-    if (!p.userData.taken && Math.abs(p.position.z) < 2.2 && Math.abs(p.position.x - state.carX) < 1.7) {
+    if (state.magnetTime > 0 && p.position.z > -26) p.position.x = THREE.MathUtils.lerp(p.position.x, state.carX, 0.12);
+    const reach = state.magnetTime > 0 ? 2.4 : 1.7;
+    if (!p.userData.taken && Math.abs(p.position.z) < 2.2 && Math.abs(p.position.x - state.carX) < reach) {
       p.userData.taken = true;
       p.visible = false;
       state.fuel = Math.min(MAX_FUEL, state.fuel + cfg.refill);
-      state.score += 50;
+      bumpCombo();
+      state.score += 50 * comboMult();
       flash(cfg.pickupColor);
       audio.pickup();
     }
     if (p.position.z > DESPAWN_BEHIND) p.visible = false;
+  }
+
+  // монетки
+  for (const c of coins) {
+    if (!c.visible) continue;
+    c.position.z += move;
+    c.rotation.z += dt * 5;
+    if (state.magnetTime > 0 && c.position.z > -26) c.position.x = THREE.MathUtils.lerp(c.position.x, state.carX, 0.14);
+    const reach = state.magnetTime > 0 ? 2.6 : 1.6;
+    if (!c.userData.taken && Math.abs(c.position.z) < 2 && Math.abs(c.position.x - state.carX) < reach) {
+      c.userData.taken = true;
+      c.visible = false;
+      state.coins++;
+      bumpCombo();
+      state.score += COIN_VALUE * comboMult();
+      audio.coin();
+    }
+    if (c.position.z > DESPAWN_BEHIND) c.visible = false;
+  }
+
+  // усиления (щит/магнит/замедление)
+  for (const p of powerups) {
+    if (!p.visible) continue;
+    p.position.z += move;
+    p.rotation.y += dt * 2;
+    p.userData.core.position.y = Math.sin(clock.elapsedTime * 3) * 0.15;
+    if (!p.userData.taken && Math.abs(p.position.z) < 2.2 && Math.abs(p.position.x - state.carX) < 1.9) {
+      p.userData.taken = true;
+      p.visible = false;
+      activatePowerup(p.userData.kind);
+    }
+    if (p.position.z > DESPAWN_BEHIND) p.visible = false;
+  }
+
+  // встречные машины — едут навстречу быстрее фона
+  for (const t of traffic) {
+    if (!t.visible) continue;
+    t.position.z += move + t.userData.speed * dt;
+    if (!t.userData.hit && Math.abs(t.position.z) < 2.4 && Math.abs(t.position.x - state.carX) < 1.9 && state.carY < AIR_CLEAR_Y) {
+      t.userData.hit = true;
+      if (!hitObstacle()) return;
+    }
+    if (t.position.z > DESPAWN_BEHIND + 6) t.visible = false;
   }
 
   // препятствия
@@ -558,15 +818,7 @@ function update(dt) {
     // в прыжке (высоко над дорогой) препятствие пролетаем насквозь
     if (!o.userData.hit && overlapping && state.carY < AIR_CLEAR_Y) {
       o.userData.hit = true;
-      state.speed *= 0.4;
-      state.fuel -= 8;
-      state.hits++;
-      state.hitTimer = 0;
-      flash(0xff2b2b);
-      shakeDamage();
-      audio.crash();
-      if (state.hits >= MAX_HITS) return gameOver('crash');
-      if (state.fuel <= 0) { state.fuel = 0; return gameOver('fuel'); }
+      if (!hitObstacle()) return; // вернул false → game over
     }
     if (o.position.z > DESPAWN_BEHIND) o.visible = false;
   }
@@ -579,7 +831,8 @@ function update(dt) {
       r.userData.used = true;
       state.airborne = true;
       state.vy = JUMP_VELOCITY;
-      state.score += 25;
+      bumpCombo();
+      state.score += 25 * comboMult();
       audio.jump();
     }
     if (r.position.z > DESPAWN_BEHIND) r.visible = false;
@@ -596,7 +849,8 @@ function update(dt) {
       b.visible = false;
       state.boostTime = BOOST_DURATION;
       state.fuel = Math.min(MAX_FUEL, state.fuel + BOOST_REFILL);
-      state.score += 100;
+      bumpCombo();
+      state.score += 100 * comboMult();
       el.boostBanner.classList.remove('hidden');
       flash(0xffd23f);
       audio.boost();
@@ -614,12 +868,27 @@ function update(dt) {
     snow.geometry.attributes.position.needsUpdate = true;
     snow.position.x = state.carX;
   }
+  // дождь — падает быстро
+  if (rain && rain.visible) {
+    const arr = rain.geometry.attributes.position.array;
+    for (let i = 1; i < arr.length; i += 3) {
+      arr[i] -= dt * 55;
+      if (arr[i] < 0) arr[i] = 45;
+    }
+    rain.geometry.attributes.position.needsUpdate = true;
+    rain.position.x = state.carX;
+  }
+  // звёзды ночью держим вокруг игрока
+  if (stars && stars.visible) stars.position.x = state.carX;
 
   // спавн впереди: ориентируемся на «виртуальный» прогресс
   nextPickupZ += move;
   nextObstacleZ += move;
   nextBoostZ += move;
   nextRampZ += move;
+  nextCoinZ += move;
+  nextPowerupZ += move;
+  nextTrafficZ += move;
   spawnAhead(0);
 
   // очки за дистанцию
@@ -646,12 +915,20 @@ const el = {
   fuelName: document.getElementById('fuel-name'),
   score: document.getElementById('score'),
   speed: document.getElementById('speed'),
+  coins: document.getElementById('coins'),
+  combo: document.getElementById('combo'),
+  pw: {
+    shield: document.getElementById('pw-shield'),
+    magnet: document.getElementById('pw-magnet'),
+    slow: document.getElementById('pw-slow'),
+  },
   damage: document.getElementById('damage'),
   hearts: Array.from(document.querySelectorAll('#damage .heart')),
   menu: document.getElementById('menu'),
   gameover: document.getElementById('gameover'),
   gameoverTitle: document.getElementById('gameover-title'),
   finalScore: document.getElementById('final-score'),
+  finalCoins: document.getElementById('final-coins'),
   bestScore: document.getElementById('best-score'),
   boostBanner: document.getElementById('boost-banner'),
   mute: document.getElementById('btn-mute'),
@@ -661,10 +938,33 @@ function updateHUD() {
   el.fuelFill.style.width = (state.fuel / MAX_FUEL * 100) + '%';
   el.score.textContent = Math.floor(state.score);
   el.speed.textContent = Math.round(state.speed * 3.6) + ' км/ч';
+  if (el.coins) el.coins.textContent = state.coins;
+  // множитель серии
+  if (el.combo) {
+    const m = comboMult();
+    if (m > 1) { el.combo.textContent = '×' + m; el.combo.classList.remove('hidden'); }
+    else el.combo.classList.add('hidden');
+  }
+  // активные усиления
+  updatePw('shield', state.shieldTime);
+  updatePw('magnet', state.magnetTime);
+  updatePw('slow', state.slowTime);
   // оставшиеся жизни = MAX_HITS - набранные удары
   const left = MAX_HITS - state.hits;
   for (let i = 0; i < el.hearts.length; i++) {
     el.hearts[i].classList.toggle('lost', i >= left);
+  }
+}
+
+function updatePw(kind, t) {
+  const e = el.pw && el.pw[kind];
+  if (!e) return;
+  if (t > 0) {
+    e.classList.add('on');
+    const b = e.querySelector('b');
+    if (b) b.textContent = Math.ceil(t);
+  } else {
+    e.classList.remove('on');
   }
 }
 
@@ -737,6 +1037,9 @@ const audio = {
   boost() { this.blip(440, 0.2, 'sawtooth'); this.blip(880, 0.25, 'sawtooth', 0.3); },
   jump() { this.blip(300, 0.18, 'sine', 0.4); this.blip(620, 0.22, 'sine', 0.3); },
   land() { this.blip(180, 0.1, 'triangle', 0.35); },
+  coin() { this.blip(1180, 0.07, 'square', 0.22); },
+  power() { this.blip(520, 0.18, 'triangle', 0.4); this.blip(780, 0.2, 'triangle', 0.3); this.blip(1040, 0.22, 'triangle', 0.22); },
+  shieldHit() { this.blip(900, 0.08, 'sine', 0.3); },
   crash() {
     if (!this.ready || state.muted) return;
     // короткий шумовой удар
@@ -768,17 +1071,27 @@ function startGame(carType) {
   state.score = 0;
   state.steer = 0;
   state.carX = 0;
+  state.vx = 0;
   state.boostTime = 0;
   state.hits = 0;
   state.hitTimer = 0;
   state.carY = 0;
   state.vy = 0;
   state.airborne = false;
+  state.coins = 0;
+  state.combo = 0;
+  state.comboTimer = 0;
+  state.shieldTime = 0;
+  state.magnetTime = 0;
+  state.slowTime = 0;
   state.biomeIndex = -1;
   nextPickupZ = -40;
   nextObstacleZ = -60;
   nextBoostZ = -120;
   nextRampZ = -55;
+  nextCoinZ = -30;
+  nextPowerupZ = -160;
+  nextTrafficZ = -90;
 
   // звук: создаём контекст по жесту пользователя
   audio.init();
@@ -792,6 +1105,9 @@ function startGame(carType) {
   obstacles.forEach((o) => (o.visible = false));
   boosts.forEach((b) => (b.visible = false));
   ramps.forEach((r) => (r.visible = false));
+  coins.forEach((c) => (c.visible = false));
+  powerups.forEach((p) => (p.visible = false));
+  traffic.forEach((t) => (t.visible = false));
   spawnAhead(0);
 
   el.fuelIcon.textContent = state.cfg.fuelIcon;
@@ -818,6 +1134,7 @@ function gameOver(reason) {
     el.gameoverTitle.textContent = reason === 'crash' ? 'Разбился! 💥' : 'Бак пуст! 🏁';
   }
   el.finalScore.textContent = state.score;
+  if (el.finalCoins) el.finalCoins.textContent = state.coins;
   el.bestScore.textContent = state.bestScore;
   el.boostBanner.classList.add('hidden');
   el.hud.classList.add('hidden');
@@ -968,6 +1285,8 @@ camera.position.set(0, 6.5, 11);
 camera.lookAt(0, 1.5, -8);
 initWorld();
 buildSnow();
+buildRain();
+buildStars();
 applyBiome(0);
 buildCar(state.cfg);
 el.bestScore.textContent = state.bestScore;

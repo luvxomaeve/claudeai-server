@@ -28,11 +28,18 @@
         </div>
         <div class="stats">
           <div class="stat"><span class="stat-label">Очки</span><span id="score" class="stat-val">0</span></div>
+          <div class="stat"><span class="stat-label">💰 Монеты</span><span id="coins" class="stat-val">0</span></div>
           <div class="stat"><span class="stat-label">Скорость</span><span id="speed" class="stat-val">0</span></div>
           <button id="btn-mute" class="icon-btn" title="Звук">🔊</button>
         </div>
       </div>
       <div id="damage" class="damage"><span class="heart">❤️</span><span class="heart">❤️</span><span class="heart">❤️</span></div>
+      <div id="combo" class="combo hidden">×2</div>
+      <div id="powerups" class="powerups">
+        <span class="pw" id="pw-shield">🛡️<b></b></span>
+        <span class="pw" id="pw-magnet">🧲<b></b></span>
+        <span class="pw" id="pw-slow">⏳<b></b></span>
+      </div>
       <div id="boost-banner" class="banner hidden">🚀 УСКОРЕНИЕ!</div>
       <div id="touch-controls">
         <button id="btn-left" class="touch-btn">◀</button>
@@ -65,13 +72,16 @@
         </div>
       </div>
       <p class="hint">Управление: ← → или A / D, на телефоне — кнопки или наклон пальцем по экрану.<br>
-      🚧 Не врежься 3 раза подряд — разобьёшься! 🛫 Наезжай на жёлтые трамплины и перепрыгивай препятствия.</p>
+      🚧 Не врежься 3 раза подряд — разобьёшься! 🛫 Прыгай с трамплинов через препятствия и встречные машины.<br>
+      💰 Собирай монетки сериями — растёт множитель ×2…×5. Лови усиления: 🛡️ щит, 🧲 магнит, ⏳ замедление.<br>
+      🌦️ Осторожно в дождь — скользко, а ночью свети фарами!</p>
     </div>
 
     <!-- Экран Game Over -->
     <div id="gameover" class="overlay hidden">
       <h1 id="gameover-title">Бак пуст! 🏁</h1>
       <p class="final">Очки: <span id="final-score">0</span></p>
+      <p class="final-coins">💰 Монеты: <span id="final-coins">0</span></p>
       <p class="final-best">Рекорд: <span id="best-score">0</span></p>
       <button id="btn-restart" class="big-btn">Ещё раз</button>
       <button id="btn-menu" class="big-btn ghost">Сменить машину</button>
