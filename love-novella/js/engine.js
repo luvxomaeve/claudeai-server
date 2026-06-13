@@ -87,33 +87,83 @@
   // ============================================================
   //  Сцена / фон / персонаж (инлайн-SVG из art.js)
   // ============================================================
-  let curBg = null, charReady = false;
+  let curBg = null, curChar = null, curExpr = "neutral";
+  let bgBuilt = false, charBuilt = false;
+  const imgCache = {};
+
+  // проверка наличия файла-картинки (с кэшем), чтобы решить: фото или SVG
+  function testImage(url, cb) {
+    if (url in imgCache) { cb(imgCache[url]); return; }
+    const im = new Image();
+    im.onload = () => { imgCache[url] = true; cb(true); };
+    im.onerror = () => { imgCache[url] = false; cb(false); };
+    im.src = url;
+  }
+
+  function buildBgLayers() {
+    if (bgBuilt) return;
+    el.bg.innerHTML = '<div class="bg-svg"></div><div class="bg-photo"></div>';
+    bgBuilt = true;
+  }
+  function buildCharLayers() {
+    if (charBuilt) return;
+    el.character.innerHTML = '<div class="char-svg"></div><img class="char-img" alt="">';
+    if (typeof CHARACTER !== "undefined")
+      el.character.querySelector(".char-svg").innerHTML = CHARACTER;
+    el.character.querySelector(".char-img").style.opacity = "0";
+    charBuilt = true;
+  }
 
   function setBackground(name) {
     if (!name || name === curBg) return;
-    curBg = name;
+    curBg = name; buildBgLayers();
+    const svgEl = el.bg.querySelector(".bg-svg");
+    const photoEl = el.bg.querySelector(".bg-photo");
     const svg = (typeof SCENES !== "undefined" && SCENES[name]) || "";
     el.bg.style.opacity = "0";
     setTimeout(() => {
       el.bg.className = "bg show svgbg " + name;
-      if (svg) el.bg.innerHTML = svg;
+      if (svg) svgEl.innerHTML = svg;
+      const f = (typeof ASSETS !== "undefined" && ASSETS.bg[name])
+        ? ASSETS.bgBase + ASSETS.bg[name] + ASSETS.bgExt : null;
+      if (f) testImage(f, (ok) => {
+        photoEl.style.backgroundImage = ok ? `url("${f}")` : "";
+        photoEl.style.opacity = ok ? "1" : "0";
+      });
+      else photoEl.style.opacity = "0";
       el.bg.style.opacity = "1";
     }, 260);
   }
 
-  function setCharacter(charKey) {
-    if (charKey == null) {            // null => спрятать
-      el.character.classList.remove("show");
+  function setCharacter(key) {
+    if (key == null) { el.character.classList.remove("show"); return; }
+    buildCharLayers();
+    curChar = key;
+    el.character.classList.add("show");
+    applyExpr();
+  }
+  function setExpr(expr) {
+    if (!expr) return;
+    curExpr = expr;
+    el.character.dataset.expr = expr;
+    if (charBuilt) applyExpr();
+  }
+  function setBlush(b) { el.character.dataset.blush = b ? "1" : "0"; }
+
+  // показать картинку-эмоцию, если файл есть; иначе — SVG-лицо
+  function applyExpr() {
+    el.character.dataset.expr = curExpr;
+    const img = el.character.querySelector(".char-img");
+    if (!img || !curChar || typeof ASSETS === "undefined" || !ASSETS.chars[curChar]) {
+      if (img) img.style.opacity = "0";
       return;
     }
-    if (!charReady && typeof CHARACTER !== "undefined") {
-      el.character.innerHTML = CHARACTER;
-      charReady = true;
-    }
-    el.character.classList.add("show");
+    const f = ASSETS.charBase + curChar + "/" + curExpr + ASSETS.charExt;
+    testImage(f, (ok) => {
+      if (ok) { if (img.getAttribute("src") !== f) img.src = f; img.style.opacity = "1"; }
+      else img.style.opacity = "0";
+    });
   }
-  function setExpr(expr) { if (expr) el.character.dataset.expr = expr; }
-  function setBlush(b) { el.character.dataset.blush = b ? "1" : "0"; }
 
   // ============================================================
   //  Печать текста
