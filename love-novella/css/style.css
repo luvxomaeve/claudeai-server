@@ -99,9 +99,9 @@ body { position: fixed; inset: 0; }
 
 /* веки (прищур/нежность) */
 .character .lid-l,.character .lid-r { display:none; transition:transform .3s ease; transform-box:fill-box; transform-origin:center; }
-.character[data-expr="soft"]  .lid-l, .character[data-expr="soft"]  .lid-r { display:block; transform:translateY(7px); }
-.character[data-expr="sad"]   .lid-l, .character[data-expr="sad"]   .lid-r { display:block; transform:translateY(4px); }
-.character[data-expr="laugh"] .lid-l, .character[data-expr="laugh"] .lid-r { display:block; transform:translateY(11px); }
+.character[data-expr="soft"]  .lid-l, .character[data-expr="soft"]  .lid-r { display:block; transform:translateY(13px); }
+.character[data-expr="sad"]   .lid-l, .character[data-expr="sad"]   .lid-r { display:block; transform:translateY(8px); }
+.character[data-expr="laugh"] .lid-l, .character[data-expr="laugh"] .lid-r { display:block; transform:translateY(26px); }
 
 /* брови */
 .character .brows,.character .brow-l,.character .brow-r { transition:transform .3s ease; transform-box:fill-box; transform-origin:center; }
