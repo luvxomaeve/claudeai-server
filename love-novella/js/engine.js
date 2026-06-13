@@ -68,46 +68,52 @@
   function buildParticles() {
     el.particles.innerHTML = "";
     if (!cfg.particles) return;
-    const n = 60;
+    const n = 34;
     for (let i = 0; i < n; i++) {
       const p = document.createElement("i");
-      const dur = 0.6 + Math.random() * 1.1;
+      const size = 3 + Math.random() * 6;
+      const dur = 9 + Math.random() * 12;
       p.style.left = Math.random() * 100 + "%";
-      p.style.height = 40 + Math.random() * 50 + "px";
+      p.style.top = (60 + Math.random() * 60) + "%";
+      p.style.width = size + "px";
+      p.style.height = size + "px";
       p.style.animationDuration = dur + "s";
       p.style.animationDelay = -Math.random() * dur + "s";
-      p.style.opacity = 0.25 + Math.random() * 0.5;
+      p.style.opacity = 0.3 + Math.random() * 0.5;
       el.particles.appendChild(p);
     }
   }
 
   // ============================================================
-  //  Сцена / фон / персонаж
+  //  Сцена / фон / персонаж (инлайн-SVG из art.js)
   // ============================================================
-  const CHAR_PALETTE = {
-    maya:   ["#e8a0a8", "#6a3a52"],
-    bright: ["#f0d9b8", "#8a5a3a"],
-    night:  ["#9aa6d8", "#2a2a52"],
-  };
+  let curBg = null, charReady = false;
 
   function setBackground(name) {
-    if (!name) return;
+    if (!name || name === curBg) return;
+    curBg = name;
+    const svg = (typeof SCENES !== "undefined" && SCENES[name]) || "";
     el.bg.style.opacity = "0";
     setTimeout(() => {
-      el.bg.className = "bg show " + name;
-    }, 220);
+      el.bg.className = "bg show svgbg " + name;
+      if (svg) el.bg.innerHTML = svg;
+      el.bg.style.opacity = "1";
+    }, 260);
   }
 
   function setCharacter(charKey) {
-    if (!charKey) {
+    if (charKey == null) {            // null => спрятать
       el.character.classList.remove("show");
       return;
     }
-    const pal = CHAR_PALETTE[charKey] || CHAR_PALETTE.maya;
-    el.character.style.setProperty("--char-top", pal[0]);
-    el.character.style.setProperty("--char-bot", pal[1]);
+    if (!charReady && typeof CHARACTER !== "undefined") {
+      el.character.innerHTML = CHARACTER;
+      charReady = true;
+    }
     el.character.classList.add("show");
   }
+  function setExpr(expr) { if (expr) el.character.dataset.expr = expr; }
+  function setBlush(b) { el.character.dataset.blush = b ? "1" : "0"; }
 
   // ============================================================
   //  Печать текста
@@ -155,7 +161,7 @@
   // ============================================================
   function startGame(fresh) {
     if (fresh || !state) {
-      state = { passage: "start", vars: { name: "ты", affection: 0 } };
+      state = { passage: "start", vars: { name: "Роман", affection: 0, trust: 0 } };
       lineIdx = 0;
     }
     hideAllScreens();
@@ -172,6 +178,8 @@
 
     if (p.bg) setBackground(p.bg);
     if ("char" in p) setCharacter(p.char);
+    if (p.expr) setExpr(p.expr);
+    if ("blush" in p) setBlush(p.blush);
 
     el.choices.classList.remove("active");
     el.choices.innerHTML = "";
@@ -200,6 +208,8 @@
     if (line.set) Object.assign(state.vars, line.set);
     if (line.bg) setBackground(line.bg);
     if ("char" in line) setCharacter(line.char);
+    if (line.expr) setExpr(line.expr);
+    if ("blush" in line) setBlush(line.blush);
 
     // адалт-гейт: если строка только для 18+, а режим мягкий — заменяем
     let text = line.text;
@@ -435,8 +445,8 @@
     bind();
     refreshContinue();
     show("menu");
-    // лёгкий фон под меню
-    setBackground("rain");
+    el.character.dataset.expr = "neutral";
+    setBackground("menu");
     buildParticles();
   }
 

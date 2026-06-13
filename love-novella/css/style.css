@@ -49,44 +49,70 @@ body { position: fixed; inset: 0; }
                background: linear-gradient(160deg, #f3d9b8 0%, #c79a78 30%, #5a4030 70%, #241a12 100%); }
 .bg.dawn     { background: linear-gradient(160deg, #f1b8a8 0%, #b87a8c 35%, #5a3a52 70%, #1a1018 100%); }
 
-/* мягкое движение света */
-.bg::after {
-  content:""; position:absolute; inset:-20%;
-  background: radial-gradient(40% 40% at 20% 20%, rgba(232,201,138,.10), transparent 60%),
-              radial-gradient(50% 50% at 85% 70%, rgba(232,160,168,.10), transparent 60%);
-  animation: drift 18s ease-in-out infinite alternate;
-}
-@keyframes drift { from{transform:translate(0,0)} to{transform:translate(3%, -2%)} }
 
-/* ===== Частицы (дождь / пыль) ===== */
-.particles { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+/* ===== SVG-фон занимает весь экран ===== */
+.bg.svgbg svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
+
+/* ===== Частицы — мягкие светлячки/пылинки ===== */
+.particles { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:1; }
 .particles i {
-  position:absolute; top:-10%;
-  width:1px; height:60px;
-  background: linear-gradient(transparent, rgba(200,215,235,.35));
-  animation: fall linear infinite;
+  position:absolute;
+  border-radius:50%;
+  background: radial-gradient(circle, rgba(255,224,160,.9), rgba(255,224,160,0) 70%);
+  animation: floatUp linear infinite;
 }
-@keyframes fall {
-  to { transform: translateY(120vh); }
+@keyframes floatUp {
+  0%   { transform: translateY(0) translateX(0); }
+  50%  { transform: translateY(-50vh) translateX(14px); }
+  100% { transform: translateY(-100vh) translateX(-10px); }
 }
 
-/* ===== Персонаж — настроенческий «силуэт» ===== */
+/* ===== Героиня — инлайн-SVG с мимикой ===== */
 .character {
-  position:absolute; left:50%; bottom:0; transform: translateX(-50%) translateY(20px);
-  width:min(56vw, 360px); height:72%;
-  z-index:1; opacity:0; transition: opacity .8s ease, transform .8s ease;
+  position:absolute; left:50%; bottom:-7%; transform: translateX(-50%) translateY(24px);
+  width:min(94vw, 600px); height:100%;
+  z-index:2; opacity:0; transition: opacity .8s ease, transform .8s ease;
   pointer-events:none;
-  filter: blur(.3px);
+  filter: drop-shadow(0 14px 30px rgba(0,0,0,.45));
 }
 .character.show { opacity:1; transform: translateX(-50%) translateY(0); }
-.character::before {
-  content:""; position:absolute; inset:0;
-  border-radius: 48% 48% 0 0 / 60% 60% 0 0;
-  background: linear-gradient(180deg, var(--char-top, #e8a0a8) 0%, var(--char-bot, #6a3a52) 100%);
-  opacity:.32;
-  -webkit-mask: radial-gradient(60% 80% at 50% 30%, #000 60%, transparent 100%);
-          mask: radial-gradient(60% 80% at 50% 30%, #000 60%, transparent 100%);
-}
+.character svg { width:100%; height:100%; display:block; animation: breathe 5s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: translateY(-1.2%) scale(1.006); } }
+
+/* мимика: рты */
+.character .m-neutral,.character .m-smile,.character .m-soft,
+.character .m-laugh,.character .m-surprise,.character .m-sad { display:none; }
+.character .m-neutral { display:block; }
+.character[data-expr="neutral"]  .m-neutral { display:block; }
+.character[data-expr="smile"]    .m-neutral,
+.character[data-expr="happy"]    .m-neutral,
+.character[data-expr="soft"]     .m-neutral,
+.character[data-expr="laugh"]    .m-neutral,
+.character[data-expr="surprise"] .m-neutral,
+.character[data-expr="sad"]      .m-neutral { display:none; }
+.character[data-expr="smile"]    .m-smile    { display:block; }
+.character[data-expr="happy"]    .m-smile    { display:block; }
+.character[data-expr="soft"]     .m-soft     { display:block; }
+.character[data-expr="laugh"]    .m-laugh    { display:block; }
+.character[data-expr="surprise"] .m-surprise { display:block; }
+.character[data-expr="sad"]      .m-sad      { display:block; }
+
+/* веки (прищур/нежность) */
+.character .lid-l,.character .lid-r { display:none; transition:transform .3s ease; transform-box:fill-box; transform-origin:center; }
+.character[data-expr="soft"]  .lid-l, .character[data-expr="soft"]  .lid-r { display:block; transform:translateY(7px); }
+.character[data-expr="sad"]   .lid-l, .character[data-expr="sad"]   .lid-r { display:block; transform:translateY(4px); }
+.character[data-expr="laugh"] .lid-l, .character[data-expr="laugh"] .lid-r { display:block; transform:translateY(11px); }
+
+/* брови */
+.character .brows,.character .brow-l,.character .brow-r { transition:transform .3s ease; transform-box:fill-box; transform-origin:center; }
+.character[data-expr="surprise"] .brows { transform:translateY(-8px); }
+.character[data-expr="happy"]    .brows { transform:translateY(-3px); }
+.character[data-expr="sad"] .brow-l { transform:rotate(10deg); }
+.character[data-expr="sad"] .brow-r { transform:rotate(-10deg); }
+
+/* румянец */
+.character .blush { display:none; }
+.character[data-blush="1"] .blush { display:block; }
 
 /* ===== Экраны / меню / оверлеи ===== */
 .screen { position:absolute; inset:0; z-index:10; display:none; }
