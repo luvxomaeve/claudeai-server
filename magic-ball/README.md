@@ -11,6 +11,10 @@ HTML5-игрушка: «волшебный шар» с ответами на в�
 magic-ball/
 ├── index.html        # точка входа
 ├── css/style.css     # стили, анимации (шар, переворот карт)
+├── manifest.json     # PWA-манифест (для установки и TWA)
+├── sw.js             # service worker (офлайн-кэш)
+├── icons/            # иконки 192/512, maskable, apple-touch, favicon,
+│                     #   feature-graphic 1024×500 для Google Play
 ├── js/
 │   ├── i18n.js       # строки интерфейса + ответы шара (RU/EN)
 │   ├── tarot.js      # колода 78 карт + 4 расклада (трактовки RU/EN)
@@ -74,9 +78,10 @@ bubblewrap init --manifest https://ВАШ_ДОМЕН/manifest.json
 bubblewrap build
 ```
 
-> Для Google Play понадобятся `manifest.json` (PWA), иконки 512×512,
-> feature graphic 1024×500 и политика конфиденциальности. Их можно добавить
-> отдельным шагом — скажи, если нужно сгенерировать.
+> `manifest.json`, service worker, иконки (192/512, maskable, apple-touch,
+> favicon) и feature graphic 1024×500 (`icons/feature-graphic-1024x500.png`)
+> уже в комплекте. Останется добавить только политику конфиденциальности
+> (требование Google Play).
 
 ## Как расширять
 
