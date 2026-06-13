@@ -81,7 +81,7 @@ const BIOMES = [
   { name: 'Закат', sky: 0xf6b26b, fog: 0xe8a06a, grass: 0x6a6a3a, leaf: 0x4a5a2a, leaf2: 0x6a7a3a, trunk: 0x5a3a2b, snow: false, rain: false, night: false, hemiI: 0.8,  sunI: 1.0 },
   { name: 'Дождь', sky: 0x6b727a, fog: 0x646b73, grass: 0x3c5230, leaf: 0x274a28, leaf2: 0x356b38, trunk: 0x4a3422, snow: false, rain: true,  night: false, hemiI: 0.55, sunI: 0.4 },
   { name: 'Зима',  sky: 0xdfeefc, fog: 0xeaf3ff, grass: 0xeef4f8, leaf: 0x6f9bb0, leaf2: 0x9fc4d6, trunk: 0x5a4636, snow: true,  rain: false, night: false, hemiI: 0.95, sunI: 0.9 },
-  { name: 'Ночь',  sky: 0x0c1430, fog: 0x10183a, grass: 0x1f3326, leaf: 0x16331c, leaf2: 0x1f4326, trunk: 0x2a1f15, snow: false, rain: false, night: true,  hemiI: 0.3,  sunI: 0.2 },
+  { name: 'Ночь',  sky: 0x0c1430, fog: 0x10183a, grass: 0x1f3326, leaf: 0x16331c, leaf2: 0x1f4326, trunk: 0x2a1f15, snow: false, rain: false, night: true,  hemiI: 0.42, sunI: 0.3 },
 ];
 
 // ---------- Состояние ----------
@@ -573,7 +573,7 @@ function spawnAhead(frontZ) {
     t.visible = true;
     t.position.set((Math.random() * 2 - 1) * ROAD_HALF, 0, nextTrafficZ);
     t.userData.hit = false;
-    t.userData.speed = 8 + Math.random() * 10; // как быстро едет навстречу
+    t.userData.speed = 5 + Math.random() * 7; // как быстро едет навстречу
     t.userData.body.material.color.setHex(trafficColors[Math.floor(Math.random() * trafficColors.length)]);
     nextTrafficZ -= 90 + Math.random() * 110;
   }
