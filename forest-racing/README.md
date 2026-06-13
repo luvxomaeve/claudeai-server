@@ -38,11 +38,15 @@ python3 -m http.server 8080
 
 ```
 forest-racing/
-├── index.html      # разметка, HUD, меню, подключение SDK
-├── style.css       # стили интерфейса
-├── js/game.js      # вся игровая логика на Three.js
+├── index.html              # разметка, HUD, меню, подключение SDK
+├── style.css               # стили интерфейса
+├── js/game.js              # вся игровая логика на Three.js
+├── js/vendor/three.module.js  # Three.js r160 (локально, без CDN)
 └── README.md
 ```
+
+Three.js подключается локально через importmap, поэтому игра полностью
+самодостаточна и не требует интернета для движка — можно сразу паковать в ZIP.
 
 ## Публикация в Яндекс Играх
 
@@ -50,10 +54,8 @@ forest-racing/
    - Yandex Games SDK: `https://yandex.ru/games/sdk/v2`
    - вызовы `LoadingAPI.ready()`, `GameplayAPI.start/stop()` и показ
      полноэкранной рекламы между забегами (`adv.showFullscreenAdv`).
-2. **Для продакшена** замените загрузку Three.js с CDN на локальную копию,
-   чтобы игра была полностью самодостаточной:
-   - скачайте `three.module.js` (версия 0.160.0) в папку, например `js/vendor/`;
-   - поправьте `importmap` в `index.html`, указав локальный путь.
+2. Three.js уже лежит локально (`js/vendor/three.module.js`), игра не зависит
+   от внешних CDN — это требование самодостаточности для Яндекс Игр выполнено.
 3. Соберите ZIP из содержимого папки `forest-racing/` (важно: `index.html`
    должен быть в корне архива) и загрузите в консоли разработчика Яндекс Игр.
 
