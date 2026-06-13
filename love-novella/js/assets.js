@@ -32,8 +32,7 @@ const ASSETS = {
   charBase: "assets/characters/",
   charExt: ".png",
   chars: {
-    anna: { exprs: ["neutral", "smile", "happy", "soft", "laugh", "surprise", "sad"] },
-    // roman пока не показывается в кадре (вид от первого лица),
-    // но если захочешь — добавь "roman" и используй char:"roman" в story.js
+    anna:  { exprs: ["neutral", "smile", "happy", "soft", "laugh", "surprise", "sad"] },
+    roman: { exprs: ["neutral", "smile"] },   // появляется слева в ключевых сценах
   },
 };

@@ -83,7 +83,7 @@ const STORY = {
   },
 
   act1_meet: {
-    bg: "cafe", char: "anna", expr: "soft", blush: true,
+    bg: "cafe", char: "anna", char2: "roman", expr: "soft", blush: true,
     lines: [
       { text: "Она в реальности — другая. Живее любой фотографии. И, кажется, нервничает не меньше тебя." },
       { who: "Анна", expr: "smile", text: "Привет… Роман. Ого. Ты существуешь. А я почти поверила, что переписываюсь с особенно поэтичным ботом." },
@@ -163,7 +163,7 @@ const STORY = {
   },
 
   act1_stars: {
-    bg: "park_night", char: "anna", expr: "soft", blush: true,
+    bg: "park_night", char: "anna", char2: "roman", expr: "soft", blush: true,
     lines: [
       { text: "Темнеет быстро, как бывает только летом. И вот уже над парком распахивается небо — настоящее, густое от звёзд, какого в городе почти не увидишь." },
       { who: "Анна", expr: "surprise", text: "Смотри… Видишь те семь звёзд? Я в детстве придумала, что это моё личное созвездие. Никому не говорила. Ты — первый." },
@@ -320,7 +320,7 @@ const STORY = {
   },
 
   climax_bench: {
-    bg: "park_night", char: "anna", expr: "soft",
+    bg: "park_night", char: "anna", char2: "roman", expr: "soft",
     lines: [
       { text: "Та самая скамейка. То самое небо. И — как по заказу — те самые семь звёзд её личного созвездия проступают над парком." },
       { text: "Ты достаёшь из сумки распечатанный снимок — тот, первый. Вы вдвоём, год назад, под этими же звёздами." },
@@ -338,7 +338,7 @@ const STORY = {
   },
 
   climax_answer: {
-    bg: "park_night", char: "anna", expr: "soft", blush: true,
+    bg: "park_night", char: "anna", char2: "roman", expr: "soft", blush: true,
     lines: [
       { text: "Долгую секунду она молчит. В глазах — отражение всех звёзд разом и блеск, который вот-вот сорвётся." },
     ],
@@ -351,7 +351,7 @@ const STORY = {
 
   /* ============ РАЗВЯЗКИ ============ */
   end_yes: {
-    bg: "park_night", char: "anna", expr: "laugh", blush: true,
+    bg: "park_night", char: "anna", char2: "roman", expr: "laugh", blush: true,
     lines: [
       { who: "Анна", expr: "laugh", blush: true, text: "Да. Да! Боже, конечно да — я люблю тебя так, что страшно, и впервые этого совсем не боюсь!" },
       { text: "Она бросается тебе на шею, и вы падаете на ту самую скамейку, смеясь и плача одновременно." },
@@ -369,7 +369,7 @@ const STORY = {
   },
 
   end_slow: {
-    bg: "park_night", char: "anna", expr: "soft", blush: true,
+    bg: "park_night", char: "anna", char2: "roman", expr: "soft", blush: true,
     lines: [
       { who: "Анна", expr: "soft", blush: true, text: "Ты… невозможный. — она вытирает слёзы. — Да. Только пообещай: мы не будем спешить. Будем учиться друг другу медленно. Каждый день." },
       { text: "Ты надеваешь кольцо ей на палец. Оно садится так, будто всегда там было." },
@@ -385,7 +385,7 @@ const STORY = {
   },
 
   end_quiet: {
-    bg: "park_night", char: "anna", expr: "sad",
+    bg: "park_night", char: "anna", char2: "roman", expr: "sad",
     lines: [
       { who: "Анна", expr: "sad", text: "Роман… я хочу сказать «да». Очень хочу. Но я всё ещё боюсь — а тебе нужна та, кто не боится." },
       { who: "Анна", expr: "soft", text: "Дай мне время. Не уходи — но дай мне дорасти до твоего «навсегда». Подождёшь?" },

@@ -33,6 +33,7 @@
     speaker: $("#speaker"), text: $("#text"), advance: $("#advance"),
     choices: $("#choices"), toast: $("#toast"),
     menu: $("#menu"), continueBtn: $("#continueBtn"),
+    character2: $("#character2"),
   };
 
   // ============================================================
@@ -150,6 +151,36 @@
   }
   function setBlush(b) { el.character.dataset.blush = b ? "1" : "0"; }
 
+  // второй герой (Роман) — слева, в ключевых сценах
+  let partnerBuilt = false;
+  function setPartner(key) {
+    if (key == null) {
+      el.character2.classList.remove("show");
+      el.character.classList.remove("paired");
+      return;
+    }
+    if (!partnerBuilt) {
+      el.character2.innerHTML = '<img class="char-img" alt="">';
+      el.character2.querySelector(".char-img").style.opacity = "0";
+      partnerBuilt = true;
+    }
+    const img = el.character2.querySelector(".char-img");
+    const f = (typeof ASSETS !== "undefined" && ASSETS.chars[key])
+      ? ASSETS.charBase + key + "/neutral" + ASSETS.charExt : null;
+    if (!f) { el.character2.classList.remove("show"); el.character.classList.remove("paired"); return; }
+    testImage(f, (ok) => {
+      if (ok) {
+        if (img.getAttribute("src") !== f) img.src = f;
+        img.style.opacity = "1";
+        el.character2.classList.add("show");
+        el.character.classList.add("paired");
+      } else {
+        el.character2.classList.remove("show");
+        el.character.classList.remove("paired");
+      }
+    });
+  }
+
   // показать картинку-эмоцию, если файл есть; иначе — SVG-лицо
   function applyExpr() {
     el.character.dataset.expr = curExpr;
@@ -230,6 +261,7 @@
     if ("char" in p) setCharacter(p.char);
     if (p.expr) setExpr(p.expr);
     if ("blush" in p) setBlush(p.blush);
+    setPartner("char2" in p ? p.char2 : null);
 
     el.choices.classList.remove("active");
     el.choices.innerHTML = "";
@@ -260,6 +292,7 @@
     if ("char" in line) setCharacter(line.char);
     if (line.expr) setExpr(line.expr);
     if ("blush" in line) setBlush(line.blush);
+    if ("char2" in line) setPartner(line.char2);
 
     // адалт-гейт: если строка только для 18+, а режим мягкий — заменяем
     let text = line.text;
