@@ -240,8 +240,8 @@ function makeBoost() {
 function addBoost() { const b = makeBoost(); boosts.push(b); return b; }
 
 // Трамплин — жёлтый клин-рампа. Геометрия-призма: пологий подъём «в экран».
-const rampGeo = buildRampGeometry(4, 6, 1.6); // ширина, длина, высота
-const rampMat = new THREE.MeshStandardMaterial({ color: 0xffc02e, metalness: 0.3, roughness: 0.55, emissive: 0x3a2600, emissiveIntensity: 0.3 });
+const rampGeo = buildRampGeometry(5, 7, 2.0); // ширина, длина, высота
+const rampMat = new THREE.MeshStandardMaterial({ color: 0xffc02e, metalness: 0.2, roughness: 0.5, emissive: 0xff8c00, emissiveIntensity: 0.45, side: THREE.DoubleSide });
 const rampStripeMat = new THREE.MeshBasicMaterial({ color: 0x202020 });
 function buildRampGeometry(w, l, h) {
   const hw = w / 2, hl = l / 2;
@@ -265,6 +265,8 @@ function buildRampGeometry(w, l, h) {
   g.computeVertexNormals();
   return g;
 }
+const rampPostMat = new THREE.MeshStandardMaterial({ color: 0xffe55c, emissive: 0xffd23f, emissiveIntensity: 0.9 });
+const rampPostGeo = new THREE.CylinderGeometry(0.18, 0.18, 3.2, 8);
 function makeRamp() {
   const g = new THREE.Group();
   const wedge = new THREE.Mesh(rampGeo, rampMat);
@@ -273,10 +275,16 @@ function makeRamp() {
   g.add(wedge);
   // чёрные полоски-«зебра» на склоне для заметности
   for (let i = -1; i <= 1; i++) {
-    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 5.6), rampStripeMat);
-    s.rotation.x = -Math.PI / 2 + 0.27; // примерно вдоль наклона
-    s.position.set(i * 1.1, 0.45, 0);
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 6.6), rampStripeMat);
+    s.rotation.x = -Math.PI / 2 + 0.28; // примерно вдоль наклона
+    s.position.set(i * 1.6, 0.5, 0);
     g.add(s);
+  }
+  // светящиеся столбики по бокам — видно издалека
+  for (const x of [-2.9, 2.9]) {
+    const p = new THREE.Mesh(rampPostGeo, rampPostMat);
+    p.position.set(x, 1.6, 3);
+    g.add(p);
   }
   scene.add(g);
   return g;
@@ -375,7 +383,7 @@ function placeSideTree(t, z) {
 let nextPickupZ = -40;
 let nextObstacleZ = -55;
 let nextBoostZ = -120;
-let nextRampZ = -90;
+let nextRampZ = -55;
 
 function spawnAhead(frontZ) {
   // пикапы
@@ -408,7 +416,7 @@ function spawnAhead(frontZ) {
     r.visible = true;
     r.position.set((Math.random() * 2 - 1) * (ROAD_HALF - 1), 0, nextRampZ);
     r.userData.used = false;
-    nextRampZ -= 170 + Math.random() * 140;
+    nextRampZ -= 70 + Math.random() * 60;
   }
 }
 
@@ -770,7 +778,7 @@ function startGame(carType) {
   nextPickupZ = -40;
   nextObstacleZ = -60;
   nextBoostZ = -120;
-  nextRampZ = -90;
+  nextRampZ = -55;
 
   // звук: создаём контекст по жесту пользователя
   audio.init();
