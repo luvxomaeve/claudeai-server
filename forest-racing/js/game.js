@@ -51,6 +51,16 @@ const BOOST_DURATION = 3.5;     // сек
 const BOOST_MULT = 1.55;        // множитель к максималке/разгону
 const BOOST_REFILL = 12;
 
+// Краш-система: набрал MAX_HITS ударов подряд (быстро) — разбился и проиграл.
+// Если HIT_RESET секунд едешь чисто — счётчик ударов обнуляется (восстановление).
+const MAX_HITS = 3;
+const HIT_RESET = 5;            // сек без удара до восстановления одной «жизни»
+
+// Трамплины: наезжаешь — машина взлетает и перелетает препятствия.
+const JUMP_VELOCITY = 13;       // начальная вертикальная скорость прыжка
+const GRAVITY = 26;             // притяжение вниз
+const AIR_CLEAR_Y = 1.2;        // выше этой высоты препятствия пролетаем насквозь
+
 // Биомы — меняются по мере прохождения дистанции (каждые BIOME_LEN метров)
 const BIOME_LEN = 900;
 const BIOMES = [
@@ -71,6 +81,11 @@ const state = {
   steer: 0,          // -1..1 текущее направление руля
   carX: 0,
   boostTime: 0,      // остаток времени ускорения
+  hits: 0,           // сколько ударов подряд набрано
+  hitTimer: 0,       // время с последнего удара (для восстановления)
+  carY: 0,           // высота машины над дорогой (прыжок)
+  vy: 0,             // вертикальная скорость
+  airborne: false,   // машина в воздухе?
   biomeIndex: 0,
   muted: loadMuted(),
   bestScore: loadBest(),
@@ -132,6 +147,7 @@ const trees = [];       // деревья по бокам (декор)
 const obstacles = [];   // деревья/пни на дороге (препятствия)
 const pickups = [];     // заправка
 const boosts = [];      // бонусы-ускорители
+const ramps = [];       // трамплины
 
 function makeRoadSegment(z) {
   const group = new THREE.Group();
@@ -222,6 +238,50 @@ function makeBoost() {
   return m;
 }
 function addBoost() { const b = makeBoost(); boosts.push(b); return b; }
+
+// Трамплин — жёлтый клин-рампа. Геометрия-призма: пологий подъём «в экран».
+const rampGeo = buildRampGeometry(4, 6, 1.6); // ширина, длина, высота
+const rampMat = new THREE.MeshStandardMaterial({ color: 0xffc02e, metalness: 0.3, roughness: 0.55, emissive: 0x3a2600, emissiveIntensity: 0.3 });
+const rampStripeMat = new THREE.MeshBasicMaterial({ color: 0x202020 });
+function buildRampGeometry(w, l, h) {
+  const hw = w / 2, hl = l / 2;
+  // 6 вершин треугольной призмы: низ — на ближней стороне (z=+hl), верх — на дальней (z=-hl)
+  const v = [
+    [-hw, 0,  hl], [ hw, 0,  hl],   // 0,1 ближний низ
+    [-hw, 0, -hl], [ hw, 0, -hl],   // 2,3 дальний низ
+    [-hw, h, -hl], [ hw, h, -hl],   // 4,5 дальний верх
+  ];
+  const faces = [
+    [0, 1, 5], [0, 5, 4],   // наклонная поверхность (по ней взлетаем)
+    [0, 2, 3], [0, 3, 1],   // дно
+    [2, 4, 5], [2, 5, 3],   // задняя стенка
+    [0, 4, 2],              // левый бок
+    [1, 3, 5],              // правый бок
+  ];
+  const pos = [];
+  for (const f of faces) for (const idx of f) pos.push(...v[idx]);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  g.computeVertexNormals();
+  return g;
+}
+function makeRamp() {
+  const g = new THREE.Group();
+  const wedge = new THREE.Mesh(rampGeo, rampMat);
+  wedge.castShadow = true;
+  wedge.receiveShadow = true;
+  g.add(wedge);
+  // чёрные полоски-«зебра» на склоне для заметности
+  for (let i = -1; i <= 1; i++) {
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 5.6), rampStripeMat);
+    s.rotation.x = -Math.PI / 2 + 0.27; // примерно вдоль наклона
+    s.position.set(i * 1.1, 0.45, 0);
+    g.add(s);
+  }
+  scene.add(g);
+  return g;
+}
+function addRamp() { const r = makeRamp(); ramps.push(r); return r; }
 
 // ---------- Снег (для зимнего биома) ----------
 let snow = null;
@@ -315,6 +375,7 @@ function placeSideTree(t, z) {
 let nextPickupZ = -40;
 let nextObstacleZ = -55;
 let nextBoostZ = -120;
+let nextRampZ = -90;
 
 function spawnAhead(frontZ) {
   // пикапы
@@ -340,6 +401,14 @@ function spawnAhead(frontZ) {
     b.position.set((Math.random() * 2 - 1) * ROAD_HALF, 1.3, nextBoostZ);
     b.userData.taken = false;
     nextBoostZ -= 140 + Math.random() * 120;
+  }
+  // трамплины (изредка)
+  while (nextRampZ > frontZ - SPAWN_AHEAD) {
+    const r = ramps.find((m) => !m.visible) || addRamp();
+    r.visible = true;
+    r.position.set((Math.random() * 2 - 1) * (ROAD_HALF - 1), 0, nextRampZ);
+    r.userData.used = false;
+    nextRampZ -= 170 + Math.random() * 140;
   }
 }
 
@@ -402,7 +471,27 @@ function update(dt) {
   state.fuel -= (cfg.drain * (0.6 + state.speed / cfg.maxSpeed)) * dt;
   if (state.fuel <= 0) {
     state.fuel = 0;
-    return gameOver();
+    return gameOver('fuel');
+  }
+
+  // восстановление «жизней»: едем чисто HIT_RESET секунд — снимаем один удар
+  if (state.hits > 0) {
+    state.hitTimer += dt;
+    if (state.hitTimer >= HIT_RESET) {
+      state.hits--;
+      state.hitTimer = 0;
+    }
+  }
+
+  // прыжок (трамплин): интегрируем вертикальную скорость с гравитацией
+  if (state.airborne || state.carY > 0) {
+    state.vy -= GRAVITY * dt;
+    state.carY += state.vy * dt;
+    if (state.carY <= 0) {
+      state.carY = 0;
+      state.vy = 0;
+      if (state.airborne) { state.airborne = false; audio.land(); }
+    }
   }
 
   // руль
@@ -411,10 +500,13 @@ function update(dt) {
   state.carX = Math.max(-ROAD_HALF, Math.min(ROAD_HALF, state.carX));
   car.position.x = state.carX;
   car.position.z = 0;
-  car.position.y = 0;
+  car.position.y = state.carY;
   // наклон кузова при повороте
   car.rotation.z = THREE.MathUtils.lerp(car.rotation.z, -state.steer * 0.12, 0.15);
   car.rotation.y = THREE.MathUtils.lerp(car.rotation.y, -state.steer * 0.18, 0.15);
+  // тангаж в прыжке: нос вверх на взлёте, вниз на снижении
+  const pitchTarget = state.carY > 0 ? -THREE.MathUtils.clamp(state.vy * 0.03, -0.5, 0.5) : 0;
+  car.rotation.x = THREE.MathUtils.lerp(car.rotation.x, pitchTarget, 0.2);
 
   // двигаем мир к игроку (машина стоит в z=0)
   for (const seg of roadSegments) {
@@ -454,15 +546,35 @@ function update(dt) {
   for (const o of obstacles) {
     if (!o.visible) continue;
     o.position.z += move;
-    if (!o.userData.hit && Math.abs(o.position.z) < 2 && Math.abs(o.position.x - state.carX) < 1.7) {
+    const overlapping = Math.abs(o.position.z) < 2 && Math.abs(o.position.x - state.carX) < 1.7;
+    // в прыжке (высоко над дорогой) препятствие пролетаем насквозь
+    if (!o.userData.hit && overlapping && state.carY < AIR_CLEAR_Y) {
       o.userData.hit = true;
-      state.speed *= 0.35;
-      state.fuel -= 12;
+      state.speed *= 0.4;
+      state.fuel -= 8;
+      state.hits++;
+      state.hitTimer = 0;
       flash(0xff2b2b);
+      shakeDamage();
       audio.crash();
-      if (state.fuel <= 0) { state.fuel = 0; return gameOver(); }
+      if (state.hits >= MAX_HITS) return gameOver('crash');
+      if (state.fuel <= 0) { state.fuel = 0; return gameOver('fuel'); }
     }
     if (o.position.z > DESPAWN_BEHIND) o.visible = false;
+  }
+
+  // трамплины
+  for (const r of ramps) {
+    if (!r.visible) continue;
+    r.position.z += move;
+    if (!r.userData.used && Math.abs(r.position.z) < 2.4 && Math.abs(r.position.x - state.carX) < 2.2 && !state.airborne) {
+      r.userData.used = true;
+      state.airborne = true;
+      state.vy = JUMP_VELOCITY;
+      state.score += 25;
+      audio.jump();
+    }
+    if (r.position.z > DESPAWN_BEHIND) r.visible = false;
   }
 
   // бонусы-ускорители
@@ -499,6 +611,7 @@ function update(dt) {
   nextPickupZ += move;
   nextObstacleZ += move;
   nextBoostZ += move;
+  nextRampZ += move;
   spawnAhead(0);
 
   // очки за дистанцию
@@ -525,8 +638,11 @@ const el = {
   fuelName: document.getElementById('fuel-name'),
   score: document.getElementById('score'),
   speed: document.getElementById('speed'),
+  damage: document.getElementById('damage'),
+  hearts: Array.from(document.querySelectorAll('#damage .heart')),
   menu: document.getElementById('menu'),
   gameover: document.getElementById('gameover'),
+  gameoverTitle: document.getElementById('gameover-title'),
   finalScore: document.getElementById('final-score'),
   bestScore: document.getElementById('best-score'),
   boostBanner: document.getElementById('boost-banner'),
@@ -537,6 +653,19 @@ function updateHUD() {
   el.fuelFill.style.width = (state.fuel / MAX_FUEL * 100) + '%';
   el.score.textContent = Math.floor(state.score);
   el.speed.textContent = Math.round(state.speed * 3.6) + ' км/ч';
+  // оставшиеся жизни = MAX_HITS - набранные удары
+  const left = MAX_HITS - state.hits;
+  for (let i = 0; i < el.hearts.length; i++) {
+    el.hearts[i].classList.toggle('lost', i >= left);
+  }
+}
+
+// короткая тряска панели жизней при ударе
+function shakeDamage() {
+  if (!el.damage) return;
+  el.damage.classList.remove('shake');
+  void el.damage.offsetWidth; // перезапуск анимации
+  el.damage.classList.add('shake');
 }
 
 let flashEl = null;
@@ -598,6 +727,8 @@ const audio = {
   },
   pickup() { this.blip(660, 0.12, 'square'); this.blip(990, 0.12, 'square', 0.25); },
   boost() { this.blip(440, 0.2, 'sawtooth'); this.blip(880, 0.25, 'sawtooth', 0.3); },
+  jump() { this.blip(300, 0.18, 'sine', 0.4); this.blip(620, 0.22, 'sine', 0.3); },
+  land() { this.blip(180, 0.1, 'triangle', 0.35); },
   crash() {
     if (!this.ready || state.muted) return;
     // короткий шумовой удар
@@ -630,10 +761,16 @@ function startGame(carType) {
   state.steer = 0;
   state.carX = 0;
   state.boostTime = 0;
+  state.hits = 0;
+  state.hitTimer = 0;
+  state.carY = 0;
+  state.vy = 0;
+  state.airborne = false;
   state.biomeIndex = -1;
   nextPickupZ = -40;
   nextObstacleZ = -60;
   nextBoostZ = -120;
+  nextRampZ = -90;
 
   // звук: создаём контекст по жесту пользователя
   audio.init();
@@ -646,6 +783,7 @@ function startGame(carType) {
   pickups.forEach((p) => (p.visible = false));
   obstacles.forEach((o) => (o.visible = false));
   boosts.forEach((b) => (b.visible = false));
+  ramps.forEach((r) => (r.visible = false));
   spawnAhead(0);
 
   el.fuelIcon.textContent = state.cfg.fuelIcon;
@@ -661,12 +799,15 @@ function startGame(carType) {
   if (yandex.gameplayStart) yandex.gameplayStart();
 }
 
-function gameOver() {
+function gameOver(reason) {
   state.running = false;
   state.score = Math.floor(state.score);
   if (state.score > state.bestScore) {
     state.bestScore = state.score;
     saveBest(state.bestScore);
+  }
+  if (el.gameoverTitle) {
+    el.gameoverTitle.textContent = reason === 'crash' ? 'Разбился! 💥' : 'Бак пуст! 🏁';
   }
   el.finalScore.textContent = state.score;
   el.bestScore.textContent = state.bestScore;

@@ -32,6 +32,7 @@
           <button id="btn-mute" class="icon-btn" title="Звук">🔊</button>
         </div>
       </div>
+      <div id="damage" class="damage"><span class="heart">❤️</span><span class="heart">❤️</span><span class="heart">❤️</span></div>
       <div id="boost-banner" class="banner hidden">🚀 УСКОРЕНИЕ!</div>
       <div id="touch-controls">
         <button id="btn-left" class="touch-btn">◀</button>
@@ -63,12 +64,13 @@
           </ul>
         </div>
       </div>
-      <p class="hint">Управление: ← → или A / D, на телефоне — кнопки или наклон пальцем по экрану.</p>
+      <p class="hint">Управление: ← → или A / D, на телефоне — кнопки или наклон пальцем по экрану.<br>
+      🚧 Не врежься 3 раза подряд — разобьёшься! 🛫 Наезжай на жёлтые трамплины и перепрыгивай препятствия.</p>
     </div>
 
     <!-- Экран Game Over -->
     <div id="gameover" class="overlay hidden">
-      <h1>Бак пуст! 🏁</h1>
+      <h1 id="gameover-title">Бак пуст! 🏁</h1>
       <p class="final">Очки: <span id="final-score">0</span></p>
       <p class="final-best">Рекорд: <span id="best-score">0</span></p>
       <button id="btn-restart" class="big-btn">Ещё раз</button>
