@@ -156,7 +156,10 @@
     ballView: $('ballView'),
     tarotView: $('tarotView'),
     ball: $('ball'),
+    ballWindow: document.querySelector('.ball-window'),
     ballAnswer: $('ballAnswer'),
+    ballThink: $('ballThink'),
+    die: $('die'),
     ballHint: $('ballHint'),
     question: $('question'),
     shakeBtn: $('shakeBtn'),
@@ -228,19 +231,39 @@
     if (state.ballBusy) return;
     state.ballBusy = true;
     sfxShake();
+
+    // Фаза 1 — тряска: муть, активные пузырьки, треугольник тонет.
     el.ball.classList.add('shaking');
-    el.ballAnswer.classList.remove('show');
-    el.ballAnswer.textContent = t('ballThinking');
-    el.ballAnswer.classList.add('show', 'thinking');
+    el.ballWindow.classList.add('churning');
+    el.die.classList.remove('surfacing', 'floating');
+    el.ballThink.textContent = t('ballThinking');
+    el.ballThink.classList.add('show');
 
     setTimeout(() => {
+      // Фаза 2 — ответ всплывает из глубины.
       el.ball.classList.remove('shaking');
-      el.ballAnswer.classList.remove('thinking');
+      el.ballWindow.classList.remove('churning');
+      el.ballThink.classList.remove('show');
       el.ballAnswer.textContent = pickBallAnswer();
+      // Перезапуск анимации всплытия (сброс класса -> reflow -> добавить).
+      el.die.classList.remove('surfacing', 'floating');
+      void el.die.offsetWidth;
+      el.die.classList.add('surfacing');
       sfxReveal();
-      state.ballBusy = false;
       maybeShowAd();
+      // Страховка: освободить блокировку, даже если animationend не придёт.
+      setTimeout(() => { state.ballBusy = false; }, 1300);
     }, 1100);
+  }
+
+  // После всплытия включаем лёгкое вечное покачивание треугольника.
+  if (el.die) {
+    el.die.addEventListener('animationend', (e) => {
+      if (e.animationName === 'surface') {
+        el.die.classList.add('floating');
+        state.ballBusy = false;
+      }
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -379,7 +402,8 @@
       applyLang();
       updateSoundBtn();
       // Сбросить открытые ответы/карты, чтобы тексты не смешивались.
-      el.ballAnswer.classList.remove('show');
+      el.die.classList.remove('surfacing', 'floating');
+      el.ballThink.classList.remove('show');
       el.cards.innerHTML = '';
       el.tarotHint.textContent = t('chooseSpread');
       el.drawBtn.textContent = t('drawBtn');
