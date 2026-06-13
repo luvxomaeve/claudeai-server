@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0720">
+  <meta name="description" content="Волшебный шар с ответами на вопросы и колода Таро (78 карт) с раскладами и трактовками.">
+  <title>Магический Шар & Таро</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Yandex Games SDK. При локальном запуске отсутствует — приложение работает без него. -->
+  <script src="https://yandex.ru/games/sdk/v2"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <h1 id="appTitle">Магический Шар & Таро</h1>
+      <div class="controls">
+        <button id="soundBtn" class="icon-btn" aria-label="sound">🔊</button>
+        <button id="langBtn" class="icon-btn lang">EN</button>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button id="tabBallBtn" class="tab active">🔮 Шар</button>
+      <button id="tabTarotBtn" class="tab">🃏 Таро</button>
+    </nav>
+
+    <main class="content">
+      <!-- ============ ШАР ============ -->
+      <section id="ballView" class="view">
+        <p id="ballHint" class="hint">Задумай вопрос (да/нет) и встряхни телефон или нажми на шар</p>
+
+        <div class="ball-stage">
+          <div id="ball" class="ball" role="button" tabindex="0">
+            <div class="ball-glow"></div>
+            <div class="ball-window">
+              <div class="liquid"></div>
+              <div class="bubbles">
+                <span></span><span></span><span></span>
+                <span></span><span></span><span></span>
+              </div>
+              <div id="ballThink" class="ball-think"></div>
+              <div id="die" class="die">
+                <div id="ballAnswer" class="ball-answer"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <input id="question" class="question" type="text" placeholder="Твой вопрос…" maxlength="120">
+        <button id="shakeBtn" class="primary-btn">Встряхнуть</button>
+      </section>
+
+      <!-- ============ ТАРО ============ -->
+      <section id="tarotView" class="view hidden">
+        <div class="tarot-controls">
+          <select id="spreadSelect" class="spread-select" aria-label="spread"></select>
+          <button id="drawBtn" class="primary-btn">Разложить карты</button>
+        </div>
+        <p id="tarotHint" class="hint">Выбери расклад</p>
+        <div id="cards" class="cards"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>✦ ✦ ✦</span>
+    </footer>
+  </div>
+
+  <script src="js/i18n.js"></script>
+  <script src="js/tarot.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    // Регистрация service worker (нужен для установки PWA/TWA).
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {});
+      });
+    }
+  </script>
+</body>
+</html>
