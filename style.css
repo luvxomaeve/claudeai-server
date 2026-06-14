@@ -1,0 +1,241 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0b1418;
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #f3f7f4;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+#game-root { position: fixed; inset: 0; }
+
+#scene { display: block; width: 100%; height: 100%; }
+
+.hidden { display: none !important; }
+
+/* ---------- Overlays (меню / game over) ---------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  text-align: center;
+  background: radial-gradient(circle at 50% 30%, rgba(28, 64, 48, 0.92), rgba(7, 16, 18, 0.96));
+  backdrop-filter: blur(2px);
+  z-index: 10;
+}
+
+.overlay h1 {
+  font-size: clamp(28px, 7vw, 52px);
+  text-shadow: 0 3px 16px rgba(0, 0, 0, 0.5);
+}
+
+.subtitle { font-size: clamp(14px, 3.5vw, 20px); opacity: 0.85; }
+.hint { font-size: 13px; opacity: 0.6; max-width: 480px; }
+
+/* ---------- Выбор машины ---------- */
+.car-select {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.car-card {
+  width: 200px;
+  padding: 22px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.car-card:hover, .car-card:active {
+  transform: translateY(-4px) scale(1.03);
+  border-color: #7CFC9A;
+  background: rgba(124, 252, 154, 0.12);
+}
+.car-card .car-emoji { font-size: 54px; }
+.car-card h2 { margin: 8px 0; font-size: 24px; }
+.car-card p { font-size: 14px; opacity: 0.9; }
+.car-card ul { list-style: none; margin-top: 10px; font-size: 12px; opacity: 0.7; }
+.car-card ul li { margin: 3px 0; }
+
+/* ---------- Кнопки ---------- */
+.big-btn {
+  font-size: 20px;
+  padding: 14px 34px;
+  border-radius: 14px;
+  border: none;
+  background: #7CFC9A;
+  color: #06140c;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.big-btn:hover { transform: scale(1.05); filter: brightness(1.08); }
+.big-btn.ghost { background: transparent; color: #f3f7f4; border: 2px solid rgba(255,255,255,0.3); }
+
+.final { font-size: 26px; }
+.final-best { font-size: 18px; opacity: 0.7; }
+
+/* ---------- HUD ---------- */
+#hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+
+.hud-top {
+  position: absolute;
+  top: 14px; left: 14px; right: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.gauge { width: min(46%, 280px); }
+.gauge-label { font-size: 14px; margin-bottom: 5px; text-shadow: 0 1px 4px #000; }
+
+.bar {
+  width: 100%;
+  height: 16px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #ff5b5b, #ffd23f, #7CFC9A);
+  transition: width 0.12s linear;
+}
+
+/* ---------- Жизни / урон ---------- */
+.damage {
+  position: absolute;
+  top: 58px; right: 14px;
+  display: flex;
+  gap: 4px;
+  font-size: 22px;
+  text-shadow: 0 1px 4px #000;
+}
+.damage .heart {
+  transition: transform 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+}
+.damage .heart.lost {
+  opacity: 0.35;
+  filter: grayscale(1);
+  transform: scale(0.8);
+}
+.damage.shake { animation: dmgShake 0.3s ease; }
+@keyframes dmgShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+
+/* ---------- Комбо-множитель ---------- */
+.combo {
+  position: absolute;
+  top: 150px; left: 50%;
+  transform: translateX(-50%);
+  font-size: clamp(22px, 6vw, 40px);
+  font-weight: 900;
+  color: #7CFC9A;
+  text-shadow: 0 0 16px rgba(124, 252, 154, 0.8), 0 2px 6px #000;
+  animation: comboPulse 0.4s ease-in-out infinite alternate;
+}
+@keyframes comboPulse {
+  from { transform: translateX(-50%) scale(1) rotate(-3deg); }
+  to   { transform: translateX(-50%) scale(1.15) rotate(3deg); }
+}
+
+/* ---------- Иконки активных усилений ---------- */
+.powerups {
+  position: absolute;
+  top: 92px; right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+.powerups .pw {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  font-size: 22px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  text-shadow: 0 1px 4px #000;
+}
+.powerups .pw.on { display: inline-flex; }
+.powerups .pw b { font-size: 14px; font-weight: 700; opacity: 0.9; }
+
+.stats { display: flex; gap: 16px; }
+.stat { display: flex; flex-direction: column; align-items: flex-end; }
+.stat-label { font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; }
+.stat-val { font-size: 22px; font-weight: 700; text-shadow: 0 1px 4px #000; }
+
+/* ---------- Сенсорные кнопки ---------- */
+#touch-controls {
+  position: absolute;
+  bottom: 24px; left: 0; right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 24px;
+}
+.touch-btn {
+  pointer-events: auto;
+  width: 84px; height: 84px;
+  border-radius: 50%;
+  font-size: 34px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  -webkit-tap-highlight-color: transparent;
+}
+.touch-btn:active { background: rgba(124, 252, 154, 0.35); }
+
+/* Прячем сенсорные кнопки на десктопе по умолчанию — покажем из JS при касании */
+body:not(.touch) #touch-controls { display: none; }
+
+/* ---------- Кнопка звука ---------- */
+.icon-btn {
+  pointer-events: auto;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  font-size: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  cursor: pointer;
+  align-self: center;
+}
+.icon-btn:active { transform: scale(0.92); }
+
+/* ---------- Баннер ускорения ---------- */
+.banner {
+  position: absolute;
+  top: 96px; left: 50%;
+  transform: translateX(-50%);
+  font-size: clamp(20px, 5vw, 34px);
+  font-weight: 800;
+  color: #ffd23f;
+  text-shadow: 0 0 18px rgba(255, 210, 63, 0.8), 0 2px 6px #000;
+  animation: pulse 0.5s ease-in-out infinite alternate;
+}
+@keyframes pulse {
+  from { transform: translateX(-50%) scale(1); }
+  to   { transform: translateX(-50%) scale(1.12); }
+}
