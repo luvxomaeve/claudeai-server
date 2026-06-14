@@ -1,0 +1,15 @@
+{
+  "name": "Тёплый дождь",
+  "short_name": "Тёплый дождь",
+  "description": "Уютная романтическая визуальная новелла о случайной встрече под дождём.",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#140f1a",
+  "theme_color": "#1a1320",
+  "categories": ["games", "entertainment"],
+  "lang": "ru",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
