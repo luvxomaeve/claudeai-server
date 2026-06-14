@@ -33,6 +33,6 @@ const ASSETS = {
   charExt: ".png",
   chars: {
     anna:  { exprs: ["neutral", "smile", "happy", "soft", "laugh", "surprise", "sad"] },
-    roman: { exprs: ["neutral", "smile"] },   // появляется слева в ключевых сценах
+    // В кадре только Анна. Игрок — Роман (повествование от «ты»), его спрайт не показывается.
   },
 };

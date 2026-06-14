@@ -185,14 +185,22 @@
   function applyExpr() {
     el.character.dataset.expr = curExpr;
     const img = el.character.querySelector(".char-img");
+    const svg = el.character.querySelector(".char-svg");
     if (!img || !curChar || typeof ASSETS === "undefined" || !ASSETS.chars[curChar]) {
       if (img) img.style.opacity = "0";
+      if (svg) svg.style.opacity = "1";
       return;
     }
     const f = ASSETS.charBase + curChar + "/" + curExpr + ASSETS.charExt;
     testImage(f, (ok) => {
-      if (ok) { if (img.getAttribute("src") !== f) img.src = f; img.style.opacity = "1"; }
-      else img.style.opacity = "0";
+      if (ok) {
+        if (img.getAttribute("src") !== f) img.src = f;
+        img.style.opacity = "1";
+        if (svg) svg.style.opacity = "0";   // есть настоящий арт — прячем SVG-заглушку
+      } else {
+        img.style.opacity = "0";
+        if (svg) svg.style.opacity = "1";   // арта нет — рисуем SVG-фигуру
+      }
     });
   }
 
