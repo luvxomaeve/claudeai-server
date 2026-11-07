@@ -352,10 +352,19 @@ const POSE_LINES = {
 };
 
 function setActivePoseButton(name) {
-  for (const btn of document.querySelectorAll('#poses button')) {
+  for (const btn of document.querySelectorAll('#pose-list button')) {
     btn.classList.toggle('active', btn.dataset.pose === name);
   }
+  $('pose-current').textContent = POSES[name]?.label ?? 'Своя';
 }
+
+function setPoseListOpen(open) {
+  $('pose-list').hidden = !open;
+  $('poses-toggle').setAttribute('aria-expanded', String(open));
+  $('poses-toggle').classList.toggle('open', open);
+  if (open) $('hint').style.opacity = 0;
+}
+$('poses-toggle').addEventListener('click', () => setPoseListOpen($('pose-list').hidden));
 
 function addPoseButton(name, def) {
   const btn = document.createElement('button');
@@ -367,9 +376,10 @@ function addPoseButton(name, def) {
     character.dancing = false;
     character.setPose(name);
     setActivePoseButton(name);
+    setPoseListOpen(false);
     say(POSE_LINES[name] ?? pick(['Так?', 'Ну как я тебе?', 'Вот так нормально?']));
   });
-  $('poses').appendChild(btn);
+  $('pose-list').appendChild(btn);
 }
 for (const [name, def] of Object.entries(POSES)) addPoseButton(name, def);
 
@@ -488,7 +498,7 @@ $('editor-clear').addEventListener('click', () => {
   $('editor-clear').textContent = 'Удалить сохранённые';
   for (const name of Object.keys(savedPoses)) {
     delete POSES[`saved:${name}`];
-    document.querySelector(`#poses button[data-pose="saved:${CSS.escape(name)}"]`)?.remove();
+    document.querySelector(`#pose-list button[data-pose="saved:${CSS.escape(name)}"]`)?.remove();
   }
   savedPoses = {};
   try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
@@ -772,7 +782,9 @@ function tick() {
     const y = (-anchor.y * 0.5 + 0.5) * window.innerHeight;
     const half = bubble.offsetWidth / 2 + 8;
     bubble.style.left = `${THREE.MathUtils.clamp(x, half, window.innerWidth - half)}px`;
-    bubble.style.top = `${Math.max(y, bubble.offsetHeight + 64)}px`;
+    // Не залезаем под верхнюю панель (на телефоне она в две строки).
+    const hudBottom = $('hud').getBoundingClientRect().bottom + 12;
+    bubble.style.top = `${Math.max(y, bubble.offsetHeight + hudBottom)}px`;
 
     // Если долго не трогают — скучает.
     idleTime = pointerActive ? 0 : idleTime + dt;
