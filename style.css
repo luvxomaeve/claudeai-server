@@ -140,6 +140,84 @@ html, body {
 }
 #poses button.active { background: var(--pink); color: #fff; }
 
+#editor {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  width: 280px;
+  max-height: calc(100% - 140px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 28px rgba(120, 60, 120, 0.22);
+  overflow: hidden;
+}
+#editor.hidden { display: none; }
+.editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+}
+.editor-head button {
+  border: none;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+  color: var(--ink);
+}
+#editor-sliders { overflow-y: auto; padding: 0 14px 8px; }
+.editor-group {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pink);
+}
+.editor-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 2px 0;
+}
+.editor-row input { width: 100%; accent-color: var(--pink); }
+.editor-actions {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(120, 60, 120, 0.12);
+}
+.editor-actions button {
+  flex: 1;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+.editor-actions .primary { background: var(--pink); color: #fff; }
+
+@media (max-width: 600px) {
+  #editor {
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: 48%;
+    border-radius: 16px 16px 0 0;
+  }
+}
+
 #hint {
   position: fixed;
   bottom: 64px;

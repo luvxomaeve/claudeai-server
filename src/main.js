@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-import { Character, POSES } from './character.js';
+import { Character, POSES, BASE_POSE } from './character.js';
 import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
@@ -307,7 +307,7 @@ function setActivePoseButton(name) {
   }
 }
 
-for (const [name, def] of Object.entries(POSES)) {
+function addPoseButton(name, def) {
   const btn = document.createElement('button');
   btn.textContent = def.label;
   btn.dataset.pose = name;
@@ -315,10 +315,120 @@ for (const [name, def] of Object.entries(POSES)) {
     if (!character) return;
     character.setPose(name);
     setActivePoseButton(name);
-    say(POSE_LINES[name]);
+    say(POSE_LINES[name] ?? pick(['Так?', 'Ну как я тебе?', 'Вот так нормально?']));
   });
   $('poses').appendChild(btn);
 }
+for (const [name, def] of Object.entries(POSES)) addPoseButton(name, def);
+
+// ---------- Редактор поз ----------
+
+const POSES_KEY = 'waifu-poses';
+let savedPoses = {};
+try { savedPoses = JSON.parse(localStorage.getItem(POSES_KEY) || '{}'); } catch { savedPoses = {}; }
+for (const [name, params] of Object.entries(savedPoses)) {
+  POSES[`saved:${name}`] = { label: `★ ${name}`, ...params };
+  addPoseButton(`saved:${name}`, POSES[`saved:${name}`]);
+}
+
+// Ползунки: показываем «человеческие» значения и пересчитываем в углы костей.
+// Правая и левая рука зеркальны, поэтому у них разные знаки.
+const direct = (key) => ({ get: (p) => p[key], set: (p, v) => { p[key] = v; } });
+const SLIDERS = [
+  { group: 'Голова', label: 'Кивок', min: -0.6, max: 0.6, ...direct('headX') },
+  { group: 'Голова', label: 'Поворот', min: -0.9, max: 0.9, ...direct('headY') },
+  { group: 'Голова', label: 'Наклон вбок', min: -0.5, max: 0.5, ...direct('headZ') },
+  { group: 'Корпус', label: 'Наклон вперёд', min: -0.4, max: 0.5, ...direct('spineX') },
+  { group: 'Корпус', label: 'Поворот', min: -0.8, max: 0.8, ...direct('spineY') },
+  { group: 'Корпус', label: 'Изгиб вбок', min: -0.4, max: 0.4, ...direct('spineZ') },
+  { group: 'Корпус', label: 'Бёдра', min: -0.2, max: 0.2, ...direct('hipsZ') },
+  ...[['l', 'Левая рука (её)', 1], ['r', 'Правая рука (её)', -1]].flatMap(([k, group, m]) => [
+    { group, label: 'Поднять', min: -0.3, max: 2.9,
+      get: (p) => m * p[`${k}UpperZ`] + 1.22, set: (p, v) => { p[`${k}UpperZ`] = m * (v - 1.22); } },
+    { group, label: 'Вперёд / назад', min: -0.8, max: 1.6,
+      get: (p) => -p[`${k}UpperX`], set: (p, v) => { p[`${k}UpperX`] = -v; } },
+    { group, label: 'Вращение плеча', min: -1.6, max: 1.6, ...direct(`${k}UpperTwist`) },
+    { group, label: 'Локоть', min: 0, max: 2.7,
+      get: (p) => -m * p[`${k}LowerY`], set: (p, v) => { p[`${k}LowerY`] = -m * v; } },
+    { group, label: 'Предплечье вверх', min: -1, max: 2,
+      get: (p) => m * p[`${k}LowerZ`], set: (p, v) => { p[`${k}LowerZ`] = m * v; } },
+  ]),
+];
+
+let editorParams = null;
+
+function openEditor() {
+  if (!character) return;
+  editorParams = { ...character.getPoseParams() };
+  character.setCustomPose(editorParams);
+  setActivePoseButton('custom');
+  renderSliders();
+  $('editor').classList.remove('hidden');
+}
+
+function renderSliders() {
+  const box = $('editor-sliders');
+  box.innerHTML = '';
+  let group = null;
+  for (const sl of SLIDERS) {
+    if (sl.group !== group) {
+      group = sl.group;
+      const h = document.createElement('div');
+      h.className = 'editor-group';
+      h.textContent = group;
+      box.appendChild(h);
+    }
+    const row = document.createElement('label');
+    row.className = 'editor-row';
+    const name = document.createElement('span');
+    name.textContent = sl.label;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = sl.min;
+    input.max = sl.max;
+    input.step = 0.01;
+    input.value = sl.get(editorParams);
+    input.addEventListener('input', () => {
+      sl.set(editorParams, Number(input.value));
+      character.setCustomPose(editorParams);
+    });
+    row.append(name, input);
+    box.appendChild(row);
+  }
+}
+
+$('btn-editor').addEventListener('click', () => {
+  if ($('editor').classList.contains('hidden')) openEditor();
+  else $('editor').classList.add('hidden');
+});
+$('editor-close').addEventListener('click', () => $('editor').classList.add('hidden'));
+$('editor-reset').addEventListener('click', () => {
+  editorParams = { ...BASE_POSE };
+  character.setCustomPose(editorParams);
+  renderSliders();
+});
+$('editor-save').addEventListener('click', () => {
+  const name = (prompt('Как назовём позу?') || '').trim().slice(0, 20);
+  if (!name) return;
+  const key = `saved:${name}`;
+  const isNew = !POSES[key];
+  savedPoses[name] = { ...editorParams };
+  POSES[key] = { label: `★ ${name}`, ...editorParams };
+  try { localStorage.setItem(POSES_KEY, JSON.stringify(savedPoses)); } catch { /* ignore */ }
+  if (isNew) addPoseButton(key, POSES[key]);
+  character.setPose(key);
+  setActivePoseButton(key);
+  say('Запомнила эту позу~');
+});
+$('editor-clear').addEventListener('click', () => {
+  if (!confirm('Удалить все сохранённые позы?')) return;
+  for (const name of Object.keys(savedPoses)) {
+    delete POSES[`saved:${name}`];
+    document.querySelector(`#poses button[data-pose="saved:${CSS.escape(name)}"]`)?.remove();
+  }
+  savedPoses = {};
+  try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
+});
 
 // ---------- Своя модель ----------
 

@@ -35,6 +35,8 @@ const BASE_POSE = {
   hipsY: 0, hipsZ: 0,
 };
 
+export { BASE_POSE };
+
 export const POSES = {
   stand: { label: 'Стоит' },
   hips: {
@@ -134,9 +136,21 @@ export class Character {
   }
 
   playMotion(name, side = Math.random() < 0.5 ? 'left' : 'right') {
-    const durations = { tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6 };
+    const durations = { tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6, lookAround: 3.2, stretch: 2.8, shift: 3.0 };
     this.motions = this.motions.filter((m) => m.name !== name);
     this.motions.push({ name, side, t: 0, dur: durations[name] ?? 1.5 });
+  }
+
+  // Поза из редактора: применяется сразу, без плавного перехода.
+  setCustomPose(params) {
+    POSES.custom = { label: 'Своя', ...params };
+    this.poseName = 'custom';
+    this.poseT = 1;
+  }
+
+  // Текущие значения базовой позы (для редактора).
+  getPoseParams() {
+    return this.currentBasePose();
   }
 
   setPose(name) {
@@ -262,6 +276,28 @@ export class Character {
           pose.spineZ += Math.sin(m.t * 18) * 0.06 * e;
           pose.headZ += Math.sin(m.t * 18) * 0.08 * e;
           break;
+        case 'lookAround': {
+          // Оглядывается: сначала в одну сторону, потом в другую.
+          const p = m.t / m.dur;
+          pose.headY += Math.sin(p * Math.PI * 2) * 0.45 * e * s;
+          pose.headX -= 0.05 * e;
+          break;
+        }
+        case 'stretch':
+          // Потягивается: руки вверх, спина назад.
+          pose.lUpperZ += 1.9 * e;
+          pose.rUpperZ -= 1.9 * e;
+          pose.lLowerZ += 0.4 * e;
+          pose.rLowerZ -= 0.4 * e;
+          pose.spineX -= 0.12 * e;
+          pose.headX -= 0.2 * e;
+          break;
+        case 'shift':
+          // Переносит вес на другую ногу.
+          pose.hipsZ += 0.07 * e * s;
+          pose.spineZ -= 0.09 * e * s;
+          pose.headZ += 0.06 * e * s;
+          break;
         case 'turnAway':
           pose.spineY += 0.45 * e * s;
           pose.headY += 0.5 * e * s;
@@ -274,6 +310,20 @@ export class Character {
       }
     }
     this.motions = this.motions.filter((m) => m.t < m.dur);
+
+    // Мелкие движения в покое, если сейчас ничего не происходит.
+    this.idleTimer = (this.idleTimer ?? 4) - dt;
+    if (this.idleTimer <= 0) {
+      this.idleTimer = 5 + Math.random() * 7;
+      if (this.motions.length === 0 && this.patAmount < 0.1) {
+        const r = Math.random();
+        const busyArms = this.poseName !== 'stand';
+        if (r < 0.35) this.playMotion('shift');
+        else if (r < 0.65) this.playMotion('lookAround');
+        else if (r < 0.85 || busyArms) this.playMotion('tiltHead');
+        else this.playMotion('stretch');
+      }
+    }
 
     // Применяем позу к нормализованным костям.
     const spineBone = b.chest ?? b.spine;

@@ -26,6 +26,7 @@
     </div>
     <div id="buttons">
       <button id="btn-voice" title="Озвучка">🔊</button>
+      <button id="btn-editor" title="Редактор поз">✏️</button>
       <button id="btn-hitbox" title="Показать зоны касаний">🎯</button>
       <label class="btn" title="Загрузить свою модель (.vrm)">
         📂<input id="file-input" type="file" accept=".vrm" hidden />
@@ -35,6 +36,19 @@
 
   <div id="bubble" class="hidden"></div>
   <div id="poses"></div>
+
+  <div id="editor" class="hidden">
+    <div class="editor-head">
+      <b>Своя поза</b>
+      <button id="editor-close" title="Закрыть">✕</button>
+    </div>
+    <div id="editor-sliders"></div>
+    <div class="editor-actions">
+      <button id="editor-clear">Удалить сохранённые</button>
+      <button id="editor-reset">Сброс</button>
+      <button id="editor-save" class="primary">Сохранить</button>
+    </div>
+  </div>
   <div id="hint">Гладь по голове, бери за руку… просто попробуй 😉</div>
 
   <div id="loading">
