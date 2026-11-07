@@ -774,3 +774,19 @@ body.posing #sit-slider { display: none; }
 }
 #pose-list::-webkit-scrollbar { display: none; }
 #poses #pose-list button { flex: none; scroll-snap-align: center; white-space: nowrap; }
+
+/* ⌂ на главном экране — слева внизу, на одной линии с кнопкой поз. */
+#poses #btn-home {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: 16px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+#poses #btn-home:active { background: var(--pink); color: #fff; }
+body.posing #poses #btn-home { display: none; }

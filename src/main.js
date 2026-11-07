@@ -429,8 +429,8 @@ canvas.addEventListener('pointerdown', (e) => {
 
   const hit = zoneAt(e);
   if (!hit) {
-    // Пустое место в обычном режиме: ничего не делаем (сесть/встать — ползунком слева).
-    bgSwipe = { sy: e.clientY, sx: e.clientX, lastY: e.clientY, axis: null };
+    // Пустое место в обычном режиме: свайп крутит камеру (сесть/встать — у левого края).
+    bgSwipe = { sy: e.clientY, sx: e.clientX, lastX: e.clientX, lastY: e.clientY, axis: null };
     return;
   }
 
@@ -512,9 +512,9 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (bgSwipe) {
-    if (!bgSwipe.axis && Math.hypot(e.clientX - bgSwipe.sx, e.clientY - bgSwipe.sy) > 10) {
-      bgSwipe.axis = Math.abs(e.clientY - bgSwipe.sy) > Math.abs(e.clientX - bgSwipe.sx) ? 'y' : 'x';
-    }
+    // Пустое место в обычном режиме — камера свободно вращается (со всех ракурсов).
+    rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, (e.clientY - bgSwipe.lastY) * 0.005);
+    bgSwipe.lastX = e.clientX;
     bgSwipe.lastY = e.clientY;
     return;
   }
@@ -595,13 +595,19 @@ function holdButton(id, action) {
 }
 holdButton('cam-in', () => zoomBy(0.96));
 holdButton('cam-out', () => zoomBy(1.04));
-$('cam-reset').addEventListener('click', () => {
+function resetView() {
   camYaw = 0;
   camPitch = 0.05;
   camZoom = 1;
   animateCamera = true;
   frameCamera();
   animateCamera = false;
+}
+$('cam-reset').addEventListener('click', resetView);
+// ⌂ на главном экране: камера спереди, она лицом к тебе и сразу встаёт.
+$('btn-home').addEventListener('click', () => {
+  resetView();
+  if (character && character.sit > 0) sitBy(-character.sit / 0.004);
 });
 canvas.addEventListener('pointercancel', endPointer);
 
@@ -764,7 +770,7 @@ function setPoseMode(on) {
     // Позируем во весь рост — видно и руки, и ноги.
     if (!fullBody) setFullBody(true);
     $('hint').style.opacity = 0;
-    hintOnce('pose', 'Тяни за точки · таз вниз — сесть · фон — камера');
+    hintOnce('pose', 'Тяни за точки · по фону — камера');
   }
 }
 $('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
@@ -970,11 +976,9 @@ function poseDragMove(e) {
     // вбок — бёдра в сторону (стоя), с противовесом плеч и головы.
     const o = character.bodyOffset;
     const S = character.scale;
-    if (Math.abs(dy) > Math.abs(dx) * 0.6) sitBy(dy * 0.85);
-    if (character.sit < 0.15) {
-      o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -0.08 * S, 0.08 * S);
-      o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
-    }
+    // Только вбок (бёдра в сторону) — вертикаль не трогаем, чтобы она не приседала случайно.
+    o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -0.08 * S, 0.08 * S);
+    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
   }
 }
 
