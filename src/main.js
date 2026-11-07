@@ -4,7 +4,8 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
-import { Character, POSES, BASE_POSE } from './character.js';
+import { parseMixamo, mixamoClip } from './mixamo.js';
+import { Character, POSES } from './character.js';
 import { REACTIONS, STROKES, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
@@ -190,7 +191,7 @@ async function loadModel(source) {
     } else {
       setActivePoseButton('stand');
     }
-    if (currentAnim) character.playClip(createVRMAnimationClip(currentAnim.animation, vrm));
+    if (currentAnim) character.playClip(clipFor(currentAnim, vrm));
     stockings = new Stockings(vrm);
     loadLookFor(currentOutfit);
     applyLook();
@@ -615,77 +616,13 @@ for (const [name, params] of Object.entries(savedPoses)) {
   addPoseButton(`saved:${name}`, POSES[`saved:${name}`]);
 }
 
-// Ползунки: показываем «человеческие» значения и пересчитываем в углы костей.
-// Правая и левая рука зеркальны, поэтому у них разные знаки.
-const direct = (key) => ({ get: (p) => p[key], set: (p, v) => { p[key] = v; } });
-const SLIDERS = [
-  { group: 'Голова', label: 'Кивок', min: -0.6, max: 0.6, ...direct('headX') },
-  { group: 'Голова', label: 'Поворот', min: -0.9, max: 0.9, ...direct('headY') },
-  { group: 'Голова', label: 'Наклон вбок', min: -0.5, max: 0.5, ...direct('headZ') },
-  { group: 'Корпус', label: 'Наклон вперёд', min: -0.4, max: 0.5, ...direct('spineX') },
-  { group: 'Корпус', label: 'Поворот', min: -0.8, max: 0.8, ...direct('spineY') },
-  { group: 'Корпус', label: 'Изгиб вбок', min: -0.4, max: 0.4, ...direct('spineZ') },
-  { group: 'Корпус', label: 'Бёдра', min: -0.2, max: 0.2, ...direct('hipsZ') },
-  ...[['l', 'Левая рука (её)', 1], ['r', 'Правая рука (её)', -1]].flatMap(([k, group, m]) => [
-    { group, label: 'Поднять', min: -0.3, max: 2.9,
-      get: (p) => m * p[`${k}UpperZ`] + 1.22, set: (p, v) => { p[`${k}UpperZ`] = m * (v - 1.22); } },
-    { group, label: 'Вперёд / назад', min: -0.8, max: 1.6,
-      get: (p) => -p[`${k}UpperX`], set: (p, v) => { p[`${k}UpperX`] = -v; } },
-    { group, label: 'Вращение плеча', min: -1.6, max: 1.6, ...direct(`${k}UpperTwist`) },
-    { group, label: 'Локоть', min: 0, max: 2.7,
-      get: (p) => -m * p[`${k}LowerY`], set: (p, v) => { p[`${k}LowerY`] = -m * v; } },
-    { group, label: 'Предплечье вверх', min: -1, max: 2,
-      get: (p) => m * p[`${k}LowerZ`], set: (p, v) => { p[`${k}LowerZ`] = m * v; } },
-  ]),
-];
-
-let editorParams = null;
-
-function openEditor() {
-  if (!character) return;
-  editorParams = { ...character.getPoseParams() };
-  character.setCustomPose(editorParams);
-  setActivePoseButton('custom');
-  renderSliders();
-}
-
-function renderSliders() {
-  const box = $('editor-sliders');
-  box.innerHTML = '';
-  let group = null;
-  for (const sl of SLIDERS) {
-    if (sl.group !== group) {
-      group = sl.group;
-      const h = document.createElement('div');
-      h.className = 'editor-group';
-      h.textContent = group;
-      box.appendChild(h);
-    }
-    const row = document.createElement('label');
-    row.className = 'editor-row';
-    const name = document.createElement('span');
-    name.textContent = sl.label;
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.min = sl.min;
-    input.max = sl.max;
-    input.step = 0.01;
-    input.value = sl.get(editorParams);
-    input.addEventListener('input', () => {
-      sl.set(editorParams, Number(input.value));
-      character.setCustomPose(editorParams);
-    });
-    row.append(name, input);
-    box.appendChild(row);
-  }
-}
-
 // ---------- Поза пальцем ----------
-// Режим ✏️: тянешь её за руку — рука идёт за пальцем (локоть сгибается сам),
-// тянешь за голову — поворачивает голову.
+// Режим ✏️: тянешь за руку — рука идёт за пальцем (локоть сгибается сам);
+// за голову — поворачивает голову; за грудь — наклоняет корпус;
+// за таз/живот — сдвигает бёдра (вниз — приседает, колени сгибаются сами).
 
 let poseMode = false;
-let poseDrag = null; // { kind: 'hand' | 'head', side, plane, lastX, lastY }
+let poseDrag = null; // { kind: 'hand' | 'head' | 'spine' | 'hips', side, plane, lastX, lastY }
 
 function setPoseMode(on) {
   if (on && cameraMode) setCameraMode(false);
@@ -696,9 +633,7 @@ function setPoseMode(on) {
   closePoseSaveForm();
   if (on) {
     setPoseListOpen(false);
-    showToast('✋ Тяни её за руки и голову');
-  } else {
-    $('editor').classList.add('hidden');
+    showToast('✋ Тяни за руки, голову, грудь или таз');
   }
 }
 $('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
@@ -707,7 +642,6 @@ $('pose-reset').addEventListener('click', () => {
   character?.clearTouchPose();
   showToast('Поза сброшена');
 });
-$('pose-sliders').addEventListener('click', () => togglePanel('editor', openEditor));
 // Сохранение прямо в нижней панели: кнопки сменяются полем для названия.
 $('pose-save').addEventListener('click', () => {
   $('pose-bar-buttons').hidden = true;
@@ -721,7 +655,6 @@ function closePoseSaveForm() {
 }
 $('pose-save-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  editorParams = null; // берём текущую позу целиком
   if (savePoseAs($('pose-save-name').value)) {
     closePoseSaveForm();
     showToast('Поза сохранена — она в списке «Поза»');
@@ -740,6 +673,10 @@ function poseDragStart(e) {
     poseDragMove(e);
   } else if (hit.zone === 'headpat' || hit.zone === 'face') {
     poseDrag = { kind: 'head', lastX: e.clientX, lastY: e.clientY };
+  } else if (hit.zone === 'body' && hit.bone === 'chest') {
+    poseDrag = { kind: 'spine', lastX: e.clientX, lastY: e.clientY };
+  } else if (hit.zone === 'body' || hit.zone === 'belly') {
+    poseDrag = { kind: 'hips', lastX: e.clientX, lastY: e.clientY };
   }
 }
 
@@ -750,40 +687,42 @@ function poseDragMove(e) {
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) character.setHandTarget(poseDrag.side, dragPoint);
-  } else {
+    return;
+  }
+  const dx = e.clientX - poseDrag.lastX;
+  const dy = e.clientY - poseDrag.lastY;
+  poseDrag.lastX = e.clientX;
+  poseDrag.lastY = e.clientY;
+  const facing = Math.cos(camYaw) >= 0 ? 1 : -1; // если смотрим сзади — влево/вправо наоборот
+  const clamp = THREE.MathUtils.clamp;
+  if (poseDrag.kind === 'head') {
     const o = character.headOffset;
-    o.y = THREE.MathUtils.clamp(o.y + (e.clientX - poseDrag.lastX) * 0.006 * Math.cos(camYaw), -0.9, 0.9);
-    o.x = THREE.MathUtils.clamp(o.x + (e.clientY - poseDrag.lastY) * 0.005, -0.5, 0.5);
-    poseDrag.lastX = e.clientX;
-    poseDrag.lastY = e.clientY;
+    o.y = clamp(o.y + dx * 0.006 * facing, -0.9, 0.9);
+    o.x = clamp(o.x + dy * 0.005, -0.5, 0.5);
+  } else if (poseDrag.kind === 'spine') {
+    // Вниз — наклон вперёд, вбок — изгиб в сторону.
+    const o = character.bodyOffset;
+    o.spineX = clamp(o.spineX + dy * 0.004, -0.35, 0.6);
+    o.spineZ = clamp(o.spineZ - dx * 0.003 * facing, -0.35, 0.35);
+  } else {
+    // Вбок — бёдра в сторону, вниз — присесть.
+    const o = character.bodyOffset;
+    const S = character.scale;
+    o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -0.08 * S, 0.08 * S);
+    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+    o.hipsY = clamp(o.hipsY - dy * 0.0008 * S, -0.3 * S, 0);
   }
 }
-$('editor-reset').addEventListener('click', () => {
-  editorParams = { ...BASE_POSE };
-  character.setCustomPose(editorParams);
-  renderSliders();
-});
-$('editor-save').addEventListener('click', () => {
-  $('editor-save-row').hidden = false;
-  $('pose-name').focus();
-});
-$('editor-save-row').addEventListener('submit', (e) => {
-  e.preventDefault();
-  if (savePoseAs($('pose-name').value)) {
-    $('pose-name').value = '';
-    $('editor-save-row').hidden = true;
-  }
-});
 
 function savePoseAs(rawName) {
   const name = rawName.trim().slice(0, 20);
   if (!name || !character) return false;
   const key = `saved:${name}`;
   const isNew = !POSES[key];
-  editorParams ??= { ...character.getPoseParams() };
+  const params = { ...character.getPoseParams() };
   const touch = character.exportTouchPose();
-  savedPoses[name] = { ...editorParams, touch };
-  POSES[key] = { label: `★ ${name}`, ...editorParams, touch };
+  savedPoses[name] = { ...params, touch };
+  POSES[key] = { label: `★ ${name}`, ...params, touch };
   try { localStorage.setItem(POSES_KEY, JSON.stringify(savedPoses)); } catch { /* ignore */ }
   if (isNew) addPoseButton(key, POSES[key]);
   character.setPose(key);
@@ -792,23 +731,25 @@ function savePoseAs(rawName) {
   return true;
 }
 
-// Удаление в два нажатия: первое спрашивает, второе удаляет.
+// Удаление своих поз в два нажатия: первое спрашивает, второе удаляет.
 let clearArmed = false;
-$('editor-clear').addEventListener('click', () => {
+$('pose-clear').addEventListener('click', () => {
+  if (!Object.keys(savedPoses).length) { showToast('Сохранённых поз пока нет'); return; }
   if (!clearArmed) {
     clearArmed = true;
-    $('editor-clear').textContent = 'Точно удалить?';
-    setTimeout(() => { clearArmed = false; $('editor-clear').textContent = 'Удалить сохранённые'; }, 3000);
+    $('pose-clear').textContent = 'Точно?';
+    setTimeout(() => { clearArmed = false; $('pose-clear').textContent = 'Удалить мои'; }, 3000);
     return;
   }
   clearArmed = false;
-  $('editor-clear').textContent = 'Удалить сохранённые';
+  $('pose-clear').textContent = 'Удалить мои';
   for (const name of Object.keys(savedPoses)) {
     delete POSES[`saved:${name}`];
     document.querySelector(`#pose-list button[data-pose="saved:${CSS.escape(name)}"]`)?.remove();
   }
   savedPoses = {};
   try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
+  showToast('Свои позы удалены');
 });
 
 // ---------- Режим камеры ----------
@@ -1095,6 +1036,20 @@ $('outfit-input').addEventListener('change', (e) => {
 let anims = [];
 let currentAnim = null; // { id, name, animation }
 
+const isFbx = (a) => a.format === 'fbx' || /\.fbx$/i.test(a.file ?? '');
+
+// Клип для конкретной модели: .vrma переносится библиотекой three-vrm,
+// .fbx из Mixamo — нашим переносом скелета (src/mixamo.js).
+function clipFor(a, vrm) {
+  if (isFbx(a)) return mixamoClip(a.asset, vrm);
+  return createVRMAnimationClip(a.animation, vrm);
+}
+
+async function prepareAnim(a) {
+  if (isFbx(a)) a.asset ??= parseMixamo(a.data.slice(0));
+  else a.animation ??= await parseAnimation(a.data);
+}
+
 async function parseAnimation(buffer) {
   const gltf = await loader.parseAsync(buffer.slice(0), '');
   const animation = gltf.userData.vrmAnimations?.[0];
@@ -1110,7 +1065,7 @@ function renderAnims() {
   if (!anims.length) {
     const empty = document.createElement('p');
     empty.className = 'panel-note';
-    empty.textContent = 'Пока пусто. Добавь mocap-анимацию в формате .vrma — она заменит позы.';
+    empty.textContent = 'Пока пусто. Добавь анимацию: .vrma (VRoid / Booth) или .fbx из Mixamo («Without Skin»).';
     list.appendChild(empty);
   }
   for (const a of anims) {
@@ -1138,13 +1093,13 @@ function renderAnims() {
 async function playAnim(a) {
   if (!character) return;
   try {
-    a.animation ??= await parseAnimation(a.data);
-    currentAnim = a;
+    await prepareAnim(a);
     character.dancing = false;
-    character.playClip(createVRMAnimationClip(a.animation, character.vrm));
+    character.playClip(clipFor(a, character.vrm));
+    currentAnim = a;
   } catch (err) {
     console.error(err);
-    say('Не получается так двигаться… файл точно .vrma?', 'sad');
+    say('Не получается так двигаться… нужен .vrma или .fbx из Mixamo', 'sad');
   }
   renderAnims();
 }
@@ -1157,7 +1112,8 @@ function stopAnim() {
 
 async function addAnim(file) {
   const data = await file.arrayBuffer();
-  const record = { id: `anim-${Date.now()}`, kind: 'anim', name: file.name.replace(/\.vrma$/i, '').slice(0, 24), data, created: Date.now() };
+  const format = /\.fbx$/i.test(file.name) ? 'fbx' : 'vrma';
+  const record = { id: `anim-${Date.now()}`, kind: 'anim', format, name: file.name.replace(/\.(vrma|fbx)$/i, '').slice(0, 24), data, created: Date.now() };
   await saveFile(record);
   anims.push(record);
   await playAnim(record);
@@ -1186,7 +1142,7 @@ window.addEventListener('drop', (e) => {
   const file = e.dataTransfer.files[0];
   if (!file) return;
   const name = file.name.toLowerCase();
-  if (name.endsWith('.vrma')) addAnim(file);
+  if (name.endsWith('.vrma') || name.endsWith('.fbx')) addAnim(file);
   else if (name.endsWith('.vrm')) addOutfit(file);
 });
 

@@ -176,6 +176,7 @@ export class Character {
     this.initIK();
     this.handTargets = { left: null, right: null }; // позы «пальцем»: цель кисти в системе груди
     this.headOffset = { x: 0, y: 0 };
+    this.bodyOffset = { spineX: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
 
@@ -345,9 +346,12 @@ export class Character {
 
     if (this.dancing) this.applyDance(pose, t);
 
-    // Поворот головы, заданный пальцем в режиме позы.
+    // Голова, корпус и таз, заданные пальцем в режиме позы.
     pose.headY += this.headOffset.y;
     pose.headX += this.headOffset.x;
+    for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key];
+    // Наклон вперёд — голова чуть приподнимается, чтобы смотреть на тебя.
+    pose.headX -= this.bodyOffset.spineX * 0.4;
 
     // Голова чуть поворачивается за пальцем/курсором.
     pose.headY += this.headLook.x * 0.35;
@@ -702,6 +706,7 @@ export class Character {
   clearTouchPose() {
     this.handTargets = { left: null, right: null };
     this.headOffset = { x: 0, y: 0 };
+    this.bodyOffset = { spineX: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
   }
 
   exportTouchPose() {
@@ -709,6 +714,7 @@ export class Character {
       left: this.handTargets.left?.toArray() ?? null,
       right: this.handTargets.right?.toArray() ?? null,
       head: { ...this.headOffset },
+      body: { ...this.bodyOffset },
     };
   }
 
@@ -718,6 +724,7 @@ export class Character {
     if (data.left) this.handTargets.left = new THREE.Vector3().fromArray(data.left);
     if (data.right) this.handTargets.right = new THREE.Vector3().fromArray(data.right);
     if (data.head) this.headOffset = { ...data.head };
+    if (data.body) Object.assign(this.bodyOffset, data.body);
   }
 
   applyHandTargets() {

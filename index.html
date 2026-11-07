@@ -44,7 +44,7 @@
     <div id="pose-bar" hidden>
       <div id="pose-bar-buttons">
         <button id="pose-reset">Сброс</button>
-        <button id="pose-sliders">Ползунки</button>
+        <button id="pose-clear">Удалить мои</button>
         <button id="pose-save">Сохранить</button>
         <button id="pose-done" class="primary">Готово</button>
       </div>
@@ -98,28 +98,12 @@
       <button id="btn-dance" class="panel-big">💃 Танцевать</button>
       <div class="editor-group">Mocap-анимации</div>
       <div id="anim-list"></div>
-      <label class="panel-add">+ Загрузить анимацию (.vrma)
-        <input id="anim-input" type="file" accept=".vrma" hidden />
+      <label class="panel-add">+ Загрузить анимацию (.vrma или .fbx Mixamo)
+        <input id="anim-input" type="file" accept=".vrma,.fbx" hidden />
       </label>
     </div>
   </div>
 
-  <div id="editor" class="panel hidden">
-    <div class="editor-head">
-      <b>Своя поза</b>
-      <button class="panel-close" title="Закрыть">✕</button>
-    </div>
-    <div id="editor-sliders"></div>
-    <form id="editor-save-row" hidden>
-      <input id="pose-name" type="text" maxlength="20" placeholder="Название позы" autocomplete="off" />
-      <button type="submit" class="primary">OK</button>
-    </form>
-    <div class="editor-actions">
-      <button id="editor-clear">Удалить сохранённые</button>
-      <button id="editor-reset">Сброс</button>
-      <button id="editor-save" class="primary">Сохранить</button>
-    </div>
-  </div>
   <div id="hint">Гладь по голове, бери за руку… просто попробуй 😉</div>
 
   <div id="loading">
@@ -128,7 +112,7 @@
   </div>
 
   <div id="flash"></div>
-  <div id="drop-overlay" class="hidden">Отпусти файл: .vrm — новый наряд, .vrma — анимация</div>
+  <div id="drop-overlay" class="hidden">Отпусти файл: .vrm — новый наряд, .vrma/.fbx — анимация</div>
 
   <script type="module" src="src/main.js"></script>
 </body>
