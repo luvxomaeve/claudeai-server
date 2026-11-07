@@ -187,7 +187,7 @@ export class Character {
     this.initIK();
     this.handTargets = { left: null, right: null }; // позы «пальцем»: цель кисти в системе груди
     this.headOffset = { x: 0, y: 0 };
-    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
+    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
     this.footOffset = { left: null, right: null }; // ступни, сдвинутые пальцем
     this.sit = 0; // 0 — стоит, 1 — сидит на полу (свайп вниз)
     this.sitS = 0; // сглаженное значение
@@ -329,6 +329,7 @@ export class Character {
     // Mocap-анимация управляет телом сама; мимика и физика — как обычно.
     if (this.mixer) {
       this.mixer.update(dt);
+      this.applyReactLayer(dt);
       this.floorPush(true);
       this.finishFrame(dt);
       return;
@@ -632,6 +633,8 @@ export class Character {
       // В приседе таз уходит чуть назад, на коленях — возвращается над пятками.
       b.hips.position.z -= this.sitBackNow * this.flip;
       b.hips.position.x -= this.sitSideNow * this.flip;
+      // Наклон в тазобедренных (поза пальцем): таз уходит назад для баланса.
+      b.hips.position.z -= Math.max(0, this.bodyOffset.hipsRotX) * 0.13 * this.scale * this.flip;
       this.rot(b.hips, pose.hipsRotX, pose.hipsRotY, pose.hipsZ);
     }
     // Ступни стоят на полу: колени сгибаются сами под движение бёдер.
@@ -934,7 +937,39 @@ export class Character {
   // ---------- Толчок от касания ----------
   // Касание чуть толкает тело: корпус откачивается от пальца и пружинисто
   // возвращается, голова и бёдра догоняют с запаздыванием (через пружины позы).
+  // Слой реакции поверх записей движений: небольшие повороты корпуса и головы
+  // на пружине, которые добавляются к анимации (толчок от касания).
+  applyReactLayer(dt) {
+    const r = this.reactLayer;
+    if (!r) return;
+    const w = 7;
+    for (const key of ['spineX', 'spineZ', 'headX', 'headZ']) {
+      r.v[key] += (-w * w * r.x[key] - 2 * w * r.v[key]) * dt;
+      r.x[key] += r.v[key] * dt;
+    }
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const apply = (bone, x, z) => {
+      if (!bone) return;
+      e.set(x * this.flip, 0, z * this.flip);
+      bone.quaternion.multiply(q.setFromEuler(e));
+    };
+    apply(this.bones.chest ?? this.bones.spine, r.x.spineX, r.x.spineZ);
+    apply(this.bones.head, r.x.headX, r.x.headZ);
+  }
+
   nudge(dir, strength = 1) {
+    if (this.mixer) {
+      // Во время записи — толкаем слой реакции.
+      const k = 2.2 * strength;
+      this.reactLayer ??= { x: { spineX: 0, spineZ: 0, headX: 0, headZ: 0 }, v: { spineX: 0, spineZ: 0, headX: 0, headZ: 0 } };
+      const v = this.reactLayer.v;
+      v.spineX += dir.z * k;
+      v.spineZ -= dir.x * k;
+      v.headX += dir.z * k * 0.6;
+      v.headZ -= dir.x * k * 0.8;
+      return;
+    }
     if (!this.spv) return;
     const k = 2.2 * strength;
     const add = (key, val) => { if (key in this.spv) this.spv[key] += val; };
@@ -1075,7 +1110,7 @@ export class Character {
   clearTouchPose() {
     this.handTargets = { left: null, right: null };
     this.headOffset = { x: 0, y: 0 };
-    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
+    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
     this.footOffset = { left: null, right: null };
   }
 

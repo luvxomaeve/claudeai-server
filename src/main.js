@@ -211,6 +211,8 @@ async function loadModel(source) {
     $('loading').classList.add('done');
     if (firstLoad) {
       setTimeout(() => say(pick(IDLE_LINES[tier()])), 600);
+      // По умолчанию — живое ожидание на записях живых людей.
+      setTimeout(() => { if (!currentAnim && !currentMocap && !character.loop && !character.dancing) { liveIdle = true; playMocap(nextIdle()); } }, 300);
     } else {
       character.react({ expression: 'happy', motion: 'tiltHead' });
       setTimeout(() => say(pick(['Ну как я тебе? ♥', 'Та-дам! Нравится?', 'Хе-хе, переоделась~', 'Мне идёт?'])), 300);
@@ -664,6 +666,7 @@ let poseDrag = null; // { kind: 'hand' | 'head' | 'spine' | 'hips', side, plane,
 
 function setPoseMode(on) {
   if (on && cameraMode) setCameraMode(false);
+  if (on && currentMocap) stopMocap(); // позу выставляем на «живом» скелете, без записи
   poseMode = on;
   poseDrag = null;
   $('btn-editor').classList.toggle('active', on);
@@ -816,9 +819,11 @@ function poseDragMove(e) {
     o.y = clamp(o.y + dx * 0.006 * facing, -0.9, 0.9);
     o.x = clamp(o.x + dy * 0.005, -0.5, 0.5);
   } else if (poseDrag.kind === 'spine') {
-    // Вниз — наклон вперёд (глубоко), вверх — прогиб назад, вбок — изгиб в сторону.
+    // Вниз — наклон вперёд как у человека: в основном в тазобедренных (таз уходит
+    // назад для баланса, ноги на полу) и немного в спине; вверх — прогиб назад.
     const o = character.bodyOffset;
-    o.spineX = clamp(o.spineX + dy * 0.005, -0.5, 1.1);
+    o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
+    o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
     o.spineZ = clamp(o.spineZ - dx * 0.004 * facing, -0.5, 0.5);
   } else if (poseDrag.kind === 'twist') {
     // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
