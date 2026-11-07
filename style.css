@@ -450,3 +450,31 @@ body.dark {
 }
 body.dark #hint { color: #e9dcf5; }
 body.dark #loading { background: #0d0812; color: #e9dcf5; }
+
+#cam-controls {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#cam-controls button {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(120, 60, 120, 0.15);
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#cam-controls button:active { background: var(--pink); color: #fff; }

@@ -60,10 +60,12 @@ function frameCamera() {
   const distH = (0.75 * S) / 2 / (Math.tan(halfFov) * camera.aspect);
   const dist = Math.max(distV, distH);
   const cy = (top + bottom) / 2;
+  camBase.dist = dist;
+  camBase.cy = cy;
+  camBase.S = S;
   camFrom.pos.copy(camera.position);
   camFrom.look.copy(cameraLookAt);
-  camTo.look.set(0, cy, 0);
-  camTo.pos.set(0, cy + 0.05 * S, dist);
+  orbitTarget(camTo);
   camTween = character && animateCamera ? 0 : 1;
   if (camTween === 1) {
     camera.position.copy(camTo.pos);
@@ -73,6 +75,42 @@ function frameCamera() {
   camera.updateProjectionMatrix();
 }
 let animateCamera = false;
+
+// Орбита камеры вокруг девушки: поворот (yaw) и приближение (zoom).
+const camBase = { dist: 2, cy: 1, S: 1 };
+let camYaw = 0;
+let camZoom = 1; // < 1 — ближе, > 1 — дальше
+const ZOOM_MIN = 0.35;
+const ZOOM_MAX = 1.8;
+
+function orbitTarget(out) {
+  const d = camBase.dist * camZoom;
+  // При приближении смещаем точку взгляда к лицу.
+  const headY = (character ? character.headHeight : 1.4) + 0.05 * camBase.S;
+  const lookY = THREE.MathUtils.lerp(headY, camBase.cy, THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1));
+  out.look.set(0, lookY, 0);
+  out.pos.set(Math.sin(camYaw) * d, lookY + 0.05 * camBase.S, Math.cos(camYaw) * d);
+  return out;
+}
+
+// Мгновенно применить yaw/zoom (при жестах и кнопках).
+function applyOrbit() {
+  orbitTarget(camTo);
+  camTween = 1;
+  camera.position.copy(camTo.pos);
+  cameraLookAt.copy(camTo.look);
+  camera.lookAt(cameraLookAt);
+}
+
+function rotateBy(delta) {
+  camYaw = (camYaw + delta) % (Math.PI * 2);
+  applyOrbit();
+}
+
+function zoomBy(factor) {
+  camZoom = THREE.MathUtils.clamp(camZoom * factor, ZOOM_MIN, ZOOM_MAX);
+  applyOrbit();
+}
 
 // Плавный переезд камеры между «крупно» и «во весь рост».
 function updateCamera(dt) {
@@ -256,13 +294,38 @@ function zoneAt(e) {
   return character.hitTest(raycaster.ray);
 }
 
+// Активные касания: для щипка (зум) двумя пальцами и поворота свайпом по фону.
+const touches = new Map();
+let orbitDrag = null; // { lastX }
+let pinchDist = 0;
+
+function pinchDistance() {
+  const [a, b] = [...touches.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   if (!character) return;
   canvas.setPointerCapture(e.pointerId);
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   pointerActive = true;
   $('hint').style.opacity = 0;
+
+  if (touches.size === 2) {
+    // Второй палец: начинаем щипок, отменяем поглаживание и поворот.
+    pinchDist = pinchDistance();
+    petting = null;
+    orbitDrag = null;
+    canvas.classList.remove('petting');
+    return;
+  }
+  if (touches.size > 2) return;
+
   const hit = zoneAt(e);
-  if (!hit) return;
+  if (!hit) {
+    orbitDrag = { lastX: e.clientX };
+    return;
+  }
 
   if (hit.zone === 'headpat') {
     petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 0 };
@@ -284,6 +347,18 @@ canvas.addEventListener('pointerdown', (e) => {
 
 canvas.addEventListener('pointermove', (e) => {
   toNdc(e);
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2 && pinchDist > 0) {
+    const d = pinchDistance();
+    zoomBy(pinchDist / d);
+    pinchDist = d;
+    return;
+  }
+  if (orbitDrag) {
+    rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01);
+    orbitDrag.lastX = e.clientX;
+    return;
+  }
   if (!petting) return;
   const dx = e.clientX - petting.lastX;
   const dy = e.clientY - petting.lastY;
@@ -303,6 +378,10 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 function endPointer(e) {
+  touches.delete(e.pointerId);
+  if (touches.size < 2) pinchDist = 0;
+  orbitDrag = null;
+  if (touches.size > 0) return;
   pointerActive = false;
   canvas.classList.remove('petting');
   if (petting) {
@@ -312,6 +391,35 @@ function endPointer(e) {
   }
 }
 canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  zoomBy(Math.exp(e.deltaY * 0.001));
+}, { passive: false });
+
+// Кнопки камеры: зажал — крутится/приближается непрерывно.
+function holdButton(id, action) {
+  const btn = $(id);
+  let timer = null;
+  const stop = () => { clearInterval(timer); timer = null; };
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    action();
+    stop();
+    timer = setInterval(action, 40);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
+}
+holdButton('cam-left', () => rotateBy(-0.06));
+holdButton('cam-right', () => rotateBy(0.06));
+holdButton('cam-in', () => zoomBy(0.96));
+holdButton('cam-out', () => zoomBy(1.04));
+$('cam-reset').addEventListener('click', () => {
+  camYaw = 0;
+  camZoom = 1;
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+});
 canvas.addEventListener('pointercancel', endPointer);
 
 function triggerReaction(zone, hit, e) {
@@ -531,6 +639,7 @@ $('editor-clear').addEventListener('click', () => {
 
 $('btn-zoom').addEventListener('click', () => {
   fullBody = !fullBody;
+  camZoom = 1;
   $('btn-zoom').classList.toggle('off', !fullBody);
   animateCamera = true;
   frameCamera();
@@ -890,6 +999,7 @@ async function restoreLibrary() {
 const clock = new THREE.Clock();
 const anchor = new THREE.Vector3();
 const lookPoint = new THREE.Vector3();
+const lookNdc = new THREE.Vector2();
 let idleTime = 0;
 
 function tick() {
@@ -900,9 +1010,12 @@ function tick() {
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
-    raycaster.ray.at(camera.position.z - 0.3, lookPoint);
+    raycaster.ray.at(camera.position.distanceTo(cameraLookAt) - 0.3, lookPoint);
     character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * 10));
-    character.headLook.lerp(pointer, 1 - Math.exp(-dt * 4));
+    // Головой за пальцем следит только когда мы перед ней.
+    const facing = Math.max(0, Math.cos(camYaw));
+    lookNdc.set(pointer.x * facing, pointer.y * facing);
+    character.headLook.lerp(lookNdc, 1 - Math.exp(-dt * 4));
 
     const patTarget = petting && petting.ticks > 0 ? 1 : 0;
     character.patAmount += (patTarget - character.patAmount) * (1 - Math.exp(-dt * 5));
