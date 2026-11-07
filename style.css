@@ -684,7 +684,7 @@ body.dark #loading { background: #0d0812; color: #e9dcf5; }
 }
 #poses #pose-bar button.pb-icon:active { background: rgba(255, 111, 168, 0.18); }
 /* В режиме позы кнопка списка поз не мешает. */
-body.posing #poses #poses-toggle, body.posing #poses #pose-list { display: none; }
+/* В режиме позы список поз тоже доступен (свои сохранённые позы видны). */
 /* Удалить свою позу: крестик на кнопке. */
 #pose-list .del {
   margin-left: 6px;
@@ -879,3 +879,7 @@ body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }
   z-index: 6;
 }
 #pose-label.on { opacity: 1; }
+
+/* Режим позы: полоса = наклон вперёд/назад — без отметок посадки и кнопки «лечь». */
+#sit-slider.bend .track i, #sit-slider.bend #lie-toggle { display: none; }
+#sit-slider.bend .track::before { background: linear-gradient(var(--pink), #b56cff); }

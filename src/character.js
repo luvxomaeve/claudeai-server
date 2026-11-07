@@ -1570,11 +1570,14 @@ export class Character {
     // левая рука лежит на полу перед животом.
     if (p4 > 0) {
       const chest = this.chestNode().getWorldPosition(new THREE.Vector3());
+      // Верхняя (левая) рука — не на полу, а лежит на своём бедре: так лежат на боку в жизни.
+      const upperLeg = this.bones.leftUpperLeg?.getWorldPosition(new THREE.Vector3()) ?? hipsPos;
       const lie = side === 'right'
         ? new THREE.Vector3(chest.x + 0.02 * this.scale, 0.04 * this.scale, chest.z + 0.22 * this.scale)
-        : new THREE.Vector3(hipsPos.x - 0.12 * this.scale, 0.05 * this.scale, hipsPos.z + 0.24 * this.scale);
+        : upperLeg.clone().lerp(kneePos, 0.4).add(new THREE.Vector3(0, 0.08 * this.scale, 0.03 * this.scale));
       target.lerp(lie, p4);
-      pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.6, -0.3)), p4);
+      const lieElbow = side === 'right' ? new THREE.Vector3(0, -0.6, -0.3) : new THREE.Vector3(0, 0.5, -0.4);
+      pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(lieElbow), p4);
     }
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);

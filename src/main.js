@@ -948,6 +948,7 @@ function nearestAnchor(e, side) {
   for (const a of ANCHORS) {
     if (a.side && a.side !== side) continue; // талия/поясница — своей рукой
     const p = anchorWorld(a);
+    if (a.preset && character.sitS > 0.5) continue; // лёжа/сидя — только бедро, колено, щека
     if (!p || (!a.preset && !anchorReachable(p, side))) continue;
     v.copy(p).project(camera);
     const d = Math.hypot((v.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-v.y * 0.5 + 0.5) * window.innerHeight - e.clientY);
@@ -981,7 +982,8 @@ function updateHandles() {
     el.hidden = !handDrag;
     if (!handDrag) continue;
     const p = anchorWorld(a);
-    const ok = p && (!a.side || a.side === poseDrag.side) && (a.preset || anchorReachable(p, poseDrag.side));
+    const ok = p && (!a.side || a.side === poseDrag.side) && !(a.preset && character.sitS > 0.5)
+      && (a.preset || anchorReachable(p, poseDrag.side));
     el.hidden = !ok;
     if (ok) place(el, p);
     el.classList.toggle('hot', snapAnchor?.a === a);
@@ -1033,14 +1035,32 @@ sitSlider.addEventListener('pointermove', (e) => {
   character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
+  if (poseMode) {
+    // В режиме позы полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
+    // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
+    const o = character.bodyOffset;
+    const bend = THREE.MathUtils.clamp(o.hipsRotX + (dv / sitMax()) * BEND_RANGE, BEND_MIN, BEND_MAX);
+    o.hipsRotX = bend;
+    o.spineX = bend >= 0 ? bend * 0.45 : bend * 0.9;
+    showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
+    return;
+  }
   sitBy(dv / 0.004);
 });
 for (const ev of ['pointerup', 'pointercancel']) {
   sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
 }
+// Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
+const BEND_MIN = -0.2;
+const BEND_MAX = 1.1;
+const BEND_RANGE = BEND_MAX - BEND_MIN;
 function updateSitSlider() {
   if (!character) return;
-  sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(character.sitS / sitMax(), 0, 1).toFixed(3));
+  sitSlider.classList.toggle('bend', poseMode);
+  const k = poseMode
+    ? (character.bodyOffset.hipsRotX - BEND_MIN) / BEND_RANGE
+    : character.sitS / sitMax();
+  sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(k, 0, 1).toFixed(3));
 }
 
 // Свайп вниз по пустому месту — садится на пол, вверх — встаёт.
