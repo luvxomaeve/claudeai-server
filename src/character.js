@@ -32,7 +32,7 @@ const BASE_POSE = {
   lUpperTwist: 0, rUpperTwist: 0,
   lLowerY: -0.45, rLowerY: 0.45,
   lLowerZ: 0, rLowerZ: 0,
-  hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0, lFootIn: 0, rFootIn: 0,
+  hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0, hipsRotX: 0, lFootIn: 0, rFootIn: 0,
   lLegX: 0, rLegX: 0, lLegZ: 0, rLegZ: 0, lKneeX: 0, rKneeX: 0,
   lShoulderZ: 0, rShoulderZ: 0, handBend: 0.25,
 };
@@ -384,11 +384,14 @@ export class Character {
       const s = this.sitS;
       const { p1, p2 } = this.sitPhases(s);
       this.sitDropNow = this.sitDropFor(s);
-      this.sitBackNow = (0.07 * p1 * (1 - p2)) * this.scale;
+      this.sitBackNow = (0.12 * p1 * (1 - p2)) * this.scale;
       pose.hipsY -= this.sitDropNow;
-      // В приседе корпус наклонён вперёд, сев на пол — выпрямляется.
-      pose.spineX += 0.32 * p1 - 0.26 * p2;
-      pose.headX -= 0.28 * p1 - 0.2 * p2;
+      // Присед на каблуках: таз уходит назад и наклоняется вперёд, поясница прогибается,
+      // корпус подаётся вперёд, грудь раскрыта. На коленях — прямая спина с лёгким прогибом.
+      const squat = p1 * (1 - p2);
+      pose.hipsRotX += 0.45 * squat + 0.18 * p2;
+      pose.spineX += -0.12 * squat - 0.1 * p2; // прогиб поясницы (корпус чуть назад относительно таза)
+      pose.headX -= 0.25 * squat + 0.05 * p2;
       pose.hipsZ *= 1 - s;
       pose.hipsX *= 1 - s;
     }
@@ -588,7 +591,7 @@ export class Character {
       b.hips.position.x += pose.hipsX * this.flip;
       // В приседе таз уходит чуть назад, на коленях — возвращается над пятками.
       b.hips.position.z -= this.sitBackNow * this.flip;
-      this.rot(b.hips, 0, pose.hipsRotY, pose.hipsZ);
+      this.rot(b.hips, pose.hipsRotX, pose.hipsRotY, pose.hipsZ);
     }
     // Ступни стоят на полу: колени сгибаются сами под движение бёдер.
     this.plantFeet(pose);
@@ -675,13 +678,14 @@ export class Character {
       const c0 = end.getWorldPosition(new THREE.Vector3());
       const dirU0 = b0.clone().sub(a0).normalize();
       const dirL0 = c0.clone().sub(b0).normalize();
+      const hinge0 = new THREE.Vector3().crossVectors(c0.clone().sub(a0).normalize(), pole0).normalize();
       this.limbRest.set(upper.uuid, {
         l1: a0.distanceTo(b0),
         l2: b0.distanceTo(c0),
         restQU: upper.getWorldQuaternion(new THREE.Quaternion()),
         restQL: lower.getWorldQuaternion(new THREE.Quaternion()),
-        frameU0: this.limbFrame(dirU0, pole0),
-        frameL0: this.limbFrame(dirL0, pole0),
+        frameU0: this.limbFrame(dirU0, hinge0),
+        frameL0: this.limbFrame(dirL0, hinge0),
       });
     };
     limb('leftUpperLeg', 'leftLowerLeg', 'leftFoot', new THREE.Vector3(0, 0, 1));
@@ -690,15 +694,14 @@ export class Character {
     limb('rightUpperArm', 'rightLowerArm', 'rightHand', new THREE.Vector3(0, -0.5, -0.3));
   }
 
-  // Ортонормированная «рамка» кости: ось вдоль кости и направление сгиба.
-  // Возвращает кватернион этой рамки в мире.
-  limbFrame(dir, poleDir) {
+  // Ортонормированная «рамка» кости: ось вдоль кости и ось шарнира (сгиба).
+  // Ось шарнира общая для обеих костей конечности и всегда однозначна —
+  // поэтому колено/локоть не переворачиваются и не скручиваются.
+  limbFrame(dir, hinge) {
     const d = dir.clone().normalize();
-    const p = poleDir.clone().addScaledVector(d, -poleDir.dot(d));
-    if (p.lengthSq() < 1e-8) p.set(0, 0, 1).addScaledVector(d, -d.z);
-    p.normalize();
-    const side = new THREE.Vector3().crossVectors(d, p).normalize();
-    const m = new THREE.Matrix4().makeBasis(side, d, p);
+    const side = hinge.clone().addScaledVector(d, -hinge.dot(d)).normalize();
+    const fwd = new THREE.Vector3().crossVectors(side, d).normalize();
+    const m = new THREE.Matrix4().makeBasis(side, d, fwd);
     return new THREE.Quaternion().setFromRotationMatrix(m);
   }
 
@@ -745,8 +748,10 @@ export class Character {
     const dirU = e.clone().sub(a).normalize();
     const dirL = d.clone().sub(e).normalize();
     if (!rest) return null;
-    const QU = this.limbFrame(dirU, p).multiply(rest.frameU0.clone().invert());
-    const QL = this.limbFrame(dirL, p).multiply(rest.frameL0.clone().invert());
+    // Ось шарнира — нормаль к плоскости «плечо/бедро — цель — полюс».
+    const hinge = new THREE.Vector3().crossVectors(t, p).normalize();
+    const QU = this.limbFrame(dirU, hinge).multiply(rest.frameU0.clone().invert());
+    const QL = this.limbFrame(dirL, hinge).multiply(rest.frameL0.clone().invert());
     this.setWorldQuat(upper, QU.clone().multiply(rest.restQU));
     this.setWorldQuat(lower, QL.clone().multiply(rest.restQL));
     return QL;
@@ -779,6 +784,7 @@ export class Character {
       // Присед в каблуках: привстаёт на носки, ступни чуть вперёд, колени над носками.
       target.z += p1 * 0.1 * S;
       target.y += p1 * 0.025 * S;
+      target.x -= outSign * p1 * (1 - p2) * 0.015 * S; // ступни чуть ближе — аккуратнее
       // На коленях: голени лежат на полу, ступни под ягодицами, носками назад.
       if (p2 > 0) {
         const kneel = new THREE.Vector3(
@@ -801,7 +807,7 @@ export class Character {
       const lateral = footOff ? footOff.x * 1.5 : 0;
       const kneeUp = footOff ? footOff.y * 1.2 : 0;
       const pole = new THREE.Vector3(
-        rest.pos.x + outSign * 0.03 * S + lateral,
+        rest.pos.x + outSign * (0.03 - 0.05 * p1 * (1 - p2)) * S + lateral, // в приседе колени ближе друг к другу
         knee.y - 0.5 * p2 + kneeUp * 0.5,
         knee.z + 0.6 + kneeUp,
       );
