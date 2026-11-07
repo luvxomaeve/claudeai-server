@@ -1767,7 +1767,8 @@ export class Character {
       blink = Math.sin(Math.min(this.blinkPhase, 1) * Math.PI);
       if (this.blinkPhase >= 1) {
         this.blinkPhase = 0;
-        this.blinkTimer = 2 + Math.random() * 4;
+        // Иногда моргает дважды подряд — как живой человек.
+        this.blinkTimer = Math.random() < 0.18 ? 0.12 : 2 + Math.random() * 4;
       }
     }
     const eyesBusy = Math.max(this.exprCurrent.happy, this.exprCurrent.relaxed);

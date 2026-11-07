@@ -28,10 +28,57 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20);
 const cameraLookAt = new THREE.Vector3(0, 1, 0);
 
+// Свет как в студии: основной (с мягкой тенью на пол) + розоватый контровой
+// сзади — силуэт отделяется от фона и выглядит объёмнее.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const light = new THREE.DirectionalLight(0xffffff, Math.PI);
-light.position.set(1, 1.5, 2).normalize();
+light.position.set(1.1, 3.2, 2.4);
+light.castShadow = true;
+light.shadow.mapSize.set(1024, 1024);
+Object.assign(light.shadow.camera, { left: -1.6, right: 1.6, top: 1.6, bottom: -1.6, near: 0.5, far: 8 });
+light.shadow.bias = -0.0006;
+light.shadow.normalBias = 0.02;
 scene.add(light);
+const rim = new THREE.DirectionalLight(0xffd2ec, 0.9);
+rim.position.set(-1.2, 1.8, -2.2);
+scene.add(rim);
 scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+// Пол: невидимый, только тень от неё + мягкая «контактная» тень под телом,
+// чтобы она стояла, сидела и лежала на полу, а не парила.
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMaterial({ opacity: 0.18 }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+const blobTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, 'rgba(60,20,70,0.55)');
+  grd.addColorStop(0.5, 'rgba(60,20,70,0.22)');
+  grd.addColorStop(1, 'rgba(60,20,70,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
+const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
+blob.rotation.x = -Math.PI / 2;
+blob.position.y = 0.003;
+blob.renderOrder = -1;
+scene.add(blob);
+const blobHips = new THREE.Vector3();
+function updateBlob() {
+  if (!character?.bones.hips) return;
+  character.bones.hips.getWorldPosition(blobHips);
+  // Сидит/лежит — пятно шире и темнее (тело ближе к полу).
+  const low = THREE.MathUtils.clamp(1 - blobHips.y / 0.95, 0, 1);
+  blob.position.x = blobHips.x;
+  blob.position.z = blobHips.z;
+  blob.scale.set(0.55 + low * 0.9, 0.42 + low * 0.5, 1);
+  blob.material.opacity = 0.7 + low * 0.3;
+}
 
 function resize() {
   const w = window.innerWidth;
@@ -192,6 +239,7 @@ async function loadModel(source) {
       scene.remove(prev.vrm.scene);
       VRMUtils.deepDispose(prev.vrm.scene);
     }
+    vrm.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
     scene.add(vrm.scene);
     character = new Character(vrm);
     window.__waifu = character; // для отладки из консоли
@@ -1480,18 +1528,28 @@ const lookPoint = new THREE.Vector3();
 const lookNdc = new THREE.Vector2();
 let idleTime = 0;
 
+let saccadeT = 1;
+const saccade = new THREE.Vector3();
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
 
   updateCamera(dt);
   updateHandles();
+  updateBlob();
   updateLiveIdle();
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
     raycaster.ray.at(camera.position.distanceTo(cameraLookAt) - 0.3, lookPoint);
-    character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * 10));
+    // Микродвижения глаз (саккады): живой взгляд быстро «перескакивает» на чуть другую точку.
+    saccadeT -= dt;
+    if (saccadeT <= 0) {
+      saccadeT = 0.6 + Math.random() * 2.2;
+      saccade.set((Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.04, 0);
+    }
+    lookPoint.add(saccade);
+    character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * 18));
     // Головой за пальцем следит только когда мы перед ней.
     const facing = Math.max(0, Math.cos(camYaw));
     lookNdc.set(pointer.x * facing, pointer.y * facing);
