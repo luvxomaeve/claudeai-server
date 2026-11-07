@@ -333,8 +333,14 @@ export class Character {
       }
       mean.normalize();
       const hand = node === this.bones.leftHand || node === this.bones.rightHand;
+      const b = this.bones;
+      const upperArm = node === b.leftUpperArm || node === b.rightUpperArm;
+      const shoulder = node === b.leftShoulder || node === b.rightShoulder;
+      const lowerArm = node === b.leftLowerArm || node === b.rightLowerArm;
+      // Предел отклонения от своей позы (рад): руки не разлетаются в стороны.
+      const max = upperArm ? 0.2 : shoulder ? 0.08 : lowerArm ? 0.3 : hand ? 0.25 : head ? 0.2 : 0.1;
       // Амплитуда спокойнее, чем у актёра: живость без «трясучки».
-      samplers.push({ node, interp, meanInv: mean.invert(), k: head ? 0.4 : hand ? 0.35 : 0.7 });
+      samplers.push({ node, interp, meanInv: mean.invert(), k: head ? 0.4 : hand ? 0.35 : 0.7, max });
     }
     const cur = { samplers, t: 0, dur: clip.duration };
     const prev = this.upper?.cur ?? null;
@@ -366,8 +372,11 @@ export class Character {
       qb.copy(s.meanInv).multiply(qa.fromArray(s.interp.evaluate(L.cur.t)));
       const ps = prevBy?.get(s.node);
       if (ps) qb.copy(ps.meanInv.clone().multiply(qa.fromArray(ps.interp.evaluate(L.prev.t))).slerp(qb.clone(), fe));
-      // Движение из записи — поверх её собственной позы, с весом слоя.
-      qb.copy(one.clone().slerp(qb, L.w * s.k));
+      // Движение из записи — поверх её собственной позы, с весом слоя и пределом угла.
+      if (qb.w < 0) qb.set(-qb.x, -qb.y, -qb.z, -qb.w);
+      const ang = 2 * Math.acos(Math.min(1, qb.w)) * L.w * s.k;
+      const lim = ang > s.max ? s.max / ang : 1;
+      qb.copy(one.clone().slerp(qb, L.w * s.k * lim));
       s.node.quaternion.multiply(qb);
     }
   }
@@ -443,17 +452,19 @@ export class Character {
     const w = Math.tanh(2.2 * Math.sin(t * 0.42)) / Math.tanh(2.2);
     const relaxL = Math.max(0, -w); // левая нога расслаблена
     const relaxR = Math.max(0, w); // правая нога расслаблена
-    pose.hipsX += w * 0.035 * this.scale;
-    pose.hipsZ += w * 0.075;
-    pose.hipsY -= Math.abs(w) * 0.01 * this.scale;
+    pose.hipsX += w * 0.04 * this.scale;
+    pose.hipsZ += w * 0.09;
+    pose.hipsY -= Math.abs(w) * 0.016 * this.scale;
     pose.lLegZ -= w * 0.075; // ноги остаются вертикальными, бёдра наклоняются
     pose.rLegZ -= w * 0.075;
     pose.spineZ -= w * 0.12;
     pose.headZ += w * 0.06;
-    pose.rKneeX += relaxR * 0.3;
-    pose.rLegX -= relaxR * 0.13;
-    pose.lKneeX += relaxL * 0.3;
-    pose.lLegX -= relaxL * 0.13;
+    // Свободная нога расслаблена: колено мягко согнуто и чуть внутрь — женственная стойка.
+    pose.rKneeX += relaxR * 0.42;
+    pose.rLegX -= relaxR * 0.18;
+    pose.lKneeX += relaxL * 0.42;
+    pose.lLegX -= relaxL * 0.18;
+    pose.headZ -= w * 0.03;
     // Рука со стороны опорной ноги чуть отходит от бедра.
     pose.lUpperZ += relaxR * 0.06;
     pose.rUpperZ -= relaxL * 0.06;
