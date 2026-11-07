@@ -839,3 +839,44 @@ body.posing #poses #btn-home { display: none; }
 .panel { z-index: 10; }
 body:has(.panel:not(.hidden)) #sit-slider,
 body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }
+
+/* Режим позы: что держишь — ярко, остальное притухает; магниты для кистей. */
+#handles.dragging .handle { opacity: 0.25; animation: none; }
+#handles .handle.active {
+  opacity: 1;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  background: var(--pink);
+  box-shadow: 0 0 0 3px #fff, 0 0 22px 6px rgba(255, 111, 168, 0.85);
+  animation: none;
+}
+.anchor {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.95);
+  background: rgba(255, 111, 168, 0.18);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.anchor[hidden] { display: none; }
+.anchor.hot { transform: scale(1.7); background: rgba(255, 111, 168, 0.75); border-style: solid; }
+#pose-label {
+  position: fixed;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(58, 34, 64, 0.82);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 6;
+}
+#pose-label.on { opacity: 1; }

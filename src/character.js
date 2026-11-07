@@ -189,6 +189,7 @@ export class Character {
     this.headOffset = { x: 0, y: 0 };
     this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
     this.footOffset = { left: null, right: null }; // ступни, сдвинутые пальцем
+    this.armPreset = { left: null, right: null }; // рука «примагничена»: 'hips' — на талии, 'behind' — на пояснице
     // Физика управления: цели рук/ног догоняются с инерцией (пружина с лёгким перехлёстом).
     this.dragPhys = { hand: { left: null, right: null }, foot: { left: null, right: null } };
     this.reachLean = { x: 0, z: 0 }; // наклон корпуса вслед за рукой, которую тянут дальше досягаемости
@@ -780,6 +781,16 @@ export class Character {
 
     // Пружины: каждый сустав догоняет цель с инерцией (бёдра тяжёлые,
     // голова и руки чуть запаздывают) — движения становятся плавными и живыми.
+    // Примагниченная рука берёт выверенную позу руки (на талию / на поясницу) — красиво и без IK-перекрутов.
+    for (const side of ['left', 'right']) {
+      const preset = POSES[this.armPreset[side]];
+      if (!preset) continue;
+      const pre = side === 'left' ? 'l' : 'r';
+      for (const k of ['UpperZ', 'UpperX', 'UpperTwist', 'LowerY', 'LowerZ']) {
+        if (preset[pre + k] !== undefined) pose[pre + k] = preset[pre + k];
+        else pose[pre + k] = BASE_POSE[pre + k];
+      }
+    }
     Object.assign(pose, this.springPose(pose, dt));
 
     // Применяем позу к нормализованным костям.
@@ -1326,7 +1337,18 @@ export class Character {
     return this.bones.upperChest ?? this.bones.chest ?? this.bones.spine;
   }
 
+  armLength(side) {
+    const r = this.limbRest.get(this.bones[`${side}UpperArm`]?.uuid);
+    return r ? r.l1 + r.l2 : 0.5 * this.scale;
+  }
+
+  setArmPreset(side, preset) {
+    this.armPreset[side] = preset;
+    this.handTargets[side] = null;
+  }
+
   setHandTarget(side, worldPoint) {
+    this.armPreset[side] = null;
     const chest = this.chestNode();
     chest.updateWorldMatrix(true, false);
     this.handTargets[side] = chest.worldToLocal(worldPoint.clone());
@@ -1361,6 +1383,7 @@ export class Character {
     this.headOffset = { x: 0, y: 0 };
     this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
     this.footOffset = { left: null, right: null };
+    this.armPreset = { left: null, right: null };
   }
 
   exportTouchPose() {
@@ -1368,6 +1391,7 @@ export class Character {
       left: this.handTargets.left?.toArray() ?? null,
       right: this.handTargets.right?.toArray() ?? null,
       head: { ...this.headOffset },
+      presets: { ...this.armPreset },
       body: { ...this.bodyOffset },
       feet: {
         left: this.footOffset.left?.toArray() ?? null,
@@ -1382,6 +1406,7 @@ export class Character {
     if (data.left) this.handTargets.left = new THREE.Vector3().fromArray(data.left);
     if (data.right) this.handTargets.right = new THREE.Vector3().fromArray(data.right);
     if (data.head) this.headOffset = { ...data.head };
+    if (data.presets) this.armPreset = { left: data.presets.left ?? null, right: data.presets.right ?? null };
     if (data.body) Object.assign(this.bodyOffset, data.body);
     for (const side of ['left', 'right']) {
       if (data.feet?.[side]) this.footOffset[side] = new THREE.Vector3().fromArray(data.feet[side]);
@@ -1723,7 +1748,7 @@ export class Character {
       const front = bin ? hand.z - shift.z > (bin.zMin + bin.zMax) / 2 : true;
       // В позе «за спиной» руки всегда отводим назад, иначе — по положению кисти.
       const armBusy = this.dancing || this.motions.some((m) => ARM_MOTIONS.has(m.name));
-      const hint = armBusy ? undefined : POSES[this.poseName]?.armDir;
+      const hint = armBusy ? undefined : this.armPreset[side] === 'behind' ? 1 : this.armPreset[side] ? undefined : POSES[this.poseName]?.armDir;
       const dir = hint ?? (front ? -1 : 1); // минус по X — рука вперёд
       let need = 0;
       for (let i = 0; i <= 10; i++) {

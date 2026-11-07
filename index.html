@@ -39,6 +39,7 @@
 
   <div id="toast"></div>
   <div id="handles" hidden></div>
+  <div id="pose-label"></div>
 
   <div id="sit-slider" aria-label="Левый край: вниз — присесть, сесть, лечь; вверх — встать">
     <div class="track"><i style="top:0%"></i><i style="top:38.5%"></i><i style="top:61.5%"></i><i style="top:76.9%"></i><i style="top:100%"></i><b class="thumb"></b></div>
@@ -83,8 +84,7 @@
         <input id="outfit-input" type="file" accept=".vrm" hidden />
       </label>
       <p class="panel-note">Сделай в VRoid Studio ту же девушку в разных нарядах и добавь каждый файл сюда.</p>
-      <div class="editor-group">Цвет одежды</div>
-      <div id="color-list"></div>
+      <div id="color-list" style="display:none"></div>
       <div class="editor-group">Волосы</div>
       <div id="hair-list" class="swatches"></div>
       <div class="editor-group">Чулки</div>

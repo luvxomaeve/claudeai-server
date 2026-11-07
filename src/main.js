@@ -573,6 +573,8 @@ canvas.addEventListener('pointermove', (e) => {
 });
 
 function endPointer(e) {
+  activeHandle = null;
+  snapAnchor = null;
   touches.delete(e.pointerId);
   poseDrag = null;
   bgSwipe = null;
@@ -841,17 +843,91 @@ function handleWorld(key) {
   }
   return null;
 }
+// Точки-«магниты» для кистей: талия, поясница, бёдра, колени, щёки.
+// Ведёшь руку рядом — кисть притягивается и встаёт туда красиво.
+const ANCHORS = [
+  { id: 'waistL', label: 'на талию', bone: 'hips', off: [0.15, 0.09, 0.02], side: 'left', preset: 'hips' },
+  { id: 'waistR', label: 'на талию', bone: 'hips', off: [-0.15, 0.09, 0.02], side: 'right', preset: 'hips' },
+  { id: 'backL', label: 'на поясницу', bone: 'hips', off: [0.11, 0.08, -0.1], side: 'left', preset: 'behind' },
+  { id: 'backR', label: 'на поясницу', bone: 'hips', off: [-0.11, 0.08, -0.1], side: 'right', preset: 'behind' },
+  { id: 'thighL', label: 'на бедро', bone: 'leftUpperLeg', off: [0.04, -0.17, 0.06] },
+  { id: 'thighR', label: 'на бедро', bone: 'rightUpperLeg', off: [-0.04, -0.17, 0.06] },
+  { id: 'kneeL', label: 'на колено', bone: 'leftLowerLeg', off: [0, 0.02, 0.07] },
+  { id: 'kneeR', label: 'на колено', bone: 'rightLowerLeg', off: [0, 0.02, 0.07] },
+  { id: 'cheekL', label: 'к щеке', bone: 'head', off: [0.07, 0.04, 0.06] },
+  { id: 'cheekR', label: 'к щеке', bone: 'head', off: [-0.07, 0.04, 0.06] },
+];
+const anchorEls = {};
+for (const a of ANCHORS) {
+  const el = document.createElement('div');
+  el.className = 'anchor';
+  $('handles').appendChild(el);
+  anchorEls[a.id] = el;
+}
+const anchorTmp = new THREE.Vector3();
+function anchorWorld(a) {
+  const c = character;
+  const node = c.vrm.humanoid.getNormalizedBoneNode(a.bone);
+  if (!node) return null;
+  // Смещение в осях тела (вправо/вверх/вперёд модели), чтобы точка была снаружи тела.
+  node.getWorldPosition(anchorTmp);
+  const q = c.bones.hips.getWorldQuaternion(new THREE.Quaternion());
+  const flip = c.flip;
+  const off = new THREE.Vector3(a.off[0] * flip, a.off[1], a.off[2] * flip).multiplyScalar(c.scale).applyQuaternion(q);
+  return anchorTmp.clone().add(off);
+}
+window.__anchors = () => ANCHORS.map((x) => [x.id, anchorWorld(x)]);
+let snapAnchor = null;
+// Магнит доступен, только если рука до него дотягивается (стоя колени далеко — их нет).
+function anchorReachable(p, side) {
+  const sh = character.bones[`${side}UpperArm`]?.getWorldPosition(new THREE.Vector3());
+  return !sh || sh.distanceTo(p) < character.armLength(side) * 0.97;
+}
+// Ближайший магнит к пальцу на экране (~45px): притягивает, как только палец рядом.
+function nearestAnchor(e, side) {
+  let best = null;
+  let bestD = 45;
+  const v = new THREE.Vector3();
+  for (const a of ANCHORS) {
+    if (a.side && a.side !== side) continue; // талия/поясница — своей рукой
+    const p = anchorWorld(a);
+    if (!p || (!a.preset && !anchorReachable(p, side))) continue;
+    v.copy(p).project(camera);
+    const d = Math.hypot((v.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-v.y * 0.5 + 0.5) * window.innerHeight - e.clientY);
+    if (d < bestD) { bestD = d; best = { a, p }; }
+  }
+  return best;
+}
+
+let activeHandle = null; // какая точка сейчас в руке — она подсвечивается, остальные притухают
+const HANDLE_LABELS = { handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра', footL: 'Левая нога', footR: 'Правая нога' };
 function updateHandles() {
   const show = poseMode && !!character;
   $('handles').hidden = !show;
   if (!show) return;
+  $('handles').classList.toggle('dragging', !!activeHandle);
+  const place = (el, p) => {
+    handleV.copy(p).project(camera);
+    el.style.left = `${(handleV.x * 0.5 + 0.5) * window.innerWidth}px`;
+    el.style.top = `${(-handleV.y * 0.5 + 0.5) * window.innerHeight}px`;
+  };
   for (const k of HANDLE_KEYS) {
     const p = handleWorld(k);
     if (!p) continue;
-    handleV.copy(p).project(camera);
-    const el = handleEls[k];
-    el.style.left = `${(handleV.x * 0.5 + 0.5) * window.innerWidth}px`;
-    el.style.top = `${(-handleV.y * 0.5 + 0.5) * window.innerHeight}px`;
+    place(handleEls[k], p);
+    handleEls[k].classList.toggle('active', activeHandle === k);
+  }
+  // Магниты видны, только пока ведёшь руку.
+  const handDrag = poseDrag?.kind === 'hand';
+  for (const a of ANCHORS) {
+    const el = anchorEls[a.id];
+    el.hidden = !handDrag;
+    if (!handDrag) continue;
+    const p = anchorWorld(a);
+    const ok = p && (!a.side || a.side === poseDrag.side) && (a.preset || anchorReachable(p, poseDrag.side));
+    el.hidden = !ok;
+    if (ok) place(el, p);
+    el.classList.toggle('hot', snapAnchor?.a === a);
   }
 }
 
@@ -939,12 +1015,34 @@ function nearestHandle(e) {
     if (!p) continue;
     handleV.copy(p).project(camera);
     const d = Math.hypot((handleV.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-handleV.y * 0.5 + 0.5) * window.innerHeight - e.clientY);
-    if (d < bestD) { bestD = d; best = HANDLE_HIT[k]; }
+    if (d < bestD) { bestD = d; best = { ...HANDLE_HIT[k], key: k }; }
   }
   return best;
 }
+function handleKeyFor(hit) {
+  if (!hit) return null;
+  if (hit.key) return hit.key;
+  if (hit.zone === 'hand' || hit.zone === 'arm') return hit.side === 'left' ? 'handL' : 'handR';
+  if (hit.zone === 'headpat' || hit.zone === 'face') return 'head';
+  if (hit.zone === 'belly') return 'belly';
+  if (hit.zone === 'legs') return /left/i.test(hit.bone) ? 'footL' : 'footR';
+  if (hit.zone === 'body') return hit.bone === 'chest' ? 'chest' : 'hips';
+  return null;
+}
+// Подпись у пальца: что сейчас двигаешь.
+let labelTimer = 0;
+function showLabel(text) {
+  const el = $('pose-label');
+  el.textContent = text;
+  el.classList.add('on');
+  clearTimeout(labelTimer);
+  labelTimer = setTimeout(() => el.classList.remove('on'), 1200);
+}
 function poseDragStart(e) {
   const hit = nearestHandle(e) ?? zoneAt(e, true);
+  activeHandle = handleKeyFor(hit);
+  snapAnchor = null;
+  if (activeHandle) showLabel(HANDLE_LABELS[activeHandle]);
   if (!hit) {
     // Пустое место: вбок — крутим камеру (сесть/встать — только ползунком).
     poseDrag = { kind: 'bg', sx: e.clientX, sy: e.clientY, lastX: e.clientX, lastY: e.clientY, axis: null };
@@ -980,7 +1078,13 @@ function poseDragMove(e) {
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
-      if (poseDrag.kind === 'hand') character.setHandTarget(poseDrag.side, dragPoint);
+      if (poseDrag.kind === 'hand') {
+        const near = nearestAnchor(e, poseDrag.side);
+        if (near && snapAnchor?.a !== near.a) showLabel(`${HANDLE_LABELS[activeHandle] ?? 'Рука'} ${near.a.label}`);
+        snapAnchor = near;
+        if (near?.a.preset) character.setArmPreset(poseDrag.side, near.a.preset);
+        else character.setHandTarget(poseDrag.side, near ? near.p : dragPoint);
+      }
       else character.setFootTarget(poseDrag.side, dragPoint);
     }
     return;
