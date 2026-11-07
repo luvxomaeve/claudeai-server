@@ -478,3 +478,27 @@ body.dark #loading { background: #0d0812; color: #e9dcf5; }
   user-select: none;
 }
 #cam-controls button:active { background: var(--pink); color: #fff; }
+
+#cam-controls[hidden] { display: none; }
+#btn-camera.active { background: var(--pink); }
+#scene.camera { cursor: move; }
+#btn-zoom.off { opacity: 1; }
+#toast {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.95);
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(58, 34, 64, 0.85);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+#toast.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+#cam-controls #btn-zoom:not(.off) { background: var(--pink); color: #fff; }

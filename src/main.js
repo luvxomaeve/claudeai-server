@@ -313,8 +313,19 @@ canvas.addEventListener('pointerdown', (e) => {
   pointerActive = true;
   $('hint').style.opacity = 0;
 
+  // Режим камеры: пальцы крутят и приближают, реакций нет.
+  if (cameraMode) {
+    if (touches.size === 2) {
+      pinchDist = pinchDistance();
+      orbitDrag = null;
+    } else if (touches.size === 1) {
+      orbitDrag = { lastX: e.clientX };
+    }
+    return;
+  }
+
   if (touches.size === 2) {
-    // Второй палец: начинаем щипок, отменяем поглаживание и поворот.
+    // Второй палец в обычном режиме: отменяем поглаживание.
     pinchDist = pinchDistance();
     petting = null;
     orbitDrag = null;
@@ -324,10 +335,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (touches.size > 2) return;
 
   const hit = zoneAt(e);
-  if (!hit) {
-    orbitDrag = { lastX: e.clientX };
-    return;
-  }
+  if (!hit) return;
 
   if (hit.zone === 'headpat') {
     petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 0 };
@@ -350,7 +358,7 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointermove', (e) => {
   toNdc(e);
   if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (touches.size === 2 && pinchDist > 0) {
+  if (cameraMode && touches.size === 2 && pinchDist > 0) {
     const d = pinchDistance();
     zoomBy(pinchDist / d);
     pinchDist = d;
@@ -394,6 +402,7 @@ function endPointer(e) {
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('wheel', (e) => {
+  if (!cameraMode) return;
   e.preventDefault();
   zoomBy(Math.exp(e.deltaY * 0.001));
 }, { passive: false });
@@ -638,6 +647,29 @@ $('editor-clear').addEventListener('click', () => {
   savedPoses = {};
   try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
 });
+
+// ---------- Режим камеры ----------
+
+let cameraMode = false;
+function setCameraMode(on) {
+  cameraMode = on;
+  $('btn-camera').classList.toggle('active', on);
+  $('cam-controls').hidden = !on;
+  canvas.classList.toggle('camera', on);
+  petting = null;
+  orbitDrag = null;
+  showToast(on ? '🎥 Режим камеры: крути пальцем, щипок — приблизить' : '👆 Обычный режим: касайся её');
+}
+$('btn-camera').addEventListener('click', () => setCameraMode(!cameraMode));
+
+let toastTimer = 0;
+function showToast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 2200);
+}
 
 $('btn-zoom').addEventListener('click', () => {
   fullBody = !fullBody;
