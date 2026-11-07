@@ -192,6 +192,7 @@ export class Character {
     this.sit = 0; // 0 — стоит, 1 — сидит на полу (свайп вниз)
     this.sitS = 0; // сглаженное значение
     this.sitDropNow = 0;
+    this.sitBackNow = 0;
     this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
@@ -366,10 +367,13 @@ export class Character {
     // Сесть на пол (свайп вниз): бёдра опускаются к полу, ступни уходят вперёд,
     // колени поднимаются — она садится, обняв колени. Плавно, с пружиной.
     this.sitS += (this.sit - this.sitS) * (1 - Math.exp(-dt * 5));
+    this.sitDropNow = 0;
+    this.sitBackNow = 0;
     if (this.sitS > 0.001) {
       const s = this.sitS;
       const { p1, p2 } = this.sitPhases(s);
       this.sitDropNow = this.sitDropFor(s);
+      this.sitBackNow = (0.07 * p1 * (1 - p2)) * this.scale;
       pose.hipsY -= this.sitDropNow;
       // В приседе корпус наклонён вперёд, сев на пол — выпрямляется.
       pose.spineX += 0.32 * p1 - 0.26 * p2;
@@ -569,6 +573,8 @@ export class Character {
     if (b.hips) {
       b.hips.position.y += pose.hipsY;
       b.hips.position.x += pose.hipsX * this.flip;
+      // В приседе таз уходит чуть назад, на коленях — возвращается над пятками.
+      b.hips.position.z -= this.sitBackNow * this.flip;
       this.rot(b.hips, 0, pose.hipsRotY, pose.hipsZ);
     }
     // Ступни стоят на полу: колени сгибаются сами под движение бёдер.
@@ -694,7 +700,8 @@ export class Character {
     if (!b.hips || !this.restFoot.left) return;
     b.hips.updateWorldMatrix(true, true);
     const hipsPos = b.hips.getWorldPosition(new THREE.Vector3());
-    const fwd = new THREE.Vector3(0, 0, 1);
+    const { p1, p2 } = this.sitPhases();
+    const S = this.scale;
     for (const side of ['left', 'right']) {
       const L = side === 'left';
       const upper = b[`${side}UpperLeg`];
@@ -702,48 +709,64 @@ export class Character {
       const foot = b[`${side}Foot`];
       const rest = this.restFoot[side];
       if (!upper || !lower || !foot || !rest) continue;
-      // Нога, которой «хотят» согнуть колено, приподнимает пятку и чуть выходит вперёд.
-      // Пятку поднимает только та нога, что согнута сильнее другой (расслабленная).
+      const outSign = Math.sign(rest.pos.x - this.restHips.x) || (L ? 1 : -1);
+
+      // Расслабленная нога (согнута сильнее другой) приподнимает пятку.
       const bend = (L ? pose.lKneeX - pose.rKneeX : pose.rKneeX - pose.lKneeX);
-      const lift = THREE.MathUtils.clamp(bend, 0, 0.6);
+      const lift = THREE.MathUtils.clamp(bend, 0, 0.6) * (1 - p1);
       const target = rest.pos.clone();
-      target.y += lift * 0.06 * this.scale;
-      target.z += lift * 0.08 * this.scale;
-      const inward = L ? pose.lFootIn : pose.rFootIn;
-      const outSign = -Math.sign(hipsPos.x - rest.pos.x) || (L ? 1 : -1);
-      target.x -= outSign * inward;
-      // Сидя на полу ступни уходят вперёд и чуть в стороны.
-      const { p1, p2 } = this.sitPhases();
-      target.z += p1 * 0.3 * this.scale;
+      target.y += lift * 0.06 * S;
+      target.z += lift * 0.08 * S;
+      target.x -= outSign * (L ? pose.lFootIn : pose.rFootIn);
+
+      // Присед в каблуках: привстаёт на носки, ступни чуть вперёд, колени над носками.
+      target.z += p1 * 0.1 * S;
+      target.y += p1 * 0.025 * S;
+      // На коленях: голени лежат на полу, ступни под ягодицами, носками назад.
       if (p2 > 0) {
-        // На коленях: голени лежат на полу, ступни под ягодицами носками назад.
         const kneel = new THREE.Vector3(
-          hipsPos.x + outSign * 0.07 * this.scale,
-          rest.pos.y,
-          this.restHips.z - 0.12 * this.scale,
+          rest.pos.x + outSign * 0.01 * S,
+          rest.pos.y - 0.05 * S,
+          this.restHips.z - 0.12 * S,
         );
         target.lerp(kneel, p2);
       }
+
       // Ступня, сдвинутая пальцем.
-      if (this.footOffset[side]) target.add(this.footOffset[side]);
-      target.y = Math.max(target.y, rest.pos.y);
-      const knee = lower.getWorldPosition(new THREE.Vector3());
-      // Колено смотрит вперёд; сидя на полу — вперёд и вниз (колени на полу).
-      const { p2: down } = this.sitPhases();
-      // В приседе колени вместе и смотрят вперёд, а не разъезжаются в стороны.
-      // Если ногу отвели пальцем — колено смотрит туда же, куда ушла ступня.
-      const inwardPole = (hipsPos.x - knee.x) * 1.5;
       const footOff = this.footOffset[side];
-      const lateralPole = footOff ? footOff.x * 2 : 0;
-      const kneeUp = footOff ? footOff.y * 1.2 : 0; // поднятая нога — колено вперёд-вверх
-      const pole = knee.addScaledVector(fwd, 0.6 + kneeUp).add(new THREE.Vector3(inwardPole + lateralPole, -0.5 * down + kneeUp * 0.5, 0));
+      if (footOff) target.add(footOff);
+      target.y = Math.max(target.y, rest.pos.y - 0.05 * S * p2);
+
+      // Колено всегда смотрит в сторону своей ступни (вперёд), поэтому колени
+      // не перекрещиваются и не заламываются. Отвели ногу — колено туда же;
+      // подняли — колено вперёд-вверх; на коленях — вперёд-вниз.
+      const knee = lower.getWorldPosition(new THREE.Vector3());
+      const lateral = footOff ? footOff.x * 1.5 : 0;
+      const kneeUp = footOff ? footOff.y * 1.2 : 0;
+      const pole = new THREE.Vector3(
+        rest.pos.x + outSign * 0.03 * S + lateral,
+        knee.y - 0.5 * p2 + kneeUp * 0.5,
+        knee.z + 0.6 + kneeUp,
+      );
       this.twoBoneIK(upper, lower, foot, target, pole);
-      // Стопа ровно на полу (при поднятой пятке носок смотрит вниз).
-      // Сидя на полу носки смотрят назад, подъём стопы лежит на полу.
-      // Поднятая пальцем нога тянет носок (до ~40°).
-      const point = footOff ? Math.min(footOff.y / (0.3 * this.scale), 1) * 0.7 : 0;
-      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + down * Math.PI * 0.85);
-      this.setWorldQuat(foot, tilt.multiply(rest.quat.clone()));
+
+      // Ориентация стопы.
+      // Стоя — ровно на полу; приподнятая пятка, присед на носках и поднятая
+      // нога наклоняют носок вниз. На коленях стопа продолжает линию голени
+      // (носок назад, подъём на полу) — так голеностоп не выворачивается.
+      const point = footOff ? Math.min(footOff.y / (0.3 * S), 1) * 0.7 : 0;
+      const pitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + p1 * 0.55 * (1 - p2));
+      let q = pitch.multiply(rest.quat.clone());
+      if (p2 > 0) {
+        const anklePos = foot.getWorldPosition(new THREE.Vector3());
+        const kneePos = lower.getWorldPosition(new THREE.Vector3());
+        const shin = anklePos.sub(kneePos);
+        shin.y = Math.min(shin.y, -0.02); // чуть вниз — ось поворота однозначна
+        const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), shin.normalize());
+        const kneelQ = align.multiply(rest.quat.clone());
+        q = q.slerp(kneelQ, p2);
+      }
+      this.setWorldQuat(foot, q);
     }
   }
 
