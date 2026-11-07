@@ -238,7 +238,7 @@ export class Character {
     }
     const durations = {
       tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6,
-      lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4,
+      lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4, lieTurn: 2.6,
       squirm: 1.3, shyLegs: 1.8, sigh: 2.6, clasp: 4.5, handOnHip: 4.5, nails: 3.4,
     };
     this.motions = this.motions.filter((m) => m.name !== name);
@@ -270,6 +270,17 @@ export class Character {
     const k = easeInOut(Math.min(this.poseT / 0.7, 1));
     const out = {};
     for (const key in BASE_POSE) out[key] = this.posePrev[key] + (target[key] - this.posePrev[key]) * k;
+    // Руки идут в новую позу по дуге (чуть в стороны в середине пути), а не напрямик
+    // сквозь тело — как двигается живой человек.
+    if (k < 1) {
+      const arc = Math.sin(Math.PI * k);
+      const dl = Math.abs(target.lUpperZ - this.posePrev.lUpperZ) + Math.abs(target.lLowerY - this.posePrev.lLowerY);
+      const dr = Math.abs(target.rUpperZ - this.posePrev.rUpperZ) + Math.abs(target.rLowerY - this.posePrev.rLowerY);
+      out.lUpperZ += arc * Math.min(0.35, dl * 0.25);
+      out.rUpperZ -= arc * Math.min(0.35, dr * 0.25);
+      out.lLowerY -= arc * Math.min(0.3, dl * 0.15);
+      out.rLowerY += arc * Math.min(0.3, dr * 0.15);
+    }
     return out;
   }
 
@@ -489,7 +500,9 @@ export class Character {
     if (poseDef.wave === 'left') pose.lLowerZ += Math.sin(t * 9) * 0.25;
 
     // Дыхание: грудь и плечи чуть поднимаются.
-    const breath = Math.sin(t * 1.5);
+    // Во сне дыхание медленное и глубже.
+    const sl = this.sleep ?? 0;
+    const breath = Math.sin(t * (1.5 - 0.6 * sl)) * (1 + 0.8 * sl);
     pose.spineX += breath * 0.02;
     pose.lShoulderZ += breath * 0.035;
     pose.rShoulderZ -= breath * 0.035;
@@ -572,7 +585,8 @@ export class Character {
       this.pendingLieStyle = null;
       if (this.pendingSit != null) { this.sit = this.pendingSit; this.pendingSit = null; }
     }
-    this.sleep += ((this.sitPhases().b4 > 0.85 ? 1 : 0) - this.sleep) * (1 - Math.exp(-dt * 1.2));
+    this.wakeT = Math.max(0, (this.wakeT ?? 0) - dt);
+    this.sleep += ((this.sitPhases().b4 > 0.85 && this.wakeT <= 0 ? 1 : 0) - this.sleep) * (1 - Math.exp(-dt * (this.wakeT > 0 ? 4 : 1.2)));
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     this.sitSideNow = 0;
@@ -820,6 +834,12 @@ export class Character {
           arm(m.side, { upZ: -1.1, upX: -0.5, tw: 0, loY: -2.3, loZ: 0.2 });
           pose.headX += 0.18 * e;
           pose.headY += 0.15 * e * s;
+          break;
+        case 'lieTurn':
+          // Лёжа: поднимает голову и поворачивается к тебе, мягко улыбается.
+          pose.headY += 0.5 * e * (this.lieStyle === 'belly' ? 1 : 0.4);
+          pose.headX -= 0.25 * e;
+          pose.spineX -= 0.08 * e;
           break;
         case 'turnAway':
           // Обиделась: отвернулась, руки скрещены.
@@ -1599,6 +1619,11 @@ export class Character {
 
   // Посадка в две фазы: 0…0.6 — глубокий присед (ступни вперёд),
   // 0.6…1 — опускается на колени и садится на пятки (сейдза), руки на коленях.
+  // Разбудить ненадолго (касание спящей): глаза открываются, потом снова засыпает.
+  wake(seconds = 3) {
+    this.wakeT = Math.max(this.wakeT ?? 0, seconds);
+  }
+
   setLieStyle(style) {
     if (style === this.lieStyle) { this.pendingLieStyle = null; return; }
     if (this.sitS > 0.81) { this.pendingLieStyle = style; this.sit = Math.min(this.sit, 0.8); }
@@ -1981,6 +2006,11 @@ export class Character {
     this.exprHold -= dt;
     if (this.exprHold <= 0) for (const e of EXPRESSIONS) this.exprTarget[e] = 0;
     if (this.patAmount > 0.2) this.exprTarget.happy = Math.max(this.exprTarget.happy, this.patAmount);
+    // Лицо живее: смотрит на тебя — лёгкая улыбка; спит — спокойное расслабленное лицо.
+    if (this.exprHold <= 0) {
+      if (this.gazeTarget) this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.28);
+      this.exprTarget.relaxed = Math.max(this.exprTarget.relaxed, (this.sleep ?? 0) * 0.45);
+    }
 
     const k = 1 - Math.exp(-dt * 8);
     for (const e of EXPRESSIONS) {

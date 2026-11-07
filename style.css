@@ -930,3 +930,21 @@ body.posing #poses #pose-list { margin-bottom: 0; }
 #poses #poses-toggle > span:not(.chev) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #poses #poses-toggle svg { width: 17px; height: 17px; flex: none; }
 #poses #poses-toggle .chev { display: none; }
+
+/* Фоны. */
+body.bg-sunset { background: linear-gradient(180deg, #ffb38a 0%, #ff8fab 40%, #b07cc6 75%, #5d4a8a 100%); }
+body.bg-stars {
+  background:
+    radial-gradient(1.5px 1.5px at 12% 18%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 42%, #fff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 47% 12%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 33%, #fff 50%, transparent 51%),
+    radial-gradient(2px 2px at 81% 22%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 90% 48%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 7% 58%, #fff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 36% 66%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 74% 61%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 55% 52%, #fff 50%, transparent 51%),
+    radial-gradient(ellipse at 50% 110%, #3a2f7a 0%, #161036 55%, #07061a 100%);
+}
+body.bg-room { background: linear-gradient(180deg, #f6dccb 0%, #eec4c8 55%, #b98f9f 78%, #8b6878 100%); }

@@ -43,7 +43,8 @@ scene.add(light);
 const rim = new THREE.DirectionalLight(0xffd2ec, 0.9);
 rim.position.set(-1.2, 1.8, -2.2);
 scene.add(rim);
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambient);
 
 // Пол: невидимый, только тень от неё + мягкая «контактная» тень под телом,
 // чтобы она стояла, сидела и лежала на полу, а не парила.
@@ -719,9 +720,30 @@ $('btn-home').addEventListener('click', () => {
 });
 canvas.addEventListener('pointercancel', endPointer);
 
+// Сидя и лёжа — свои реакции: лёжа поворачивается к тебе, спящая сонно просыпается.
+const LYING_LINES = {
+  sleep: ['Ммм… ещё пять минуточек…', 'Ты меня разбудил~', 'М?.. это ты… 😴'],
+  lie: ['Ложись рядом~', 'Мне так уютно…', 'Хи, щекотно~', 'Не мешай отдыхать… шучу ♥'],
+  sit: ['Посиди со мной~', 'Ой, не тяни так ♥', 'Хи, я тут сижу~', 'Ты такой милый…'],
+};
 function triggerReaction(zone, hit, e) {
   const r = REACTIONS[zone];
   if (!r) return;
+  if (character.sitS > 0.6 && zone !== 'spam') {
+    const lying = character.sitS > 1.05;
+    const asleep = lying && character.lieStyle === 'belly';
+    character.react({ expression: asleep ? 'relaxed' : 'happy', motion: lying ? 'lieTurn' : 'squirm', side: hit?.side, strength: 0.8 });
+    if (asleep) character.wake(3.5);
+    if (hit) character.nudge(raycaster.ray.direction, 0.4);
+    changeAffection(0.6);
+    floatHeart(e.clientX, e.clientY);
+    const now = performance.now();
+    if (now - lastZoneLineAt > 900) {
+      lastZoneLineAt = now;
+      say(pick(LYING_LINES[asleep ? 'sleep' : lying ? 'lie' : 'sit']));
+    }
+    return;
+  }
   const t = tier();
   const expression = r.expressionByTier ? r.expressionByTier[t] : r.expression;
   const delta = r.affectionByTier ? r.affectionByTier[t] : r.affection;
@@ -1469,7 +1491,46 @@ function applyLook() {
   applyClothColor();
   tintMaterials(/HAIR/i, HAIR_COLORS.find((c) => c.id === look.hair)?.color ?? null, 0.6);
   stockings?.apply(look.stockings);
-  document.body.classList.toggle('dark', look.dark);
+  const bg = look.bg ?? (look.dark ? 'night' : 'day');
+  document.body.classList.toggle('dark', BG_DARK.has(bg));
+  for (const b of BACKGROUNDS) document.body.classList.toggle(`bg-${b.id}`, b.id === bg);
+  applyLight(bg);
+}
+
+// Фоны и свет под каждый: мягкий розовый день, закат, готика, звёздная ночь, уютная комната.
+const BACKGROUNDS = [
+  { id: 'day', name: '🌸 Нежный', key: 0xffffff, rim: 0xffd2ec, amb: 0.6, keyI: Math.PI },
+  { id: 'sunset', name: '🌅 Закат', key: 0xffc79a, rim: 0xff7fae, amb: 0.5, keyI: Math.PI * 0.95 },
+  { id: 'night', name: '🖤 Готика', key: 0xe6d8ff, rim: 0xc77dff, amb: 0.45, keyI: Math.PI * 0.85 },
+  { id: 'stars', name: '✨ Звёзды', key: 0xcfd8ff, rim: 0x8fb4ff, amb: 0.4, keyI: Math.PI * 0.8 },
+  { id: 'room', name: '🛋 Комната', key: 0xffe2c4, rim: 0xffb3d1, amb: 0.55, keyI: Math.PI * 0.9 },
+];
+const BG_DARK = new Set(['night', 'stars']);
+function applyLight(bg) {
+  const d = BACKGROUNDS.find((b) => b.id === bg) ?? BACKGROUNDS[0];
+  light.color.setHex(d.key);
+  light.intensity = d.keyI;
+  rim.color.setHex(d.rim);
+  ambient.intensity = d.amb;
+}
+function renderBackgrounds() {
+  const box = $('bg-list');
+  if (!box) return;
+  box.innerHTML = '';
+  const cur = look.bg ?? (look.dark ? 'night' : 'day');
+  for (const b of BACKGROUNDS) {
+    const el = document.createElement('button');
+    el.className = 'chip' + (b.id === cur ? ' active' : '');
+    el.textContent = b.name;
+    el.addEventListener('click', () => {
+      look.bg = b.id;
+      look.dark = BG_DARK.has(b.id);
+      saveLook();
+      applyLook();
+      renderWardrobe();
+    });
+    box.appendChild(el);
+  }
 }
 
 function renderSwatches(boxId, items, current, onPick) {
@@ -1565,21 +1626,14 @@ function renderWardrobe() {
     }
   }
 
-  $('dark-toggle').classList.toggle('active', look.dark);
-  $('dark-toggle').textContent = look.dark ? '🌙 Готичная атмосфера: вкл' : '🌙 Готичная атмосфера: выкл';
+  renderBackgrounds();
 }
 
-$('dark-toggle').addEventListener('click', () => {
-  look.dark = !look.dark;
-  saveLook();
-  applyLook();
-  renderWardrobe();
-});
 
 $('goth-preset').addEventListener('click', () => {
   clothColor = 'black';
   saveLook();
-  Object.assign(look, { hair: 'black', stockings: 'black', dark: true });
+  Object.assign(look, { hair: 'black', stockings: 'black', dark: true, bg: 'night' });
   saveLook();
   applyLook();
   renderWardrobe();
