@@ -1602,8 +1602,10 @@ export class Character {
     // Руки в выбранной позе (или примагничены) — так и остаются, когда она садится;
     // берём руку только для опоры о пол, когда она сидит боком или лежит.
     if (this.armPreset[side] || this.poseName !== 'stand') {
+      // Руки позы остаются и лёжа на боку (только правая — опора на локоть);
+      // на живот руки уходят под голову.
       const ph = this.sitPhases();
-      w *= Math.max(ph.p3, ph.b3);
+      w *= side === 'right' ? Math.max(ph.p3, ph.b3) : ph.b3;
     }
     if (w <= 0) return;
     const upper = this.bones[`${side}UpperArm`];

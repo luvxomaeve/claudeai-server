@@ -841,6 +841,7 @@ function setPoseMode(on) {
   if (on && currentMocap) stopMocap(); // позу выставляем на «живом» скелете, без записи
   poseMode = on;
   poseDrag = null;
+  renderPoseSliderBtn();
   $('btn-editor').classList.toggle('active', on);
   $('pose-bar').hidden = !on;
   document.body.classList.toggle('posing', on);
@@ -1025,8 +1026,27 @@ function renderLieToggle() {
   sitSlider.querySelectorAll('.track i').forEach((el, i) => { el.style.top = `${(marks[i] / sitMax()) * 100}%`; });
 }
 $('lie-toggle').addEventListener('pointerdown', (e) => e.stopPropagation());
+// В режиме позы полоса умеет два дела: наклон (по умолчанию) или сесть/лечь, не ломая позу.
+let poseSlider = 'bend';
+const POSE_SLIDER_ICONS = {
+  bend: '<path d="M12 4.5a1.6 1.6 0 1 1 0 .1"/><path d="M11 8l-3 5 4 2v5M8 13l-3-1"/><path d="M15 9l-4-1"/>',
+  sit: '<path d="M10 4.5a1.6 1.6 0 1 1 0 .1"/><path d="M10 8v5h5l1 6M10 13l-3 6"/>',
+};
+function renderPoseSliderBtn() {
+  const btn = $('lie-toggle');
+  if (!poseMode) { renderLieToggle(); return; }
+  btn.classList.remove('off');
+  btn.querySelector('svg').innerHTML = POSE_SLIDER_ICONS[poseSlider];
+  btn.title = poseSlider === 'bend' ? 'Полоса: наклон' : 'Полоса: сесть / лечь';
+}
 $('lie-toggle').addEventListener('click', (e) => {
   e.stopPropagation();
+  if (poseMode) {
+    poseSlider = poseSlider === 'bend' ? 'sit' : 'bend';
+    renderPoseSliderBtn();
+    showToast(poseSlider === 'bend' ? 'Полоса: наклон вперёд / назад' : 'Полоса: присесть, сесть, лечь — поза остаётся');
+    return;
+  }
   lieMode = { side: 'belly', belly: 'off', off: 'side' }[lieMode];
   try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
   renderLieToggle();
@@ -1054,7 +1074,7 @@ sitSlider.addEventListener('pointermove', (e) => {
   character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
-  if (poseMode && character.sit < 0.05) {
+  if (poseMode && poseSlider === 'bend' && character.sit < 0.05) {
     // В режиме позы полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
     const o = character.bodyOffset;
@@ -1076,7 +1096,8 @@ const BEND_RANGE = BEND_MAX - BEND_MIN;
 function updateSitSlider() {
   if (!character) return;
   // В режиме позы стоя — наклон; если она сидит/лежит — полоса поднимает/опускает её.
-  const bendMode = poseMode && character.sit < 0.05;
+  const bendMode = poseMode && poseSlider === 'bend' && character.sit < 0.05;
+  sitSlider.classList.toggle('pose-mode', poseMode);
   sitSlider.classList.toggle('bend', bendMode);
   const k = bendMode
     ? (character.bodyOffset.hipsRotX - BEND_MIN) / BEND_RANGE
