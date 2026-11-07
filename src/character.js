@@ -404,8 +404,9 @@ export class Character {
       if (p3 > 0) {
         // Сидит боком: ноги сложены в одну сторону, корпус развёрнут к тебе,
         // опора на одну руку, спина — мягкой S-линией, голова набок.
-        pose.hipsRotY += 0.35 * p3;
-        pose.spineY -= 0.28 * p3;
+        // Таз сильнее развёрнут к ногам — бёдрам не нужно скручиваться сверх нормы.
+        pose.hipsRotY += 0.6 * p3;
+        pose.spineY -= 0.42 * p3;
         pose.hipsZ += 0.12 * p3;
         pose.spineZ += 0.16 * p3;
         pose.headZ -= 0.22 * p3;
@@ -619,6 +620,9 @@ export class Character {
     this.solveArms(pose, dt);
     // Руки, выставленные пальцем, тянутся к своим точкам.
     this.applyHandTargets();
+    // Анатомические пределы: после всех поз, IK и реакций каждый сустав
+    // возвращается в диапазон, возможный у живого человека.
+    this.applyJointLimits();
 
     this.finishFrame(dt);
   }
@@ -857,6 +861,95 @@ export class Character {
         q = q.slerp(kneelQ, p2);
       }
       this.setWorldQuat(foot, q);
+    }
+  }
+
+  // ---------- Анатомические ограничения суставов ----------
+  // Локальные повороты нормализованных костей заданы относительно исходной T-позы.
+  // Раскладываем поворот на «скручивание» вокруг оси кости и «отклонение» оси,
+  // и ограничиваем каждое как у человека. Для VRM 0.x оси X/Z зеркальные (flip).
+
+  static swingTwist(q, axis) {
+    const qq = q.clone();
+    if (qq.w < 0) { qq.x = -qq.x; qq.y = -qq.y; qq.z = -qq.z; qq.w = -qq.w; }
+    const proj = axis.clone().multiplyScalar(qq.x * axis.x + qq.y * axis.y + qq.z * axis.z);
+    const twist = new THREE.Quaternion(proj.x, proj.y, proj.z, qq.w);
+    if (twist.lengthSq() < 1e-10) twist.identity(); else twist.normalize();
+    const swing = qq.clone().multiply(twist.clone().invert());
+    const twistAngle = 2 * Math.atan2(qq.x * axis.x + qq.y * axis.y + qq.z * axis.z, qq.w);
+    return { swing, twistAngle };
+  }
+
+  applyJointLimits() {
+    const deg = Math.PI / 180;
+    const f = this.flip;
+    const X = new THREE.Vector3(1, 0, 0);
+    const Y = new THREE.Vector3(0, 1, 0);
+    for (const side of ['left', 'right']) {
+      const L = side === 'left';
+      const out = L ? 1 : -1; // в сторону от тела (в осях VRM 1.0)
+
+      // Колено: только шарнир вперёд, 0…145°, без скручивания и бокового изгиба.
+      const knee = this.bones[`${side}LowerLeg`];
+      if (knee) {
+        const q = knee.quaternion;
+        const w = q.w < 0 ? -1 : 1;
+        let bend = 2 * Math.atan2(q.x * w, q.w * w) * f;
+        bend = THREE.MathUtils.clamp(bend, 0, 145 * deg);
+        knee.quaternion.setFromAxisAngle(X, bend * f);
+      }
+
+      // Бедро: скручивание ±40°, вперёд до 120°, назад до 25°, наружу до 45°, внутрь до 20°.
+      const hip = this.bones[`${side}UpperLeg`];
+      if (hip) {
+        const { swing, twistAngle } = Character.swingTwist(hip.quaternion, Y);
+        const tw = THREE.MathUtils.clamp(twistAngle, -40 * deg, 40 * deg);
+        const dir = new THREE.Vector3(0, -1, 0).applyQuaternion(swing);
+        // В «человеческих» осях: fwd — вперёд, lat — наружу, down — вниз.
+        const fwd = dir.z * f;
+        const lat = dir.x * f * out;
+        const down = -dir.y;
+        let pitch = Math.atan2(fwd, down);
+        let roll = Math.asin(THREE.MathUtils.clamp(lat, -1, 1));
+        pitch = THREE.MathUtils.clamp(pitch, -25 * deg, 120 * deg);
+        roll = THREE.MathUtils.clamp(roll, -20 * deg, 45 * deg);
+        const r = Math.cos(roll);
+        const nd = new THREE.Vector3(Math.sin(roll) / (f * out), -r * Math.cos(pitch), (r * Math.sin(pitch)) / f);
+        const newSwing = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), nd.normalize());
+        hip.quaternion.copy(newSwing.multiply(new THREE.Quaternion().setFromAxisAngle(Y, tw)));
+      }
+
+      // Стопа: носок вниз до 60°, вверх до 25°, вбок/скручивание до ±15°.
+      const foot = this.bones[`${side}Foot`];
+      if (foot) {
+        const e = new THREE.Euler().setFromQuaternion(foot.quaternion, 'XYZ');
+        e.x = THREE.MathUtils.clamp(e.x * f, -25 * deg, 60 * deg) * f;
+        e.y = THREE.MathUtils.clamp(e.y, -15 * deg, 15 * deg);
+        e.z = THREE.MathUtils.clamp(e.z, -15 * deg, 15 * deg);
+        foot.quaternion.setFromEuler(e);
+      }
+
+      // Локоть: сгиб до 145°, скручивание предплечья ±80°.
+      const elbow = this.bones[`${side}LowerArm`];
+      if (elbow) {
+        const { swing, twistAngle } = Character.swingTwist(elbow.quaternion, X);
+        const tw = THREE.MathUtils.clamp(twistAngle, -80 * deg, 80 * deg);
+        const sw = swing.clone();
+        const ang = 2 * Math.acos(Math.min(1, Math.abs(sw.w)));
+        if (ang > 145 * deg) sw.slerp(new THREE.Quaternion(), 1 - (145 * deg) / ang);
+        elbow.quaternion.copy(sw.multiply(new THREE.Quaternion().setFromAxisAngle(X, tw)));
+      }
+
+      // Кисть: сгиб до 60°, скручивание ±30°.
+      const hand = this.bones[`${side}Hand`];
+      if (hand) {
+        const { swing, twistAngle } = Character.swingTwist(hand.quaternion, X);
+        const tw = THREE.MathUtils.clamp(twistAngle, -30 * deg, 30 * deg);
+        const sw = swing.clone();
+        const ang = 2 * Math.acos(Math.min(1, Math.abs(sw.w)));
+        if (ang > 60 * deg) sw.slerp(new THREE.Quaternion(), 1 - (60 * deg) / ang);
+        hand.quaternion.copy(sw.multiply(new THREE.Quaternion().setFromAxisAngle(X, tw)));
+      }
     }
   }
 
