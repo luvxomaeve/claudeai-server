@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
-import { Character } from './character.js';
+import { Character, POSES } from './character.js';
 import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
@@ -86,6 +86,8 @@ async function loadModel(url) {
     }
     scene.add(vrm.scene);
     character = new Character(vrm);
+    window.__waifu = character; // для отладки из консоли
+    setActivePoseButton('stand');
     buildHitboxes();
     frameCamera();
     $('loading').classList.add('done');
@@ -287,6 +289,36 @@ $('btn-hitbox').addEventListener('click', () => {
   $('btn-hitbox').classList.toggle('off', !showHitboxes);
   if (hitboxGroup) hitboxGroup.visible = showHitboxes;
 });
+
+// ---------- Позы ----------
+
+const POSE_LINES = {
+  stand: 'Ну, стою. И?',
+  hips: 'Хмф! Ну и чего ты хочешь?',
+  shy: 'Н-не смотри так пристально…',
+  behind: 'Хе-хе, а что у меня за спиной? Не скажу~',
+  think: 'Хм-м… дай подумать.',
+  hello: 'Приве-е-ет!',
+};
+
+function setActivePoseButton(name) {
+  for (const btn of document.querySelectorAll('#poses button')) {
+    btn.classList.toggle('active', btn.dataset.pose === name);
+  }
+}
+
+for (const [name, def] of Object.entries(POSES)) {
+  const btn = document.createElement('button');
+  btn.textContent = def.label;
+  btn.dataset.pose = name;
+  btn.addEventListener('click', () => {
+    if (!character) return;
+    character.setPose(name);
+    setActivePoseButton(name);
+    say(POSE_LINES[name]);
+  });
+  $('poses').appendChild(btn);
+}
 
 // ---------- Своя модель ----------
 

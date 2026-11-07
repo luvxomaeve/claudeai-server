@@ -22,6 +22,53 @@ const ZONE_DEFS = [
   { zone: 'legs', bone: 'rightLowerLeg', offset: [0, -0.06, 0], radius: 0.055 },
 ];
 
+// Базовые позы. Значения — углы нормализованных костей (радианы).
+// lUpperTwist/rUpperTwist — поворот плеча вокруг своей оси (куда сгибается локоть).
+const BASE_POSE = {
+  spineX: 0, spineY: 0, spineZ: 0,
+  headX: 0, headY: 0, headZ: 0,
+  lUpperZ: -1.22, rUpperZ: 1.22,
+  lUpperX: 0.08, rUpperX: 0.08,
+  lUpperTwist: 0, rUpperTwist: 0,
+  lLowerY: -0.25, rLowerY: 0.25,
+  lLowerZ: 0, rLowerZ: 0,
+  hipsY: 0, hipsZ: 0,
+};
+
+export const POSES = {
+  stand: { label: 'Стоит' },
+  hips: {
+    label: 'Руки в боки',
+    lUpperZ: -0.75, rUpperZ: 0.75, lUpperX: 0.2, rUpperX: 0.2,
+    lUpperTwist: 0.95, rUpperTwist: 0.95, lLowerY: -1.5, rLowerY: 1.5,
+    hipsZ: 0.06, spineZ: -0.05, headZ: 0.08,
+  },
+  shy: {
+    label: 'Скромница',
+    lUpperZ: -0.85, rUpperZ: 0.85, lUpperX: 0.15, rUpperX: 0.15,
+    lUpperTwist: 0.75, rUpperTwist: 0.75, lLowerY: -2.1, rLowerY: 2.1,
+    spineX: 0.05, headX: 0.15, headZ: 0.12,
+  },
+  behind: {
+    label: 'Руки за спиной',
+    lUpperZ: -0.95, rUpperZ: 0.95, lUpperX: 0.1, rUpperX: 0.1,
+    lUpperTwist: 1.3, rUpperTwist: 1.3, lLowerY: -1.6, rLowerY: 1.6,
+    spineX: -0.04, headZ: -0.1,
+  },
+  think: {
+    label: 'Задумалась',
+    lUpperZ: -0.85, lUpperX: 0.15, lUpperTwist: 0.75, lLowerY: -2.1,
+    rUpperZ: 1.0, rUpperX: -0.7, rUpperTwist: 0.5, rLowerY: 2.6,
+    headZ: -0.12, headX: 0.05, spineZ: 0.04,
+  },
+  hello: {
+    label: 'Привет',
+    lUpperZ: 0.15, lLowerZ: 1.3, lLowerY: 0,
+    headZ: 0.1, spineZ: -0.04,
+    wave: 'left',
+  },
+};
+
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 // Огибающая движения: быстро вошли, подержали, плавно вышли.
 function envelope(t, dur) {
@@ -45,6 +92,11 @@ export class Character {
     this.talkTime = 0;
     this.patAmount = 0; // 0..1, пока гладят по голове
     this.headLook = new THREE.Vector2(); // -1..1, куда смотрит голова
+    this.poseName = 'stand';
+    this.posePrev = { ...BASE_POSE };
+    this.poseT = 1;
+    this.twistQ = new THREE.Quaternion();
+    this.axisX = new THREE.Vector3(1, 0, 0);
 
     this.lookTarget = new THREE.Object3D();
     if (vrm.lookAt) vrm.lookAt.target = this.lookTarget;
@@ -85,6 +137,21 @@ export class Character {
     const durations = { tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6 };
     this.motions = this.motions.filter((m) => m.name !== name);
     this.motions.push({ name, side, t: 0, dur: durations[name] ?? 1.5 });
+  }
+
+  setPose(name) {
+    if (!POSES[name] || name === this.poseName) return;
+    this.posePrev = this.currentBasePose();
+    this.poseName = name;
+    this.poseT = 0;
+  }
+
+  currentBasePose() {
+    const target = { ...BASE_POSE, ...POSES[this.poseName] };
+    const k = easeInOut(Math.min(this.poseT / 0.7, 1));
+    const out = {};
+    for (const key in BASE_POSE) out[key] = this.posePrev[key] + (target[key] - this.posePrev[key]) * k;
+    return out;
   }
 
   talk(seconds) {
@@ -130,15 +197,10 @@ export class Character {
     for (const n in b) b[n]?.rotation.set(0, 0, 0);
     if (b.hips) b.hips.position.y = this.hipsBaseY;
 
-    const pose = {
-      spineX: 0, spineY: 0, spineZ: 0,
-      headX: 0, headY: 0, headZ: 0,
-      lUpperZ: -1.22, rUpperZ: 1.22,
-      lUpperX: 0.08, rUpperX: 0.08,
-      lLowerY: -0.25, rLowerY: 0.25,
-      lLowerZ: 0, rLowerZ: 0,
-      hipsY: 0, hipsZ: 0,
-    };
+    this.poseT += dt;
+    const pose = this.currentBasePose();
+    const poseDef = POSES[this.poseName];
+    if (poseDef.wave === 'left') pose.lLowerZ += Math.sin(t * 9) * 0.25;
 
     // Дыхание и лёгкое покачивание.
     const breath = Math.sin(t * 1.6);
@@ -221,6 +283,8 @@ export class Character {
     b.head?.rotation.set(pose.headX * 0.6, pose.headY * 0.6, pose.headZ * 0.6);
     b.leftUpperArm?.rotation.set(pose.lUpperX, 0, pose.lUpperZ);
     b.rightUpperArm?.rotation.set(pose.rUpperX, 0, pose.rUpperZ);
+    b.leftUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.lUpperTwist));
+    b.rightUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.rUpperTwist));
     b.leftLowerArm?.rotation.set(0, pose.lLowerY, pose.lLowerZ);
     b.rightLowerArm?.rotation.set(0, pose.rLowerY, pose.rLowerZ);
     if (b.hips) {
