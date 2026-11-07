@@ -377,7 +377,10 @@ export class Character {
 
     // Сесть на пол (свайп вниз): бёдра опускаются к полу, ступни уходят вперёд,
     // колени поднимаются — она садится, обняв колени. Плавно, с пружиной.
-    this.sitS += (this.sit - this.sitS) * (1 - Math.exp(-dt * 5));
+    // Одно общее плавное значение посадки с ограниченной скоростью: таз, колени
+    // и ступни всегда согласованы, даже если свайпнуть очень резко.
+    const sitStep = (this.sit - this.sitS) * (1 - Math.exp(-dt * 4));
+    this.sitS += THREE.MathUtils.clamp(sitStep, -0.85 * dt, 0.85 * dt);
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     if (this.sitS > 0.001) {
@@ -385,7 +388,7 @@ export class Character {
       const { p1, p2 } = this.sitPhases(s);
       this.sitDropNow = this.sitDropFor(s);
       this.sitBackNow = (0.12 * p1 * (1 - p2)) * this.scale;
-      pose.hipsY -= this.sitDropNow;
+      // Таз опускаем напрямую (без отдельной пружины), чтобы он не отставал от ног.
       // Присед на каблуках: таз уходит назад и наклоняется вперёд, поясница прогибается,
       // корпус подаётся вперёд, грудь раскрыта. На коленях — прямая спина с лёгким прогибом.
       const squat = p1 * (1 - p2);
@@ -587,7 +590,7 @@ export class Character {
       else this.rot(f.node, 0, 0, s * f.curl * curl);
     }
     if (b.hips) {
-      b.hips.position.y += pose.hipsY;
+      b.hips.position.y += pose.hipsY - this.sitDropNow;
       b.hips.position.x += pose.hipsX * this.flip;
       // В приседе таз уходит чуть назад, на коленях — возвращается над пятками.
       b.hips.position.z -= this.sitBackNow * this.flip;
@@ -790,7 +793,7 @@ export class Character {
         const kneel = new THREE.Vector3(
           rest.pos.x + outSign * 0.01 * S,
           rest.pos.y - 0.05 * S,
-          this.restHips.z - 0.12 * S,
+          this.restHips.z - 0.06 * S,
         );
         target.lerp(kneel, p2);
       }
@@ -930,8 +933,9 @@ export class Character {
 
   sitDropFor(s) {
     const restY = this.restHips.y;
-    const squatY = restY * 0.5;
-    const floorY = 0.25 * this.scale; // сидит на пятках
+    // Не до предела: при полном сгибе сетка модели сминается («плющит» ноги).
+    const squatY = restY * 0.58;
+    const floorY = 0.36 * this.scale; // на коленях, таз над пятками
     const { p1, p2 } = this.sitPhases(s);
     const y = p2 > 0 ? THREE.MathUtils.lerp(squatY, floorY, p2) : THREE.MathUtils.lerp(restY, squatY, p1);
     return Math.max(0, restY - y);
