@@ -588,7 +588,7 @@ export class Character {
       if (this.pendingSit != null) { this.sit = this.pendingSit; this.pendingSit = null; }
     }
     this.wakeT = Math.max(0, (this.wakeT ?? 0) - dt);
-    this.sleep += ((this.sitPhases().b4 > 0.85 && this.wakeT <= 0 ? 1 : 0) - this.sleep) * (1 - Math.exp(-dt * (this.wakeT > 0 ? 4 : 1.2)));
+    this.sleep += ((this.sitPhases().b4 > 0.85 && this.wakeT <= 0 && !this.gazeTarget ? 1 : 0) - this.sleep) * (1 - Math.exp(-dt * (this.wakeT > 0 ? 4 : 1.2)));
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     this.sitSideNow = 0;
@@ -709,17 +709,18 @@ export class Character {
       const pitch = (this.gazePitch ?? 0);
       this.gazeYawS = (this.gazeYawS ?? 0) + (yaw - (this.gazeYawS ?? 0)) * k;
       this.gazePitchS = (this.gazePitchS ?? 0) + (pitch - (this.gazePitchS ?? 0)) * k;
-      const w = this.gazeW * (1 - 0.6 * THREE.MathUtils.smoothstep(this.sitS, 0.9, 1.3));
+      const w = this.gazeW;
       // Сзади оборачивается умеренно (до ~125°), без выворачивания.
       const total = THREE.MathUtils.clamp(this.gazeYawS, -2.2, 2.2) * w;
       // В наклоне корпус не скручиваем — поворачивается только голова.
       const bendK = THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
-      const head = THREE.MathUtils.clamp(total, -1.3, 1.3);
+      const head = THREE.MathUtils.clamp(total, -1.3 + 0.4 * bendK, 1.3 - 0.4 * bendK);
       const body = THREE.MathUtils.clamp(total - head, -0.9, 0.9) * (1 - bendK);
       pose.headY += head;
       pose.spineY += body;
       // Наклонена — поднимает голову к тебе сильнее (угол считается относительно корпуса).
-      pose.headX += THREE.MathUtils.clamp(-this.gazePitchS, -0.6 - 0.5 * bendK, 0.7) * w;
+      const lieK = THREE.MathUtils.smoothstep(this.sitS, 1.0, 1.3);
+      pose.headX += THREE.MathUtils.clamp(-this.gazePitchS, -0.6 - 0.5 * Math.max(bendK, lieK), 0.7) * w;
     }
     pose.headX += -this.headLook.y * 0.2;
 
@@ -987,6 +988,10 @@ export class Character {
     const fwd = new THREE.Vector3().crossVectors(left, up).normalize();
     const dir = t.clone().sub(P(b.head ?? b.neck)).normalize();
     let yaw = Math.atan2(dir.dot(left), dir.dot(fwd));
+    // Камера почти «над головой» по оси тела (например, в наклоне спереди): поворот
+    // вбок не определён — не крутим голову, только поднимаем.
+    const along = dir.dot(up);
+    yaw *= THREE.MathUtils.smoothstep(Math.sqrt(Math.max(0, 1 - along * along)), 0.25, 0.6);
     // Камера ровно сзади — не перескакиваем с плеча на плечо.
     if (Math.abs(yaw) > 2.7 && this.gazeYaw && Math.sign(yaw) !== Math.sign(this.gazeYaw)) yaw = Math.sign(this.gazeYaw) * 2.7;
     this.gazeYaw = yaw;
@@ -2017,7 +2022,6 @@ export class Character {
     if (this.patAmount > 0.2) this.exprTarget.happy = Math.max(this.exprTarget.happy, this.patAmount);
     // Лицо живее: смотрит на тебя — лёгкая улыбка; спит — спокойное расслабленное лицо.
     if (this.exprHold <= 0) {
-      if (this.gazeTarget) this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.28);
       this.exprTarget.relaxed = Math.max(this.exprTarget.relaxed, (this.sleep ?? 0) * 0.45);
     }
 

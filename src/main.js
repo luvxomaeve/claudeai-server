@@ -920,8 +920,7 @@ function setPoseMode(on) {
   document.body.classList.toggle('posing', on);
   $('cam-controls').hidden = !(on || cameraMode);
   closePoseSaveForm();
-  // Во вкладке «Позы» список поз открыт сразу; дома — скрыт.
-  setPoseListOpen(on);
+  setPoseListOpen(false);
   if (on) {
     // Позируем во весь рост — видно и руки, и ноги.
     if (!fullBody) setFullBody(true);
