@@ -56,6 +56,12 @@
     </div>
     <div class="panel-body">
       <button id="goth-preset" class="panel-big">🖤 Готик-образ одной кнопкой</button>
+      <div class="editor-group">Мои модели из VRoid Hub</div>
+      <p id="hub-setup" class="panel-note">Вход через VRoid Hub ещё не настроен (нужны Application ID и адрес воркера в src/config.js).</p>
+      <button id="hub-login" class="panel-big" hidden>🔑 Войти через VRoid Hub</button>
+      <div id="hub-list"></div>
+      <p id="hub-status" class="panel-note"></p>
+      <button id="hub-logout" class="outfit-del hub-logout" hidden>Выйти из VRoid Hub</button>
       <div class="editor-group">Наряды</div>
       <div id="outfit-list"></div>
       <label class="panel-add">+ Добавить наряд (.vrm)
