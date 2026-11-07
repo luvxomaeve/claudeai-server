@@ -22,7 +22,7 @@
   - позы `POSES`, базовая поза `BASE_POSE`, пружинная плавность `springPose()`;
   - покой: перенос веса, дыхание, живые руки/пальцы, жесты (`playMotion`), встроенные анимации `LOOPS`;
   - IK без скручивания `twoBoneIK()` (рамки костей от исходной позы + общая ось шарнира);
-  - ступни на полу `plantFeet()`, посадка в 2 фазы `sitPhases()/sitDropFor()` (присед → на колени);
+  - ступни на полу `plantFeet()`, посадка в 3 фазы `sitPhases()/sitDropFor()` (присед → на колени → сидит боком);
   - коррекция рук от проникания в тело `measureBody()/solveArms()`;
   - поза пальцем: `setHandTarget/setFootTarget/headOffset/bodyOffset`, `export/importTouchPose`.
 - `src/dialogue.js` — реплики и реакции по зонам (`REACTIONS`, `STROKES`) и уровням симпатии.

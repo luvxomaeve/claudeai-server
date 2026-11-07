@@ -193,6 +193,7 @@ export class Character {
     this.sitS = 0; // сглаженное значение
     this.sitDropNow = 0;
     this.sitBackNow = 0;
+    this.sitSideNow = 0;
     this.kneelPlantar = 1.1; // насколько вытянут носок на коленях (рад)
     this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
@@ -384,10 +385,12 @@ export class Character {
     this.sitS += THREE.MathUtils.clamp(sitStep, -0.85 * dt, 0.85 * dt);
     this.sitDropNow = 0;
     this.sitBackNow = 0;
+    this.sitSideNow = 0;
     if (this.sitS > 0.001) {
       const s = this.sitS;
-      const { p1, p2 } = this.sitPhases(s);
+      const { p1, p2, p3 } = this.sitPhases(s);
       this.sitDropNow = this.sitDropFor(s);
+      this.sitSideNow = 0.12 * p3 * this.scale; // сидя боком таз смещён к руке-опоре
       this.sitBackNow = (0.12 * p1 * (1 - p2)) * this.scale;
       // Таз опускаем напрямую (без отдельной пружины), чтобы он не отставал от ног.
       // Присед на каблуках: таз уходит назад и наклоняется вперёд, поясница прогибается,
@@ -398,6 +401,18 @@ export class Character {
       pose.headX -= 0.25 * squat + 0.05 * p2;
       pose.hipsZ *= 1 - s;
       pose.hipsX *= 1 - s;
+      if (p3 > 0) {
+        // Сидит боком: ноги сложены в одну сторону, корпус развёрнут к тебе,
+        // опора на одну руку, спина — мягкой S-линией, голова набок.
+        pose.hipsRotY += 0.35 * p3;
+        pose.spineY -= 0.28 * p3;
+        pose.hipsZ += 0.12 * p3;
+        pose.spineZ += 0.16 * p3;
+        pose.headZ -= 0.22 * p3;
+        pose.hipsRotX -= 0.1 * p3;
+        pose.spineX -= 0.06 * p3;
+        pose.headX += 0.06 * p3;
+      }
     }
 
     // Голова, корпус и таз, заданные пальцем в режиме позы.
@@ -595,6 +610,7 @@ export class Character {
       b.hips.position.x += pose.hipsX * this.flip;
       // В приседе таз уходит чуть назад, на коленях — возвращается над пятками.
       b.hips.position.z -= this.sitBackNow * this.flip;
+      b.hips.position.x -= this.sitSideNow * this.flip;
       this.rot(b.hips, pose.hipsRotX, pose.hipsRotY, pose.hipsZ);
     }
     // Ступни стоят на полу: колени сгибаются сами под движение бёдер.
@@ -766,7 +782,7 @@ export class Character {
     if (!b.hips || !this.restFoot.left) return;
     b.hips.updateWorldMatrix(true, true);
     const hipsPos = b.hips.getWorldPosition(new THREE.Vector3());
-    const { p1, p2 } = this.sitPhases();
+    const { p1, p2, p3 } = this.sitPhases();
     const S = this.scale;
     for (const side of ['left', 'right']) {
       const L = side === 'left';
@@ -798,6 +814,15 @@ export class Character {
         );
         target.lerp(kneel, p2);
       }
+      // Сидит боком: обе голени сложены в сторону её левого бедра.
+      if (p3 > 0) {
+        const fold = new THREE.Vector3(
+          this.restHips.x + (L ? 0.34 : 0.2) * S,
+          rest.pos.y - 0.05 * S,
+          this.restHips.z + (L ? -0.14 : 0.04) * S,
+        );
+        target.lerp(fold, p3);
+      }
 
       // Ступня, сдвинутая пальцем.
       const footOff = this.footOffset[side];
@@ -811,8 +836,9 @@ export class Character {
       const lateral = footOff ? footOff.x * 1.5 : 0;
       const kneeUp = footOff ? footOff.y * 1.2 : 0;
       const pole = new THREE.Vector3(
-        rest.pos.x + outSign * (0.03 - 0.05 * p1 * (1 - p2)) * S + lateral, // в приседе колени ближе друг к другу
-        knee.y - 0.5 * p2 + kneeUp * 0.5,
+        rest.pos.x + outSign * (0.03 - 0.05 * p1 * (1 - p2)) * S + lateral + 0.4 * p3, // сидя боком колени влево-вперёд
+        // На коленях колено вниз (к полу); сидя боком таз уже у пола — колено вперёд, не под пол.
+        knee.y - 0.5 * p2 * (1 - p3) + 0.2 * p3 + kneeUp * 0.5,
         knee.z + 0.6 + kneeUp,
       );
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
@@ -928,8 +954,14 @@ export class Character {
   // Посадка в две фазы: 0…0.6 — глубокий присед (ступни вперёд),
   // 0.6…1 — опускается на колени и садится на пятки (сейдза), руки на коленях.
   sitPhases(s = this.sitS) {
+    // 0…0.5 — присед, 0.5…0.8 — на колени, 0.8…1 — садится боком на пол.
     const ease = (x) => x * x * (3 - 2 * x);
-    return { p1: ease(Math.min(s / 0.6, 1)), p2: ease(THREE.MathUtils.clamp((s - 0.6) / 0.4, 0, 1)) };
+    const c = THREE.MathUtils.clamp;
+    return {
+      p1: ease(c(s / 0.5, 0, 1)),
+      p2: ease(c((s - 0.5) / 0.3, 0, 1)),
+      p3: ease(c((s - 0.8) / 0.2, 0, 1)),
+    };
   }
 
   sitDropFor(s) {
@@ -937,14 +969,17 @@ export class Character {
     // Не до предела: при полном сгибе сетка модели сминается («плющит» ноги).
     const squatY = restY * 0.58;
     const floorY = 0.36 * this.scale; // на коленях, таз над пятками
-    const { p1, p2 } = this.sitPhases(s);
-    const y = p2 > 0 ? THREE.MathUtils.lerp(squatY, floorY, p2) : THREE.MathUtils.lerp(restY, squatY, p1);
+    const sideY = 0.15 * this.scale; // сидит боком прямо на полу
+    const { p1, p2, p3 } = this.sitPhases(s);
+    let y = THREE.MathUtils.lerp(restY, squatY, p1);
+    if (p2 > 0) y = THREE.MathUtils.lerp(squatY, floorY, p2);
+    if (p3 > 0) y = THREE.MathUtils.lerp(floorY, sideY, p3);
     return Math.max(0, restY - y);
   }
 
   // Сидя на полу кладёт руки на колени (плавно, по мере того как садится).
   handsOnKnees(side) {
-    const w = THREE.MathUtils.smoothstep(this.sitS, 0.35, 0.85);
+    const w = THREE.MathUtils.smoothstep(this.sitS, 0.25, 0.6);
     if (w <= 0) return;
     const upper = this.bones[`${side}UpperArm`];
     const lower = this.bones[`${side}LowerArm`];
@@ -954,13 +989,22 @@ export class Character {
     const q1 = upper.quaternion.clone();
     const q2 = lower.quaternion.clone();
     // Ладони на коленях; когда она на коленях — чуть ближе к себе, на бёдрах.
-    const { p2 } = this.sitPhases();
+    const { p2, p3 } = this.sitPhases();
     const kneePos = knee.getWorldPosition(new THREE.Vector3());
     const hipsPos = this.bones.hips.getWorldPosition(new THREE.Vector3());
     const target = kneePos.clone()
       .lerp(hipsPos, 0.3 * p2)
       .add(new THREE.Vector3(0, 0.05 * this.scale, 0.03 * this.scale * (1 - p2)));
-    const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.4, -0.4));
+    let pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.4, -0.4));
+    // Сидя боком: правая рука опирается о пол сбоку, левая лежит на бедре.
+    if (p3 > 0 && side === 'right') {
+      const floor = new THREE.Vector3(hipsPos.x - 0.24 * this.scale, 0.03 * this.scale, hipsPos.z + 0.02 * this.scale);
+      target.lerp(floor, p3);
+      pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(-0.3, 0, -0.5)), p3);
+    } else if (p3 > 0) {
+      const thigh = kneePos.clone().lerp(hipsPos, 0.45).add(new THREE.Vector3(0, 0.06 * this.scale, 0));
+      target.lerp(thigh, p3);
+    }
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);
     lower.quaternion.slerpQuaternions(q2, lower.quaternion.clone(), w);
