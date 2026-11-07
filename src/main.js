@@ -166,18 +166,19 @@ function orbitTarget(out) {
   if (character?.bones.hips && character.bones.head) {
     const lie = THREE.MathUtils.smoothstep(character.sitS, 0.8, 1.25);
     if (lie > 0) {
-      const mid = lieMid;
+      // Ближе к лицу: смотрим между серединой тела и головой.
+      const mid = lieMid.clone().lerp(headTrack, 0.45);
       cx = mid.x * lie;
       cz = mid.z * lie;
       lookY = THREE.MathUtils.lerp(lookY, mid.y + 0.05 * camBase.S, lie);
-      dd = d * (1 + 0.35 * lie);
+      dd = d * (1 + 0.1 * lie);
       pitch = camPitch + 0.3 * lie;
     }
   }
   // Приближено — смотрим на реальное положение головы (а не на «где голова стоя»).
   if (character && headTrackInit) {
     const zoomK = 1 - THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1);
-    const k = THREE.MathUtils.smoothstep(zoomK, 0.1, 0.8) * (1 - THREE.MathUtils.smoothstep(character.sitS, 0.8, 1.25));
+    const k = THREE.MathUtils.smoothstep(zoomK, 0.1, 0.8);
     if (k > 0) {
       cx = THREE.MathUtils.lerp(cx, headTrack.x, k);
       cz = THREE.MathUtils.lerp(cz, headTrack.z, k);

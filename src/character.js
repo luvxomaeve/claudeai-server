@@ -666,29 +666,28 @@ export class Character {
     // Голова, корпус и таз, заданные пальцем в режиме позы.
     pose.headY += this.headOffset.y;
     pose.headX += this.headOffset.x;
-    for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key] * (key.startsWith('hips') ? this.offK : 1);
-    // Сидит/лежит: наклон и прогиб с полосы делает спина (таз уже на полу):
-    // на коленях — наклон к коленям / прогиб назад, на спине — приподняться,
-    // на животе — опереться и приподнять грудь (умеренно).
+    // Наклон с левой полосы работает в полную силу и в приседе, и на коленях
+    // (таз наклоняется так же красиво, как стоя); уходит только когда она садится
+    // на пол / ложится — там наклон делает спина.
+    this.bendW = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.8, 1.0);
+    for (const key in this.bodyOffset) {
+      const w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.offK : 1;
+      pose[key] += this.bodyOffset[key] * w;
+    }
     {
-      const seat = 1 - this.offK;
-      if (seat > 0) {
+      const lie = 1 - this.bendW;
+      if (lie > 0) {
         const bend = this.bodyOffset.hipsRotX;
         const ph = this.sitPhases();
-        // На коленях/сидя часть наклона делает таз (он перекатывается на пятках) —
-        // движение цельное, а не одной спиной. Лёжа таз не трогаем.
-        const kneel = ph.p2 * (1 - Math.max(ph.p3, ph.p4, ph.b3, ph.b4, ph.c4));
-        const pelvis = bend * (bend >= 0 ? 0.35 : 0.25) * kneel;
         const k = bend >= 0 ? 0.75 : 0.6 * (1 - 0.5 * ph.b4);
-        pose.hipsRotX += pelvis * seat;
-        pose.spineX += (bend * k - pelvis * 0.6) * seat;
-        pose.headX -= bend * 0.15 * seat;
+        pose.spineX += bend * k * lie;
+        pose.headX -= bend * 0.15 * lie;
       }
     }
     // Руки висят по гравитации: корпус наклонили вперёд/прогнули назад — плечи
     // поворачиваются обратно, кисти смотрят вниз, а не торчат вперёд или в стороны.
     {
-      const pitch = (this.bodyOffset.hipsRotX + this.bodyOffset.spineX) * this.offK;
+      const pitch = (this.bodyOffset.hipsRotX * this.bendW + this.bodyOffset.spineX) * Math.max(this.offK, 0.6 * this.bendW);
       const hang = THREE.MathUtils.clamp(pitch, -0.9, 1.6) * 0.75;
       pose.lUpperX -= hang;
       pose.rUpperX -= hang;
