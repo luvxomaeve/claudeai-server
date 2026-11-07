@@ -675,8 +675,13 @@ export class Character {
       if (seat > 0) {
         const bend = this.bodyOffset.hipsRotX;
         const ph = this.sitPhases();
+        // На коленях/сидя часть наклона делает таз (он перекатывается на пятках) —
+        // движение цельное, а не одной спиной. Лёжа таз не трогаем.
+        const kneel = ph.p2 * (1 - Math.max(ph.p3, ph.p4, ph.b3, ph.b4, ph.c4));
+        const pelvis = bend * (bend >= 0 ? 0.35 : 0.25) * kneel;
         const k = bend >= 0 ? 0.75 : 0.6 * (1 - 0.5 * ph.b4);
-        pose.spineX += bend * k * seat;
+        pose.hipsRotX += pelvis * seat;
+        pose.spineX += (bend * k - pelvis * 0.6) * seat;
         pose.headX -= bend * 0.15 * seat;
       }
     }
@@ -687,6 +692,10 @@ export class Character {
       const hang = THREE.MathUtils.clamp(pitch, -0.9, 1.6) * 0.75;
       pose.lUpperX -= hang;
       pose.rUpperX -= hang;
+      // Руки чуть отводятся от тела в наклоне/прогибе и сидя — не проходят сквозь бёдра и бока.
+      const away = 0.12 * Math.min(1, Math.abs(pitch)) + 0.08 * THREE.MathUtils.smoothstep(this.sitS, 0.2, 0.6);
+      pose.lUpperZ += away;
+      pose.rUpperZ -= away;
       this.armHang = hang;
     }
     // Контрапост: бёдра ушли вбок — плечи и голова уравновешивают S-линией,

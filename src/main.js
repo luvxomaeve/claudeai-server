@@ -136,8 +136,16 @@ const ZOOM_MAX = 3;
 
 // Середина тела лёжа (сглаженная, чтобы камера не дрожала от дыхания).
 const lieMid = new THREE.Vector3(0, 0.3, 0);
+// Голова (сглаженно): при приближении камера ведёт за лицом — наклонилась, села,
+// повернулась — лицо остаётся в кадре.
+const headTrack = new THREE.Vector3(0, 1.4, 0);
+let headTrackInit = false;
 function updateLieMid(dt) {
   if (!character?.bones.hips || !character.bones.head) return;
+  const hp = character.bones.head.getWorldPosition(new THREE.Vector3());
+  hp.y += 0.05 * camBase.S;
+  if (!headTrackInit) { headTrack.copy(hp); headTrackInit = true; }
+  headTrack.lerp(hp, 1 - Math.exp(-dt * 4));
   const m = character.bones.hips.getWorldPosition(new THREE.Vector3())
     .add(character.bones.head.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
   lieMid.lerp(m, 1 - Math.exp(-dt * 3));
@@ -164,6 +172,16 @@ function orbitTarget(out) {
       lookY = THREE.MathUtils.lerp(lookY, mid.y + 0.05 * camBase.S, lie);
       dd = d * (1 + 0.35 * lie);
       pitch = camPitch + 0.3 * lie;
+    }
+  }
+  // Приближено — смотрим на реальное положение головы (а не на «где голова стоя»).
+  if (character && headTrackInit) {
+    const zoomK = 1 - THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1);
+    const k = THREE.MathUtils.smoothstep(zoomK, 0.1, 0.8) * (1 - THREE.MathUtils.smoothstep(character.sitS, 0.8, 1.25));
+    if (k > 0) {
+      cx = THREE.MathUtils.lerp(cx, headTrack.x, k);
+      cz = THREE.MathUtils.lerp(cz, headTrack.z, k);
+      lookY = THREE.MathUtils.lerp(lookY, headTrack.y, k);
     }
   }
   out.look.set(cx, lookY, cz);
@@ -201,7 +219,8 @@ function updateCamera(dt) {
   // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
   updateLieMid(dt);
   const lying = character && character.sitS > 0.8;
-  if (character && camTween >= 1 && (lying || Math.abs(character.sitS - camSitSeen) > 0.002)) {
+  const zoomedIn = camZoom < 0.9;
+  if (character && camTween >= 1 && (lying || zoomedIn || Math.abs(character.sitS - camSitSeen) > 0.002)) {
     camSitSeen = character.sitS;
     applyOrbit();
   }
