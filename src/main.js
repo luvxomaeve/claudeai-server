@@ -376,7 +376,7 @@ canvas.addEventListener('pointerdown', (e) => {
 
   const hit = zoneAt(e);
   if (!hit) {
-    // Пустое место в обычном режиме: свайп вверх/вниз — встать/сесть.
+    // Пустое место в обычном режиме: ничего не делаем (сесть/встать — ползунком слева).
     bgSwipe = { sy: e.clientY, sx: e.clientX, lastY: e.clientY, axis: null };
     return;
   }
@@ -452,12 +452,11 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (orbitDrag) {
-    // Сначала понимаем направление жеста: вбок — крутим камеру, вверх/вниз — сесть/встать.
+    // Сначала понимаем направление жеста: вбок — крутим камеру (сесть/встать — только ползунком).
     if (!orbitDrag.axis && Math.hypot(e.clientX - orbitDrag.sx, e.clientY - orbitDrag.sy) > 10) {
       orbitDrag.axis = Math.abs(e.clientX - orbitDrag.sx) > Math.abs(e.clientY - orbitDrag.sy) ? 'x' : 'y';
     }
     if (orbitDrag.axis === 'x') rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01);
-    else if (orbitDrag.axis === 'y') sitBy(e.clientY - orbitDrag.lastY);
     orbitDrag.lastX = e.clientX;
     orbitDrag.lastY = e.clientY;
     return;
@@ -466,7 +465,6 @@ canvas.addEventListener('pointermove', (e) => {
     if (!bgSwipe.axis && Math.hypot(e.clientX - bgSwipe.sx, e.clientY - bgSwipe.sy) > 10) {
       bgSwipe.axis = Math.abs(e.clientY - bgSwipe.sy) > Math.abs(e.clientX - bgSwipe.sx) ? 'y' : 'x';
     }
-    if (bgSwipe.axis === 'y') sitBy(e.clientY - bgSwipe.lastY);
     bgSwipe.lastY = e.clientY;
     return;
   }
@@ -782,23 +780,25 @@ function updateHandles() {
 // Ползунок слева: тянешь вниз — приседает → на колени → боком → ложится, вверх — встаёт.
 const SIT_MAX = 1.3;
 const sitSlider = $('sit-slider');
-let sliderDrag = false;
-function sliderSet(e) {
-  const r = sitSlider.querySelector('.track').getBoundingClientRect();
-  const v = THREE.MathUtils.clamp((e.clientY - r.top) / r.height, 0, 1) * SIT_MAX;
-  sitBy((v - character.sit) / 0.004);
-}
+// Палец ведёт относительно (без скачка к месту касания): вся высота полоски = от «стоит» до «лежит».
+let sliderDrag = null;
 sitSlider.addEventListener('pointerdown', (e) => {
   if (!character) return;
   e.preventDefault();
+  e.stopPropagation();
   sitSlider.setPointerCapture(e.pointerId);
-  sliderDrag = true;
+  sliderDrag = { y: e.clientY };
   sitSlider.classList.add('active');
-  sliderSet(e);
 });
-sitSlider.addEventListener('pointermove', (e) => { if (sliderDrag && character) sliderSet(e); });
+sitSlider.addEventListener('pointermove', (e) => {
+  if (!sliderDrag || !character) return;
+  const h = sitSlider.querySelector('.track').getBoundingClientRect().height || 200;
+  const dv = ((e.clientY - sliderDrag.y) / h) * SIT_MAX;
+  sliderDrag.y = e.clientY;
+  sitBy(dv / 0.004);
+});
 for (const ev of ['pointerup', 'pointercancel']) {
-  sitSlider.addEventListener(ev, () => { sliderDrag = false; sitSlider.classList.remove('active'); });
+  sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
 }
 function updateSitSlider() {
   if (!character) return;
@@ -824,7 +824,7 @@ function sitBy(dy) {
 function poseDragStart(e) {
   const hit = zoneAt(e);
   if (!hit) {
-    // Пустое место: вбок — крутим камеру, вверх/вниз — сесть/встать.
+    // Пустое место: вбок — крутим камеру (сесть/встать — только ползунком).
     poseDrag = { kind: 'bg', sx: e.clientX, sy: e.clientY, lastX: e.clientX, lastY: e.clientY, axis: null };
     return;
   }
@@ -868,7 +868,6 @@ function poseDragMove(e) {
       poseDrag.axis = Math.abs(e.clientX - poseDrag.sx) > Math.abs(e.clientY - poseDrag.sy) ? 'x' : 'y';
     }
     if (poseDrag.axis === 'x') rotateBy(-(e.clientX - poseDrag.lastX) * 0.01);
-    else if (poseDrag.axis === 'y') sitBy(e.clientY - poseDrag.lastY);
     poseDrag.lastX = e.clientX;
     poseDrag.lastY = e.clientY;
     return;
