@@ -758,7 +758,6 @@ body.posing #poses #poses-toggle, body.posing #poses #pose-list { display: none;
 /* Почти прозрачная: еле заметная линия у края, ярче — пока ведёшь пальцем. */
 #sit-slider .track { opacity: 0.22; transition: opacity 0.4s ease; }
 #sit-slider.active .track { opacity: 1; transition-duration: 0.15s; }
-body.posing #sit-slider { display: none; }
 #poses #pose-list .sit-chip { background: rgba(255, 111, 168, 0.13); }
 #poses #pose-list .sit-chip:active { background: var(--pink); color: #fff; }
 

@@ -406,18 +406,40 @@ export class Character {
 
   // Точное попадание по самой модели (тело, одежда, волосы): ищем ближайшую зону
   // к точке касания. Закрывает щели между сферами зон — касание не «проваливается».
+  // Быстро (без перебора треугольников): тело как набор «капсул» по костям —
+  // ноги, бёдра с юбкой, корпус, руки, голова. Касание мгновенное, без подтормаживания.
   hitTestMesh(raycaster) {
-    if (!this.meshes) {
-      this.meshes = [];
-      this.vrm.scene.traverse((o) => { if (o.isMesh && o.visible) this.meshes.push(o); });
-    }
-    for (const m of this.meshes) if (m.isSkinnedMesh) m.boundingSphere = null; // поза меняется — пересчёт
-    const hit = raycaster.intersectObjects(this.meshes, false)[0];
-    if (!hit) return null;
+    const ray = raycaster.ray;
+    const S = this.scale;
+    const b = this.bones;
+    const P = (n) => b[n]?.getWorldPosition(new THREE.Vector3());
+    const head = P('head');
+    const segs = [
+      ['hips', 'spine', 0.15], ['spine', 'chest', 0.14], ['chest', 'neck', 0.13], ['neck', 'head', 0.08],
+      ['hips', 'leftUpperLeg', 0.17], ['hips', 'rightUpperLeg', 0.17],
+      ['leftUpperLeg', 'leftLowerLeg', 0.09], ['rightUpperLeg', 'rightLowerLeg', 0.09],
+      ['leftLowerLeg', 'leftFoot', 0.065], ['rightLowerLeg', 'rightFoot', 0.065],
+      ['leftUpperArm', 'leftLowerArm', 0.055], ['rightUpperArm', 'rightLowerArm', 0.055],
+      ['leftLowerArm', 'leftHand', 0.05], ['rightLowerArm', 'rightHand', 0.05],
+    ];
+    let bestT = Infinity;
+    let point = null;
+    const pr = new THREE.Vector3();
+    const ps = new THREE.Vector3();
+    const test = (a, c, r) => {
+      if (!a || !c) return;
+      const d2 = ray.distanceSqToSegment(a, c, pr, ps);
+      if (d2 > (r * S) ** 2) return;
+      const t = pr.clone().sub(ray.origin).dot(ray.direction);
+      if (t < bestT) { bestT = t; point = ps.clone(); }
+    };
+    for (const [a, c, r] of segs) test(P(a), P(c), r);
+    if (head) test(head, head.clone().add(new THREE.Vector3(0, 0.16 * S, 0)), 0.13); // голова с волосами
+    if (!point) return null;
     let best = null;
     for (const z of this.zones) {
-      const d = (z.center.distanceTo(hit.point) - z.worldRadius) / this.scale;
-      if (!best || d < best.score) best = { ...z, point: hit.point.clone(), score: d };
+      const d = (z.center.distanceTo(point) - z.worldRadius) / S;
+      if (!best || d < best.score) best = { ...z, point: point.clone(), score: d };
     }
     return best;
   }
@@ -527,9 +549,10 @@ export class Character {
     {
       const c = THREE.MathUtils.clamp;
       // Скорость следует за пальцем: медленно ведёшь — плавно, быстро — быстрее (но без рывка).
+      // Нет данных о пальце (кнопка ⌂ и т.п.) — спокойная скорость; иначе — как ведёшь.
       const base = this.sitS > 0.95 || this.sit > 1.0 ? 0.32 : 0.5;
-      const vmax = Math.max(base, Math.min(1.6, this.sitRate * 0.9));
-      const acc = 1.4 + this.sitRate * 2.2;
+      const vmax = this.sitRate > 0.02 ? THREE.MathUtils.clamp(this.sitRate * 1.1, 0.22, 2.2) : base;
+      const acc = 1.2 + this.sitRate * 3;
       const want = c((this.sit - this.sitS) * (2.6 + this.sitRate), -vmax, vmax);
       this.sitV += c(want - this.sitV, -acc * dt, acc * dt);
       if (Math.abs(this.sit - this.sitS) < 0.02) this.sitRate *= Math.exp(-dt * 3);
@@ -1514,7 +1537,10 @@ export class Character {
 
   // Сидя на полу кладёт руки на колени (плавно, по мере того как садится).
   handsOnKnees(side) {
-    const w = THREE.MathUtils.smoothstep(this.sitS, 0.25, 0.6);
+    let w = THREE.MathUtils.smoothstep(this.sitS, 0.25, 0.6);
+    // Руки в выбранной позе (или примагничены) — так и остаются, когда она садится;
+    // берём руку только для опоры о пол, когда она сидит боком или лежит.
+    if (this.armPreset[side] || this.poseName !== 'stand') w *= this.sitPhases().p3;
     if (w <= 0) return;
     const upper = this.bones[`${side}UpperArm`];
     const lower = this.bones[`${side}LowerArm`];
