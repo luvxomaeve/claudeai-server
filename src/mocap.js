@@ -5,21 +5,16 @@ import * as THREE from 'three';
 // tools/cmu-convert.mjs в повороты нормализованных костей VRM (T-поза = покой).
 
 export const MOCAP = [
+  // Записи ожидания: в «живом ожидании» берётся только сглаженное движение верха тела.
   { id: '137_23', name: 'Изящное ожидание', idle: true },
   { id: '137_28', name: 'Ожидание', idle: true },
-  { id: '140_06', name: 'Стоит, переминается', idle: true },
   { id: '111_28', name: 'Стоит спокойно', idle: true },
+  // Жесты — по кнопке, один раз.
   { id: '111_04', name: 'Реверанс' },
   { id: '111_02', name: 'Поклон' },
   { id: '111_37', name: 'Машет рукой' },
-  { id: '111_32', name: 'Потягивается и зевает' },
-  { id: '111_16', name: 'Ку-ку' },
+  { id: '111_32', name: 'Потягивается' },
   { id: '111_25', name: 'Пожимает плечами' },
-  { id: '137_24', name: 'Изящная походка' },
-  { id: '111_05', name: 'Танец' },
-  { id: '113_04', name: 'Танец 2' },
-  { id: '60_01', name: 'Сальса' },
-  { id: '93_04', name: 'Чарльстон' },
 ];
 
 const cache = new Map();
@@ -73,6 +68,25 @@ const UPPER = new Set(['spine', 'chest', 'upperChest', 'neck', 'head',
   'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand',
   'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand']);
 export function mocapUpperClip(data, vrm) {
-  const bones = Object.fromEntries(Object.entries(data.bones).filter(([b]) => UPPER.has(b)));
+  // Сглаживаем (скользящее среднее ~0.5 с): убираем мелкую дрожь записи,
+  // остаётся только спокойное живое движение.
+  const R = 7;
+  const bones = {};
+  for (const [bone, v] of Object.entries(data.bones)) {
+    if (!UPPER.has(bone)) continue;
+    const n = v.length / 4;
+    const out = new Array(v.length);
+    for (let f = 0; f < n; f++) {
+      let x = 0, y = 0, z = 0, w = 0;
+      for (let k = -R; k <= R; k++) {
+        const g = Math.min(n - 1, Math.max(0, f + k)) * 4;
+        const sgn = v[g + 3] * v[f * 4 + 3] + v[g] * v[f * 4] + v[g + 1] * v[f * 4 + 1] + v[g + 2] * v[f * 4 + 2] < 0 ? -1 : 1;
+        x += v[g] * sgn; y += v[g + 1] * sgn; z += v[g + 2] * sgn; w += v[g + 3] * sgn;
+      }
+      const len = Math.hypot(x, y, z, w) || 1;
+      out[f * 4] = x / len; out[f * 4 + 1] = y / len; out[f * 4 + 2] = z / len; out[f * 4 + 3] = w / len;
+    }
+    bones[bone] = out;
+  }
   return mocapClip({ ...data, bones, hips: [] }, vrm);
 }
