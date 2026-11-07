@@ -189,6 +189,9 @@ export class Character {
     this.headOffset = { x: 0, y: 0 };
     this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
     this.footOffset = { left: null, right: null }; // ступни, сдвинутые пальцем
+    // Физика управления: цели рук/ног догоняются с инерцией (пружина с лёгким перехлёстом).
+    this.dragPhys = { hand: { left: null, right: null }, foot: { left: null, right: null } };
+    this.reachLean = { x: 0, z: 0 }; // наклон корпуса вслед за рукой, которую тянут дальше досягаемости
     this.sit = 0; // 0 — стоит, 1 — сидит на полу (свайп вниз)
     this.sitS = 0; // сглаженное значение
     this.sitDropNow = 0;
@@ -441,6 +444,20 @@ export class Character {
     pose.headY += this.headOffset.y;
     pose.headX += this.headOffset.x;
     for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key];
+    this.updateDragPhysics(dt);
+    // Баланс: подняла ногу — вес на опорную ногу, таз и корпус уравновешивают.
+    const liftOf = (side) => {
+      const f = this.dragPhys.foot[side]?.x;
+      return f ? THREE.MathUtils.clamp(f.y / (0.12 * this.scale), 0, 1) : 0;
+    };
+    const liftL = liftOf('left');
+    const liftR = liftOf('right');
+    pose.hipsX += (liftR - liftL) * 0.06 * this.scale;
+    pose.hipsZ += (liftL - liftR) * 0.07;
+    pose.spineZ += (liftL - liftR) * 0.06;
+    // Тянется за рукой.
+    pose.spineX += this.reachLean.z;
+    pose.spineZ += this.reachLean.x;
     // Наклон вперёд — голова чуть приподнимается, чтобы смотреть на тебя.
     pose.headX -= this.bodyOffset.spineX * 0.4;
 
@@ -863,7 +880,7 @@ export class Character {
       }
 
       // Ступня, сдвинутая пальцем.
-      const footOff = this.footOffset[side];
+      const footOff = this.dragPhys.foot[side]?.x ?? null; // с инерцией
       if (footOff) target.add(footOff);
       target.y = Math.max(target.y, rest.pos.y - 0.05 * S * p2);
 
@@ -1143,8 +1160,10 @@ export class Character {
     const chest = this.chestNode();
     if (!chest) return;
     chest.updateWorldMatrix(true, false);
+    let leanX = 0;
+    let leanZ = 0;
     for (const side of ['left', 'right']) {
-      const local = this.handTargets[side];
+      const local = this.handTargets[side] ? this.dragPhys.hand[side]?.x : null;
       if (!local) {
         this.handsOnKnees(side);
         continue;
@@ -1158,7 +1177,53 @@ export class Character {
       const shoulder = upper.getWorldPosition(new THREE.Vector3());
       const outward = Math.sign(shoulder.x - chest.getWorldPosition(new THREE.Vector3()).x) || 1;
       const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(outward * 0.3, -0.5, -0.3));
+      // Тянут дальше, чем достаёт рука, — корпус наклоняется следом.
+      const rest = this.limbRest.get(upper.uuid);
+      if (rest) {
+        const reach = (rest.l1 + rest.l2) * 0.95;
+        const d = target.clone().sub(shoulder);
+        const over = Math.max(0, d.length() - reach);
+        if (over > 0) {
+          d.normalize();
+          leanZ += d.z * over * 2.5;
+          leanX -= d.x * over * 2.5;
+        }
+      }
       this.twoBoneIK(upper, lower, hand, target, pole);
+    }
+    const k = 0.15;
+    this.reachLean.x += (THREE.MathUtils.clamp(leanX, -0.4, 0.4) - this.reachLean.x) * k;
+    this.reachLean.z += (THREE.MathUtils.clamp(leanZ, -0.3, 0.5) - this.reachLean.z) * k;
+  }
+
+  // Цели, выставленные пальцем, догоняются пружиной (ω≈11, лёгкий перехлёст):
+  // рука и нога ощущаются с массой и инерцией, а не прилипают к пальцу.
+  updateDragPhysics(dt) {
+    const w = 11;
+    const zeta = 0.65;
+    const step = (state, raw) => {
+      if (!raw) return null;
+      if (!state) return { x: raw.clone(), v: new THREE.Vector3() };
+      const steps = Math.max(1, Math.ceil(dt / 0.016));
+      const h = dt / steps;
+      const a = new THREE.Vector3();
+      for (let i = 0; i < steps; i++) {
+        a.copy(raw).sub(state.x).multiplyScalar(w * w).addScaledVector(state.v, -2 * zeta * w);
+        state.v.addScaledVector(a, h);
+        state.x.addScaledVector(state.v, h);
+      }
+      return state;
+    };
+    for (const side of ['left', 'right']) {
+      this.dragPhys.hand[side] = step(this.dragPhys.hand[side], this.handTargets[side]);
+      // Ступня стартует из исходного положения (нулевого смещения), поэтому поднимается с инерцией.
+      const rawFoot = this.footOffset[side];
+      if (rawFoot && !this.dragPhys.foot[side]) this.dragPhys.foot[side] = { x: new THREE.Vector3(), v: new THREE.Vector3() };
+      this.dragPhys.foot[side] = step(this.dragPhys.foot[side], rawFoot);
+    }
+    if (!this.handTargets.left && !this.handTargets.right) {
+      this.reachLean.x *= 0.9;
+      this.reachLean.z *= 0.9;
     }
   }
 
