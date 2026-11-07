@@ -972,3 +972,75 @@ body.posing #poses #pose-list:not([hidden]) {
   z-index: 7;
 }
 body.posing #poses #pose-list button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+
+/* Правая полоса (только во вкладке «Позы»): посадка, поза не ломается. */
+#sit-slider2 {
+  position: fixed;
+  right: max(4px, env(safe-area-inset-right, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  width: 64px;
+  height: min(56vh, 380px);
+  padding: 18px 0;
+  display: flex;
+  justify-content: center;
+  z-index: 5;
+  touch-action: none;
+  cursor: ns-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#sit-slider2 .track {
+  position: relative;
+  width: 4px;
+  height: 100%;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 1px 6px rgba(90, 40, 100, 0.15);
+}
+#sit-slider2 .track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(var(--k, 0) * 100%);
+  border-radius: 4px;
+  background: var(--pink);
+}
+#sit-slider2 i {
+  position: absolute;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+}
+#sit-slider2 .thumb {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--k, 0) * 100%);
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--pink);
+  box-shadow: 0 3px 10px rgba(90, 40, 100, 0.25);
+  transition: transform 0.15s ease;
+}
+#sit-slider2.active .thumb { transform: scale(1.25); }
+#sit-slider2 { flex-direction: column; align-items: center; padding-bottom: 6px; display: none; }
+body.posing #sit-slider2 { display: flex; }
+#sit-slider2 .track { flex: 1; opacity: 0.35; transition: opacity 0.4s ease; }
+#sit-slider2.active .track { opacity: 1; transition-duration: 0.15s; }
+#lie-toggle2 {
+  margin-top: 12px; width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%;
+  background: var(--panel); color: var(--pink); opacity: 0.8; display: grid; place-items: center; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15);
+}
+#lie-toggle2 svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#lie-toggle2.off { color: var(--ink); opacity: 0.4; }
+body.posing #cam-controls { right: calc(max(12px, env(safe-area-inset-right, 0px)) + 56px); }
+body:has(.panel:not(.hidden)) #sit-slider2 { opacity: 0; pointer-events: none; }

@@ -731,7 +731,7 @@ function triggerReaction(zone, hit, e) {
   if (!r) return;
   if (character.sitS > 0.6 && zone !== 'spam') {
     const lying = character.sitS > 1.05;
-    const asleep = lying && character.lieStyle === 'belly';
+    const asleep = lying && character.sleep > 0.5;
     character.react({ expression: asleep ? 'relaxed' : 'happy', motion: lying ? 'lieTurn' : 'squirm', side: hit?.side, strength: 0.8 });
     if (asleep) character.wake(3.5);
     if (hit) character.nudge(raycaster.ray.direction, 0.4);
@@ -955,7 +955,7 @@ $('pose-save-form').addEventListener('submit', (e) => {
 $('pose-save-cancel').addEventListener('click', closePoseSaveForm);
 
 // Светящиеся точки-ручки в режиме позы: показывают, за что можно тянуть.
-const HANDLE_KEYS = ['handL', 'handR', 'head', 'chest', 'belly', 'hips', 'footL', 'footR'];
+const HANDLE_KEYS = ['handL', 'handR', 'head', 'chest', 'belly', 'hips', 'kneeL', 'kneeR', 'footL', 'footR'];
 const handleEls = {};
 for (const k of HANDLE_KEYS) {
   const el = document.createElement('div');
@@ -974,6 +974,8 @@ function handleWorld(key) {
     case 'chest': return zone('body', 'chest');
     case 'belly': return zone('belly');
     case 'hips': return zone('body', 'hips');
+    case 'kneeL': return c.bones.leftLowerLeg?.getWorldPosition(new THREE.Vector3());
+    case 'kneeR': return c.bones.rightLowerLeg?.getWorldPosition(new THREE.Vector3());
     case 'footL': return c.footWorld('left');
     case 'footR': return c.footWorld('right');
   }
@@ -1037,7 +1039,7 @@ function nearestAnchor(e, side) {
 }
 
 let activeHandle = null; // какая точка сейчас в руке — она подсвечивается, остальные притухают
-const HANDLE_LABELS = { handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра', footL: 'Левая нога', footR: 'Правая нога' };
+const HANDLE_LABELS = { kneeL: 'Левое колено', kneeR: 'Правое колено', handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра', footL: 'Левая нога', footR: 'Правая нога' };
 // 👁 в режиме позы: спрятать точки — смотреть на позу чисто, полоса слева всё так же наклоняет.
 let handlesHidden = false;
 try { handlesHidden = localStorage.getItem('waifu-handles-hidden') === '1'; } catch { /* ignore */ }
@@ -1093,7 +1095,7 @@ const sitSlider = $('sit-slider');
 let lieMode = 'side';
 try {
   const v = localStorage.getItem('waifu-lie');
-  if (v === 'side' || v === 'belly' || v === 'off') lieMode = v;
+  if (v === 'side' || v === 'belly' || v === 'back' || v === 'off') lieMode = v;
   else if (localStorage.getItem('waifu-allow-lie') === '0') lieMode = 'off';
 } catch { /* ignore */ }
 let allowLie = lieMode !== 'off';
@@ -1101,13 +1103,16 @@ const sitMax = () => (allowLie ? 1.3 : 1.0);
 const LIE_ICONS = {
   side: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11.5" r="1.8"/>',
   belly: '<path d="M14.5 4.5a6.5 6.5 0 1 0 5 10.5A7.5 7.5 0 0 1 14.5 4.5z"/><path d="M17 4h3l-3 3h3"/>',
+  back: '<path d="M3 17h18"/><circle cx="6" cy="13.5" r="2"/><path d="M8.5 14h6l3-3 2 3"/>',
   off: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><path d="M4 4l16 16"/>',
 };
 function renderLieToggle() {
   allowLie = lieMode !== 'off';
   $('lie-toggle').classList.toggle('off', !allowLie);
   $('lie-toggle').querySelector('svg').innerHTML = LIE_ICONS[lieMode];
-  $('lie-toggle').title = { side: 'Ложится на бок', belly: 'Ложится на живот, спать', off: 'Не ложится' }[lieMode];
+  $('lie-toggle').title = { side: 'Ложится на бок', belly: 'Ложится на живот, спать', back: 'Ложится на спину', off: 'Не ложится' }[lieMode];
+  $('lie-toggle2').querySelector('svg').innerHTML = LIE_ICONS[lieMode];
+  $('lie-toggle2').classList.toggle('off', !allowLie);
   if (character && allowLie) character.setLieStyle(lieMode);
   sitSlider.classList.toggle('no-lie', !allowLie);
   // Точки-отметки: стоит, присед, на коленях, боком, лёжа — по текущему пределу.
@@ -1128,15 +1133,17 @@ function renderPoseSliderBtn() {
   btn.querySelector('svg').innerHTML = POSE_SLIDER_ICONS[poseSlider];
   btn.title = poseSlider === 'bend' ? 'Полоса: наклон' : 'Полоса: сесть / лечь';
 }
-$('lie-toggle').addEventListener('click', (e) => {
+function cycleLie(e) {
   e.stopPropagation();
-  if (poseMode) return;
-  lieMode = { side: 'belly', belly: 'off', off: 'side' }[lieMode];
+  lieMode = { side: 'belly', belly: 'back', back: 'off', off: 'side' }[lieMode];
   try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
   renderLieToggle();
   if (!allowLie && character && character.sit > 1.0) sitBy((1.0 - character.sit) / 0.004);
-  showToast({ side: 'Ляжет на бок', belly: 'Ляжет на живот — спать 😴', off: 'Не ложится: только сидит' }[lieMode]);
-});
+  showToast({ side: 'Ляжет на бок', belly: 'Ляжет на живот — спать 😴', back: 'Ляжет на спину', off: 'Не ложится: только сидит' }[lieMode]);
+}
+$('lie-toggle').addEventListener('click', (e) => { if (!poseMode) cycleLie(e); });
+$('lie-toggle2').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('lie-toggle2').addEventListener('click', cycleLie);
 renderLieToggle();
 // Палец ведёт относительно (без скачка к месту касания): вся высота полосы = от «стоит» до «лежит».
 let sliderDrag = null;
@@ -1158,8 +1165,8 @@ sitSlider.addEventListener('pointermove', (e) => {
   character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
-  if (poseMode && character.sit < 0.05) {
-    // В режиме позы полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
+  if (poseMode) {
+    // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
     const o = character.bodyOffset;
     const bend = THREE.MathUtils.clamp(o.hipsRotX + (dv / sitMax()) * BEND_RANGE, BEND_MIN, BEND_MAX);
@@ -1174,6 +1181,32 @@ sitSlider.addEventListener('pointermove', (e) => {
 for (const ev of ['pointerup', 'pointercancel']) {
   sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
 }
+// Правая полоса во вкладке «Позы»: присесть → на колени → сесть → лечь (поза остаётся).
+const sitSlider2 = $('sit-slider2');
+let slider2Drag = null;
+sitSlider2.addEventListener('pointerdown', (e) => {
+  if (!character || e.target.closest('#lie-toggle2')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  sitSlider2.setPointerCapture(e.pointerId);
+  slider2Drag = { y: e.clientY, t: performance.now() };
+  sitSlider2.classList.add('active');
+});
+sitSlider2.addEventListener('pointermove', (e) => {
+  if (!slider2Drag || !character) return;
+  const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || 200;
+  const dv = ((e.clientY - slider2Drag.y) / h) * sitMax();
+  const now = performance.now();
+  const rate = Math.abs(dv) / Math.max(0.008, (now - slider2Drag.t) / 1000);
+  character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
+  slider2Drag.y = e.clientY;
+  slider2Drag.t = now;
+  sitBy(dv / 0.004);
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  sitSlider2.addEventListener(ev, () => { slider2Drag = null; sitSlider2.classList.remove('active'); });
+}
+
 // Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
 const BEND_MIN = -0.45; // прогиб назад — побольше
 const BEND_MAX = 1.35; // наклон вперёд поглубже
@@ -1181,7 +1214,8 @@ const BEND_RANGE = BEND_MAX - BEND_MIN;
 function updateSitSlider() {
   if (!character) return;
   // В режиме позы стоя — наклон; если она сидит/лежит — полоса поднимает/опускает её.
-  const bendMode = poseMode && character.sit < 0.05;
+  const bendMode = poseMode;
+  sitSlider2.style.setProperty('--k', THREE.MathUtils.clamp(character.sitS / sitMax(), 0, 1).toFixed(3));
   sitSlider.classList.toggle('pose-mode', poseMode);
   sitSlider.classList.toggle('bend', bendMode);
   const k = bendMode
@@ -1203,7 +1237,9 @@ function sitBy(dy) {
     if (before > 0.1 && character.sit <= 0.1) { sitLineAt = now; say(pick(['Ладно, встаю!', 'Опа!', 'Всё, отдохнула~'])); }
     if (before < 1.25 && character.sit >= 1.25) {
       sitLineAt = now;
-      say(character.lieStyle === 'belly' ? pick(['Посплю немножко… 😴', 'Спокойной ночи~', 'Ммм… zzz']) : pick(['Полежу немножко~', 'Как уютно…', 'Ммм, хорошо~']));
+      say(character.lieStyle === 'belly' ? pick(['Посплю немножко… 😴', 'Спокойной ночи~', 'Ммм… zzz'])
+        : character.lieStyle === 'back' ? pick(['Смотри, облака~', 'Как хорошо полежать…', 'Ляжешь рядом?'])
+        : pick(['Полежу немножко~', 'Как уютно…', 'Ммм, хорошо~']));
     }
   }
 }
@@ -1213,6 +1249,7 @@ const HANDLE_HIT = {
   handL: { zone: 'hand', side: 'left' }, handR: { zone: 'hand', side: 'right' },
   head: { zone: 'face' }, chest: { zone: 'body', bone: 'chest' }, belly: { zone: 'belly' },
   hips: { zone: 'body', bone: 'hips' }, footL: { zone: 'legs', bone: 'leftFoot' }, footR: { zone: 'legs', bone: 'rightFoot' },
+  kneeL: { zone: 'knee', side: 'left' }, kneeR: { zone: 'knee', side: 'right' },
 };
 function nearestHandle(e) {
   let best = null;
@@ -1232,6 +1269,7 @@ function handleKeyFor(hit) {
   if (hit.zone === 'hand' || hit.zone === 'arm') return hit.side === 'left' ? 'handL' : 'handR';
   if (hit.zone === 'headpat' || hit.zone === 'face') return 'head';
   if (hit.zone === 'belly') return 'belly';
+  if (hit.zone === 'knee') return hit.side === 'left' ? 'kneeL' : 'kneeR';
   if (hit.zone === 'legs') return /left/i.test(hit.bone) ? 'footL' : 'footR';
   if (hit.zone === 'body') return hit.bone === 'chest' ? 'chest' : 'hips';
   return null;
@@ -1261,6 +1299,14 @@ function poseDragStart(e) {
     camera.getWorldDirection(normal);
     poseDrag = { kind: 'hand', side: hit.side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, handPos) };
     poseDragMove(e);
+  } else if (hit.zone === 'knee') {
+    // Колено: ведёшь колено — стопа идёт следом под ним (голень свисает), бедро сгибается само.
+    const side = hit.side;
+    const kneePos = character.bones[`${side}LowerLeg`].getWorldPosition(new THREE.Vector3());
+    const footPos = character.footWorld(side);
+    const normal = new THREE.Vector3();
+    camera.getWorldDirection(normal);
+    poseDrag = { kind: 'knee', side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, kneePos), shin: footPos.clone().sub(kneePos) };
   } else if (hit.zone === 'headpat' || hit.zone === 'face') {
     poseDrag = { kind: 'head', lastX: e.clientX, lastY: e.clientY };
   } else if (hit.zone === 'legs') {
@@ -1281,11 +1327,15 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
-  if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot') {
+  if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
-      if (poseDrag.kind === 'hand') {
+      if (poseDrag.kind === 'knee') {
+        // Голень свисает почти вертикально под коленом (чуть назад).
+        const len = poseDrag.shin.length();
+        character.setFootTarget(poseDrag.side, dragPoint.clone().add(new THREE.Vector3(0, -len * 0.97, -0.05 * character.scale)));
+      } else if (poseDrag.kind === 'hand') {
         const near = nearestAnchor(e, poseDrag.side);
         if (near && snapAnchor?.a !== near.a) showLabel(`${HANDLE_LABELS[activeHandle] ?? 'Рука'} ${near.a.label}`);
         snapAnchor = near;
