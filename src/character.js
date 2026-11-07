@@ -27,10 +27,10 @@ const ZONE_DEFS = [
 const BASE_POSE = {
   spineX: 0, spineY: 0, spineZ: 0,
   headX: 0, headY: 0, headZ: 0,
-  lUpperZ: -1.25, rUpperZ: 1.25,
-  lUpperX: 0.08, rUpperX: 0.08,
+  lUpperZ: -1.15, rUpperZ: 1.15,
+  lUpperX: 0.05, rUpperX: 0.05,
   lUpperTwist: 0, rUpperTwist: 0,
-  lLowerY: -0.4, rLowerY: 0.4,
+  lLowerY: -0.45, rLowerY: 0.45,
   lLowerZ: 0, rLowerZ: 0,
   hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0,
   lLegX: 0, rLegX: 0, lLegZ: 0, rLegZ: 0, lKneeX: 0, rKneeX: 0,
@@ -72,6 +72,8 @@ export const POSES = {
     wave: 'left',
   },
 };
+
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 // Огибающая движения: быстро вошли, подержали, плавно вышли.
@@ -149,6 +151,8 @@ export class Character {
     this.headHeight = headPos.y;
     // Масштаб зон относительно «стандартной» модели с головой на 1.4 м.
     this.scale = this.headHeight / 1.4;
+    this.armOpen = this.measureArmClearance();
+    this.stabilizeSprings();
 
     this.zones = ZONE_DEFS
       .map((d) => ({ ...d, node: vrm.humanoid.getRawBoneNode(d.bone), center: new THREE.Vector3() }))
@@ -172,7 +176,7 @@ export class Character {
     const durations = {
       tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6,
       lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4,
-      squirm: 1.3, shyLegs: 1.8,
+      squirm: 1.3, shyLegs: 1.8, sigh: 2.6, clasp: 4.5, handOnHip: 4.5, nails: 3.4,
     };
     this.motions = this.motions.filter((m) => m.name !== name);
     this.motions.push({ name, side, t: 0, dur: durations[name] ?? 1.5 });
@@ -272,6 +276,11 @@ export class Character {
     // В танце руки свободны, поэтому берём стойку «Стоит».
     const pose = this.dancing ? { ...BASE_POSE } : this.currentBasePose();
     const poseDef = POSES[this.poseName];
+    // Руки чуть шире для фигуристых моделей, чтобы не уходили в тело.
+    if (this.dancing || this.poseName === 'stand') {
+      pose.lUpperZ += this.armOpen;
+      pose.rUpperZ -= this.armOpen;
+    }
     if (poseDef.wave === 'left') pose.lLowerZ += Math.sin(t * 9) * 0.25;
 
     // Дыхание: грудь и плечи чуть поднимаются.
@@ -406,6 +415,36 @@ export class Character {
           pose.hipsY += Math.abs(Math.sin(m.t * Math.PI * 2 / 0.7)) * 0.02 * e * this.scale;
           pose.headX += Math.sin(m.t * 9) * 0.03 * e;
           break;
+        case 'sigh': {
+          // Глубокий вдох-выдох: плечи вверх, потом расслабленно вниз.
+          const p = m.t / m.dur;
+          const inhale = Math.sin(Math.min(p * 1.6, 1) * Math.PI);
+          pose.lShoulderZ += 0.14 * inhale * e;
+          pose.rShoulderZ -= 0.14 * inhale * e;
+          pose.spineX -= 0.05 * inhale * e;
+          pose.headX -= 0.08 * inhale * e;
+          break;
+        }
+        case 'clasp':
+          // Сцепила руки перед собой, покачивается.
+          arm('left', { upZ: -0.85, upX: 0.15, tw: 0.75, loY: -2.1, loZ: 0 });
+          arm('right', { upZ: -0.85, upX: 0.15, tw: 0.75, loY: -2.1, loZ: 0 });
+          pose.spineY += Math.sin(m.t * 1.6) * 0.08 * e;
+          pose.headZ += 0.08 * e * s;
+          break;
+        case 'handOnHip':
+          // Одна рука на бедре, вес на этой ноге.
+          arm(m.side, { upZ: -0.75, upX: 0.2, tw: 0.95, loY: -1.5, loZ: 0 });
+          pose.hipsZ += 0.05 * e * s;
+          pose.spineZ -= 0.06 * e * s;
+          pose.headZ -= 0.06 * e * s;
+          break;
+        case 'nails':
+          // Разглядывает ногти.
+          arm(m.side, { upZ: -1.1, upX: -0.5, tw: 0, loY: -2.3, loZ: 0.2 });
+          pose.headX += 0.18 * e;
+          pose.headY += 0.15 * e * s;
+          break;
         case 'turnAway':
           // Обиделась: отвернулась, руки скрещены.
           pose.spineY += 0.45 * e * s;
@@ -421,17 +460,16 @@ export class Character {
     // Мелкие движения в покое, если сейчас ничего не происходит.
     this.idleTimer = (this.idleTimer ?? 4) - dt;
     if (this.idleTimer <= 0) {
-      this.idleTimer = 5 + Math.random() * 7;
+      this.idleTimer = 3.5 + Math.random() * 5;
       if (this.motions.length === 0 && this.patAmount < 0.1) {
         const r = Math.random();
         const busyArms = this.poseName !== 'stand';
         if (this.dancing) { /* в танце и так весело */ }
-        else if (r < 0.25) this.playMotion('shift');
-        else if (r < 0.45) this.playMotion('lookAround');
-        else if (r < 0.6) this.playMotion('bounce');
-        else if (r < 0.75 || busyArms) this.playMotion('tiltHead');
-        else if (r < 0.9) this.playMotion('touchHair');
-        else this.playMotion('stretch');
+        else if (busyArms) this.playMotion(pick(['shift', 'lookAround', 'tiltHead', 'sigh', 'bounce']));
+        else this.playMotion(pick([
+          'shift', 'lookAround', 'tiltHead', 'sigh', 'bounce',
+          'touchHair', 'clasp', 'handOnHip', 'nails', 'stretch',
+        ]));
       }
     }
 
@@ -515,6 +553,61 @@ export class Character {
     blendArm(pose, 'right', { upZ: -1.05, upX: -0.3 - 0.4 * swing, tw: 0.4, loY: -1.5 - 0.2 * bounce, loZ: 0 }, 1);
   }
 
+  // На сколько отвести руки от тела, чтобы они не проходили сквозь бёдра и талию.
+  // Меряем ширину модели (в исходной T-позе) на высотах от бёдер до груди и
+  // считаем угол, при котором прямая рука от плеча проходит снаружи.
+  measureArmClearance() {
+    const raw = (n) => this.vrm.humanoid.getRawBoneNode(n);
+    const shoulder = raw('leftUpperArm');
+    const hips = raw('hips');
+    const chest = raw('upperChest') ?? raw('chest') ?? raw('spine');
+    if (!shoulder || !hips || !chest) return 0;
+    const sp = shoulder.getWorldPosition(new THREE.Vector3());
+    const hipY = hips.getWorldPosition(new THREE.Vector3()).y;
+    const chestY = chest.getWorldPosition(new THREE.Vector3()).y;
+    const yMin = hipY - 0.15 * this.scale;
+    const yMax = chestY - 0.05 * this.scale;
+    const bins = new Map(); // высота (2 см) → максимальная полуширина
+    const v = new THREE.Vector3();
+    this.vrm.scene.traverse((o) => {
+      if (!o.isSkinnedMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      if (mats.some((m) => /hair|face|eye/i.test(m.name))) return;
+      const pos = o.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i += 2) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+        if (v.y < yMin || v.y > yMax) continue;
+        const key = Math.round(v.y / 0.02);
+        bins.set(key, Math.max(bins.get(key) ?? 0, Math.abs(v.x)));
+      }
+    });
+    const margin = 0.035 * this.scale;
+    const shoulderX = Math.abs(sp.x);
+    let need = 0;
+    for (const [key, width] of bins) {
+      const drop = sp.y - key * 0.02;
+      if (drop <= 0.05) continue;
+      need = Math.max(need, Math.atan((width + margin - shoulderX) / drop));
+    }
+    const base = Math.PI / 2 - 1.15; // угол руки от вертикали в стойке по умолчанию
+    return THREE.MathUtils.clamp(need - base, 0, 0.35);
+  }
+
+  // Физика груди в моделях VRoid часто почти без демпфирования — из-за этого
+  // её выгибает при движениях. Делаем движение мягким и устойчивым.
+  stabilizeSprings() {
+    const joints = this.vrm.springBoneManager?.joints;
+    if (!joints) return;
+    for (const j of joints) {
+      if (!/bust|breast/i.test(j.bone.name)) continue;
+      j.settings.dragForce = Math.max(j.settings.dragForce, 0.5);
+      j.settings.stiffness = Math.max(j.settings.stiffness, 1.4);
+      j.settings.gravityPower = 0;
+      j.userData ??= {};
+      j.userData.noPoke = true;
+    }
+  }
+
   // Касание толкает одежду и волосы с физикой (spring bones) рядом с точкой касания.
   // Толкаем только горизонтально — в сторону от камеры и вбок, не вверх.
   poke(point, dir, strength = 1) {
@@ -526,6 +619,7 @@ export class Character {
     const radius = 0.22 * this.scale;
     const pos = new THREE.Vector3();
     for (const j of joints) {
+      if (j.userData?.noPoke) continue;
       j.bone.getWorldPosition(pos);
       const d = pos.distanceTo(point);
       if (d > radius) continue;
