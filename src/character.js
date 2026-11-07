@@ -710,14 +710,16 @@ export class Character {
       this.gazeYawS = (this.gazeYawS ?? 0) + (yaw - (this.gazeYawS ?? 0)) * k;
       this.gazePitchS = (this.gazePitchS ?? 0) + (pitch - (this.gazePitchS ?? 0)) * k;
       const w = this.gazeW * (1 - 0.6 * THREE.MathUtils.smoothstep(this.sitS, 0.9, 1.3));
-      const total = THREE.MathUtils.clamp(this.gazeYawS, -3.0, 3.0) * w;
+      // Сзади оборачивается умеренно (до ~125°), без выворачивания.
+      const total = THREE.MathUtils.clamp(this.gazeYawS, -2.2, 2.2) * w;
       // В наклоне корпус не скручиваем — поворачивается только голова.
       const bendK = THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
-      const head = THREE.MathUtils.clamp(total, -1.65, 1.65) * (1 - 0.5 * bendK);
-      const body = THREE.MathUtils.clamp(total - head, -1.5, 1.5) * (1 - bendK);
+      const head = THREE.MathUtils.clamp(total, -1.3, 1.3);
+      const body = THREE.MathUtils.clamp(total - head, -0.9, 0.9) * (1 - bendK);
       pose.headY += head;
       pose.spineY += body;
-      pose.headX += THREE.MathUtils.clamp(-this.gazePitchS, -0.6, 0.7) * w;
+      // Наклонена — поднимает голову к тебе сильнее (угол считается относительно корпуса).
+      pose.headX += THREE.MathUtils.clamp(-this.gazePitchS, -0.6 - 0.5 * bendK, 0.7) * w;
     }
     pose.headX += -this.headLook.y * 0.2;
 
@@ -979,9 +981,9 @@ export class Character {
     if (!t || !b.hips || !b.neck || !b.leftUpperLeg || !b.rightUpperLeg) return;
     const P = (n) => n.getWorldPosition(new THREE.Vector3());
     const left = P(b.leftUpperLeg).sub(P(b.rightUpperLeg)).normalize();
-    // Стоя (даже в наклоне) «верх» — мировая вертикаль; лёжа — вдоль тела.
-    const bodyUp = P(b.neck).sub(P(b.hips)).normalize();
-    const up = this.sitS > 0.9 ? bodyUp : new THREE.Vector3(0, 1, 0);
+    // Углы относительно корпуса (в наклоне «вверх» — вдоль спины): так голова знает,
+    // насколько её поднять, чтобы смотреть на тебя с любого ракурса.
+    const up = P(b.neck).sub(P(b.hips)).normalize();
     const fwd = new THREE.Vector3().crossVectors(left, up).normalize();
     const dir = t.clone().sub(P(b.head ?? b.neck)).normalize();
     let yaw = Math.atan2(dir.dot(left), dir.dot(fwd));

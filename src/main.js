@@ -887,11 +887,28 @@ for (const [name, params] of Object.entries(savedPoses)) {
 // за таз/живот — сдвигает бёдра (вниз — приседает, колени сгибаются сами).
 
 let poseMode = false;
+let poseTabState = null; // поза во вкладке «Позы» (возвращается при входе)
 let poseDrag = null; // { kind: 'hand' | 'head' | 'spine' | 'hips', side, plane, lastX, lastY }
 
 function setPoseMode(on) {
   if (on && cameraMode) setCameraMode(false);
   if (on && currentMocap) stopMocap(); // позу выставляем на «живом» скелете, без записи
+  // Вкладки разные: дома — обычная живая она (без выставленной позы), во вкладке «Позы» —
+  // твоя поза. Поза запоминается при выходе и возвращается, когда снова откроешь «Позы».
+  if (character && on !== poseMode) {
+    if (!on) {
+      poseTabState = { name: character.poseName, touch: character.exportTouchPose() };
+      character.importTouchPose(null);
+      character.setPose('stand');
+      setActivePoseButton('stand');
+    } else if (poseTabState) {
+      const sit = character.sit;
+      character.setPose(poseTabState.name);
+      character.importTouchPose(poseTabState.touch);
+      character.sit = sit;
+      setActivePoseButton(poseTabState.name);
+    }
+  }
   poseMode = on;
   poseDrag = null;
   renderPoseSliderBtn();
