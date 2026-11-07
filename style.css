@@ -204,7 +204,34 @@ html, body {
   color: var(--ink);
   cursor: pointer;
 }
-.editor-actions .primary { background: var(--pink); color: #fff; }
+.editor-actions .primary,
+#editor-save-row .primary { background: var(--pink); color: #fff; }
+#editor-save-row {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px 0;
+}
+#editor-save-row[hidden] { display: none; }
+#editor-save-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(120, 60, 120, 0.25);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--ink);
+}
+#editor-save-row button {
+  border: none;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
 
 @media (max-width: 600px) {
   #editor {

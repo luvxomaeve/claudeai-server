@@ -7,7 +7,7 @@ import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
 // положи файл рядом, например models/waifu.vrm, и укажи путь здесь,
 // или просто перетащи .vrm в окно / нажми 📂.
-const DEFAULT_MODEL =
+const DEFAULT_MODEL = window.WAIFU_MODEL_URL ??
   'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v3.1.0/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm';
 
 const $ = (id) => document.getElementById(id);
@@ -408,7 +408,12 @@ $('editor-reset').addEventListener('click', () => {
   renderSliders();
 });
 $('editor-save').addEventListener('click', () => {
-  const name = (prompt('Как назовём позу?') || '').trim().slice(0, 20);
+  $('editor-save-row').hidden = false;
+  $('pose-name').focus();
+});
+$('editor-save-row').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('pose-name').value.trim().slice(0, 20);
   if (!name) return;
   const key = `saved:${name}`;
   const isNew = !POSES[key];
@@ -418,10 +423,22 @@ $('editor-save').addEventListener('click', () => {
   if (isNew) addPoseButton(key, POSES[key]);
   character.setPose(key);
   setActivePoseButton(key);
+  $('pose-name').value = '';
+  $('editor-save-row').hidden = true;
   say('Запомнила эту позу~');
 });
+
+// Удаление в два нажатия: первое спрашивает, второе удаляет.
+let clearArmed = false;
 $('editor-clear').addEventListener('click', () => {
-  if (!confirm('Удалить все сохранённые позы?')) return;
+  if (!clearArmed) {
+    clearArmed = true;
+    $('editor-clear').textContent = 'Точно удалить?';
+    setTimeout(() => { clearArmed = false; $('editor-clear').textContent = 'Удалить сохранённые'; }, 3000);
+    return;
+  }
+  clearArmed = false;
+  $('editor-clear').textContent = 'Удалить сохранённые';
   for (const name of Object.keys(savedPoses)) {
     delete POSES[`saved:${name}`];
     document.querySelector(`#poses button[data-pose="saved:${CSS.escape(name)}"]`)?.remove();
