@@ -151,7 +151,8 @@ export class Character {
     this.headHeight = headPos.y;
     // Масштаб зон относительно «стандартной» модели с головой на 1.4 м.
     this.scale = this.headHeight / 1.4;
-    this.armOpen = this.measureArmClearance();
+    this.measureBody();
+    this.armFix = { left: 0, right: 0 };
     this.stabilizeSprings();
 
     this.zones = ZONE_DEFS
@@ -276,11 +277,7 @@ export class Character {
     // В танце руки свободны, поэтому берём стойку «Стоит».
     const pose = this.dancing ? { ...BASE_POSE } : this.currentBasePose();
     const poseDef = POSES[this.poseName];
-    // Руки чуть шире для фигуристых моделей, чтобы не уходили в тело.
-    if (this.dancing || this.poseName === 'stand') {
-      pose.lUpperZ += this.armOpen;
-      pose.rUpperZ -= this.armOpen;
-    }
+
     if (poseDef.wave === 'left') pose.lLowerZ += Math.sin(t * 9) * 0.25;
 
     // Дыхание: грудь и плечи чуть поднимаются.
@@ -479,10 +476,8 @@ export class Character {
     this.rot(spineBone, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
     this.rot(b.neck, pose.headX * 0.4, pose.headY * 0.4, pose.headZ * 0.4);
     this.rot(b.head, pose.headX * 0.6, pose.headY * 0.6, pose.headZ * 0.6);
-    this.rot(b.leftUpperArm, pose.lUpperX, 0, pose.lUpperZ);
-    this.rot(b.rightUpperArm, pose.rUpperX, 0, pose.rUpperZ);
-    b.leftUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.lUpperTwist * this.flip));
-    b.rightUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.rUpperTwist * this.flip));
+    this.applyUpperArm('left', pose, 0);
+    this.applyUpperArm('right', pose, 0);
     this.rot(b.leftLowerArm, 0, pose.lLowerY, pose.lLowerZ);
     this.rot(b.rightLowerArm, 0, pose.rLowerY, pose.rLowerZ);
     this.rot(b.leftShoulder, 0, 0, pose.lShoulderZ);
@@ -501,6 +496,8 @@ export class Character {
       if (f.thumb) this.rot(f.node, 0, -s * f.curl * curl, 0);
       else this.rot(f.node, 0, 0, s * f.curl * curl);
     }
+    // Не даём кистям уйти внутрь тела: при необходимости отводим руки наружу.
+    this.solveArms(pose, dt);
     if (b.hips) {
       b.hips.position.y += pose.hipsY;
       b.hips.position.x += pose.hipsX * this.flip;
@@ -553,55 +550,99 @@ export class Character {
     blendArm(pose, 'right', { upZ: -1.05, upX: -0.3 - 0.4 * swing, tw: 0.4, loY: -1.5 - 0.2 * bounce, loZ: 0 }, 1);
   }
 
-  // На сколько отвести руки от тела, чтобы они не проходили сквозь бёдра и талию.
-  // Меряем ширину модели (в исходной T-позе) на высотах от бёдер до груди и
-  // считаем угол, при котором прямая рука от плеча проходит снаружи.
-  measureArmClearance() {
+  // Меряем «объём» тела в исходной позе: для каждой высоты (шаг 2 см) — полуширину
+  // и переднюю/заднюю границы туловища вместе с одеждой. По ним потом проверяем,
+  // не попала ли кисть внутрь тела.
+  measureBody() {
     const raw = (n) => this.vrm.humanoid.getRawBoneNode(n);
-    const shoulder = raw('leftUpperArm');
     const hips = raw('hips');
-    const chest = raw('upperChest') ?? raw('chest') ?? raw('spine');
-    if (!shoulder || !hips || !chest) return 0;
-    const sp = shoulder.getWorldPosition(new THREE.Vector3());
-    const hipY = hips.getWorldPosition(new THREE.Vector3()).y;
-    const chestY = chest.getWorldPosition(new THREE.Vector3()).y;
-    const yMin = hipY - 0.15 * this.scale;
-    const yMax = chestY - 0.05 * this.scale;
-    const bins = new Map(); // высота (2 см) → максимальная полуширина
+    const shoulder = raw('leftUpperArm');
+    const knee = raw('leftLowerLeg');
+    this.bodyBins = new Map();
+    if (!hips || !shoulder) return;
+    this.restHips = hips.getWorldPosition(new THREE.Vector3());
+    const shoulderY = shoulder.getWorldPosition(new THREE.Vector3()).y;
+    const shoulderX = Math.abs(shoulder.getWorldPosition(new THREE.Vector3()).x);
+    const yMin = knee ? knee.getWorldPosition(new THREE.Vector3()).y : this.restHips.y - 0.4;
+    const yMax = shoulderY - 0.04 * this.scale;
     const v = new THREE.Vector3();
     this.vrm.scene.traverse((o) => {
       if (!o.isSkinnedMesh) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       if (mats.some((m) => /hair|face|eye/i.test(m.name))) return;
       const pos = o.geometry.attributes.position;
-      for (let i = 0; i < pos.count; i += 2) {
+      for (let i = 0; i < pos.count; i++) {
         v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
-        if (v.y < yMin || v.y > yMax) continue;
+        if (v.y < yMin || v.y > yMax || Math.abs(v.x) > shoulderX) continue; // руки в T-позе не считаем
         const key = Math.round(v.y / 0.02);
-        bins.set(key, Math.max(bins.get(key) ?? 0, Math.abs(v.x)));
+        const bin = this.bodyBins.get(key) ?? { hw: 0, zMin: Infinity, zMax: -Infinity };
+        bin.hw = Math.max(bin.hw, Math.abs(v.x));
+        bin.zMin = Math.min(bin.zMin, v.z);
+        bin.zMax = Math.max(bin.zMax, v.z);
+        this.bodyBins.set(key, bin);
       }
     });
-    const margin = 0.035 * this.scale;
-    const shoulderX = Math.abs(sp.x);
-    let need = 0;
-    for (const [key, width] of bins) {
-      const drop = sp.y - key * 0.02;
-      if (drop <= 0.05) continue;
-      need = Math.max(need, Math.atan((width + margin - shoulderX) / drop));
+  }
+
+  // true, если точка (с запасом на толщину кисти) внутри туловища.
+  insideBody(p, hipsShift) {
+    const bin = this.bodyBins.get(Math.round((p.y - hipsShift.y) / 0.02));
+    if (!bin) return false;
+    const m = 0.045 * this.scale;
+    const x = (p.x - hipsShift.x) / (bin.hw + m);
+    const zc = (bin.zMin + bin.zMax) / 2;
+    const hd = (bin.zMax - bin.zMin) / 2 + m;
+    const z = (p.z - hipsShift.z - zc) / hd;
+    return x * x + z * z < 1;
+  }
+
+  applyUpperArm(side, pose, extra) {
+    const L = side === 'left';
+    const bone = L ? this.bones.leftUpperArm : this.bones.rightUpperArm;
+    if (!bone) return;
+    const z = L ? pose.lUpperZ + extra : pose.rUpperZ - extra;
+    this.rot(bone, L ? pose.lUpperX : pose.rUpperX, 0, z);
+    bone.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, (L ? pose.lUpperTwist : pose.rUpperTwist) * this.flip));
+  }
+
+  solveArms(pose, dt) {
+    if (!this.bodyBins?.size) return;
+    const hipsNode = this.vrm.humanoid.getRawBoneNode('hips');
+    const shift = hipsNode.getWorldPosition(new THREE.Vector3()).sub(this.restHips);
+    const hand = new THREE.Vector3();
+    const elbow = new THREE.Vector3();
+    const mid = new THREE.Vector3();
+    for (const side of ['left', 'right']) {
+      const handNode = this.bones[`${side}Hand`];
+      const lower = this.bones[`${side}LowerArm`];
+      if (!handNode || !lower) continue;
+      // Ищем минимальный отвод руки, при котором кисть и предплечье снаружи.
+      let need = 0;
+      for (let i = 0; i <= 10; i++) {
+        this.applyUpperArm(side, pose, need);
+        this.bones[`${side}UpperArm`].updateWorldMatrix(true, true);
+        handNode.getWorldPosition(hand);
+        lower.getWorldPosition(elbow);
+        mid.lerpVectors(elbow, hand, 0.5);
+        if (!this.insideBody(hand, shift) && !this.insideBody(mid, shift)) break;
+        need += 0.07;
+      }
+      // Плавно, чтобы рука не дёргалась.
+      const k = 1 - Math.exp(-dt * (need > this.armFix[side] ? 14 : 4));
+      this.armFix[side] += (need - this.armFix[side]) * k;
+      this.applyUpperArm(side, pose, this.armFix[side]);
     }
-    const base = Math.PI / 2 - 1.15; // угол руки от вертикали в стойке по умолчанию
-    return THREE.MathUtils.clamp(need - base, 0, 0.35);
   }
 
   // Физика груди в моделях VRoid часто почти без демпфирования — из-за этого
-  // её выгибает при движениях. Делаем движение мягким и устойчивым.
+  // её выгибает при движениях. Оставляем мягкое естественное движение без выворотов.
   stabilizeSprings() {
     const joints = this.vrm.springBoneManager?.joints;
     if (!joints) return;
     for (const j of joints) {
       if (!/bust|breast/i.test(j.bone.name)) continue;
-      j.settings.dragForce = Math.max(j.settings.dragForce, 0.5);
-      j.settings.stiffness = Math.max(j.settings.stiffness, 1.4);
+      j.settings.dragForce = Math.max(j.settings.dragForce, 0.25);
+      j.settings.stiffness = Math.max(j.settings.stiffness, 1.0);
       j.settings.gravityPower = 0;
       j.userData ??= {};
       j.userData.noPoke = true;
