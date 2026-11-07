@@ -194,6 +194,11 @@ export class Character {
     this.reachLean = { x: 0, z: 0 }; // наклон корпуса вслед за рукой, которую тянут дальше досягаемости
     this.sit = 0; // 0 — стоит, 1 — сидит на полу (свайп вниз)
     this.sitS = 0; // сглаженное значение
+    this.sitV = 0; // скорость посадки (разгон и торможение плавные)
+    this.offK = 1; // сколько от наклона/таза пальцем действует (в посадке — плавно уходит)
+    // Верх тела из записи живого человека (живое ожидание): ноги при этом свои,
+    // стоят на полу, поэтому она не ходит и не скользит.
+    this.upper = null;
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     this.sitSideNow = 0;
@@ -262,7 +267,7 @@ export class Character {
   // ---------- Mocap (.vrma) ----------
 
   // Плавный переход между анимациями (кроссфейд), без рывков.
-  playClip(clip, { loop = true, fade = 0.6 } = {}) {
+  playClip(clip, { loop = true, fade = 0.9 } = {}) {
     if (!this.mixer) this.mixer = new THREE.AnimationMixer(this.vrm.scene);
     const action = this.mixer.clipAction(clip);
     action.reset();
@@ -276,6 +281,7 @@ export class Character {
 
   // Сколько осталось до конца текущей анимации (сек).
   clipTimeLeft() {
+    if (this.upper && !this.upper.stopping) return this.upper.cur.dur - this.upper.cur.t;
     if (!this.action) return Infinity;
     return this.action.getClip().duration - this.action.time;
   }
@@ -295,11 +301,73 @@ export class Character {
     const bf = this.blendFrom;
     if (!bf) return;
     bf.t += dt;
-    const k = Math.min(1, bf.t / 0.5);
+    const k = Math.min(1, bf.t / 0.9);
     const e = k * k * (3 - 2 * k);
     for (const [node, q] of bf.q) node.quaternion.slerpQuaternions(q, node.quaternion.clone(), e);
     if (bf.hips && this.bones.hips) this.bones.hips.position.lerpVectors(bf.hips, this.bones.hips.position.clone(), e);
     if (k >= 1) this.blendFrom = null;
+  }
+
+  // ---------- Живое ожидание: верх тела из записи ----------
+
+  // Запись играет только на позвоночнике, плечах, руках и голове; ноги, таз и
+  // посадка — свои (стоят на полу). Смена записей — длинный кроссфейд 1.6 с.
+  playUpperIdle(clip) {
+    const samplers = [];
+    for (const track of clip.tracks) {
+      const [name, prop] = track.name.split('.');
+      if (prop !== 'quaternion') continue;
+      const node = this.vrm.scene.getObjectByName(name);
+      if (!node) continue;
+      const head = node === this.bones.head || node === this.bones.neck;
+      const interp = track.createInterpolant();
+      // Средняя поза записи: из неё берём только движение (отклонение от средней),
+      // а осанку и положение рук оставляем её собственными — у актёра другие
+      // пропорции, иначе руки торчат в стороны.
+      const mean = new THREE.Quaternion(0, 0, 0, 0);
+      const q = new THREE.Quaternion();
+      for (let t = 0; t < clip.duration; t += 0.2) {
+        q.fromArray(interp.evaluate(t));
+        const sgn = mean.x * q.x + mean.y * q.y + mean.z * q.z + mean.w * q.w < 0 ? -1 : 1;
+        mean.set(mean.x + q.x * sgn, mean.y + q.y * sgn, mean.z + q.z * sgn, mean.w + q.w * sgn);
+      }
+      mean.normalize();
+      samplers.push({ node, interp, meanInv: mean.invert(), k: head ? 0.6 : 1 });
+    }
+    const cur = { samplers, t: 0, dur: clip.duration };
+    const prev = this.upper?.cur ?? null;
+    this.upper = { cur, prev, f: prev ? 0 : 1, w: this.upper?.w ?? 0, stopping: false };
+  }
+
+  stopUpperIdle() {
+    if (this.upper) this.upper.stopping = true;
+  }
+
+  applyUpperLayer(dt) {
+    const L = this.upper;
+    if (!L) return;
+    // Реакции, гладят, танец, сидит — запись уступает место (плавно).
+    const busy = this.motions.length > 0 || this.patAmount > 0.1 || this.dancing || this.loop || this.poseName !== 'stand';
+    let want = L.stopping ? 0 : busy ? 0.15 : 1;
+    want *= 1 - THREE.MathUtils.smoothstep(this.sitS, 0.02, 0.3);
+    L.w += (want - L.w) * (1 - Math.exp(-dt * 2.5));
+    if (L.stopping && L.w < 0.01) { this.upper = null; return; }
+    L.f = Math.min(1, L.f + dt / 1.6);
+    const fe = L.f * L.f * (3 - 2 * L.f);
+    for (const c of [L.cur, L.prev]) if (c) c.t = (c.t + dt) % c.dur;
+    if (L.f >= 1) L.prev = null;
+    const qa = this.tmpQa ??= new THREE.Quaternion();
+    const qb = this.tmpQb ??= new THREE.Quaternion();
+    const prevBy = L.prev ? new Map(L.prev.samplers.map((s) => [s.node, s])) : null;
+    const one = new THREE.Quaternion();
+    for (const s of L.cur.samplers) {
+      qb.copy(s.meanInv).multiply(qa.fromArray(s.interp.evaluate(L.cur.t)));
+      const ps = prevBy?.get(s.node);
+      if (ps) qb.copy(ps.meanInv.clone().multiply(qa.fromArray(ps.interp.evaluate(L.prev.t))).slerp(qb.clone(), fe));
+      // Движение из записи — поверх её собственной позы, с весом слоя.
+      qb.copy(one.clone().slerp(qb, L.w * s.k));
+      s.node.quaternion.multiply(qb);
+    }
   }
 
   talk(seconds) {
@@ -416,8 +484,21 @@ export class Character {
     // колени поднимаются — она садится, обняв колени. Плавно, с пружиной.
     // Одно общее плавное значение посадки с ограниченной скоростью: таз, колени
     // и ступни всегда согласованы, даже если свайпнуть очень резко.
-    const sitStep = (this.sit - this.sitS) * (1 - Math.exp(-dt * 4));
-    this.sitS += THREE.MathUtils.clamp(sitStep, -0.85 * dt, 0.85 * dt);
+    // Разгон и торможение плавные (ограничено ускорение), ложится медленнее,
+    // чем садится, — без «падения», как бы резко ни свайпнули.
+    {
+      const c = THREE.MathUtils.clamp;
+      const vmax = this.sitS > 0.95 || this.sit > 1.0 ? 0.32 : 0.5;
+      const want = c((this.sit - this.sitS) * 2.6, -vmax, vmax);
+      this.sitV += c(want - this.sitV, -1.4 * dt, 1.4 * dt);
+      const before = this.sit - this.sitS;
+      this.sitS += this.sitV * dt;
+      if (Math.sign(this.sit - this.sitS) !== Math.sign(before) && before !== 0) { this.sitS = this.sit; this.sitV = 0; }
+      this.sitS = c(this.sitS, 0, 1.3);
+    }
+    // Наклон и сдвиг таза пальцем — для стоя; в посадке плавно уходят,
+    // иначе таз перекручивает и ногу выбрасывает.
+    this.offK = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.03, 0.3);
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     this.sitSideNow = 0;
@@ -469,12 +550,12 @@ export class Character {
     // Голова, корпус и таз, заданные пальцем в режиме позы.
     pose.headY += this.headOffset.y;
     pose.headX += this.headOffset.x;
-    for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key];
+    for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key] * (key.startsWith('hips') ? this.offK : 1);
     this.updateDragPhysics(dt);
     // Баланс: подняла ногу — вес на опорную ногу, таз и корпус уравновешивают.
     const liftOf = (side) => {
       const f = this.dragPhys.foot[side]?.x;
-      return f ? THREE.MathUtils.clamp(f.y / (0.12 * this.scale), 0, 1) : 0;
+      return f ? THREE.MathUtils.clamp(f.y / (0.12 * this.scale), 0, 1) * this.offK : 0;
     };
     const liftL = liftOf('left');
     const liftR = liftOf('right');
@@ -629,10 +710,10 @@ export class Character {
       if (this.motions.length === 0 && this.patAmount < 0.1) {
         const r = Math.random();
         const busyArms = this.poseName !== 'stand';
-        if (this.dancing || this.loop || this.sitS > 0.2) { /* она и так занята */ }
-        else if (busyArms) this.playMotion(pick(['shift', 'lookAround', 'tiltHead', 'sigh', 'bounce']));
+        if (this.dancing || this.loop || this.sitS > 0.2 || (this.upper && !this.upper.stopping)) { /* она и так занята */ }
+        else if (busyArms) this.playMotion(pick(['shift', 'lookAround', 'tiltHead', 'sigh']));
         else this.playMotion(pick([
-          'shift', 'lookAround', 'tiltHead', 'sigh', 'bounce',
+          'shift', 'lookAround', 'tiltHead', 'sigh',
           'touchHair', 'clasp', 'handOnHip', 'nails', 'stretch',
         ]));
       }
@@ -677,9 +758,11 @@ export class Character {
       b.hips.position.z -= this.sitBackNow * this.flip;
       b.hips.position.x -= this.sitSideNow * this.flip;
       // Наклон в тазобедренных (поза пальцем): таз уходит назад для баланса.
-      b.hips.position.z -= Math.max(0, this.bodyOffset.hipsRotX) * 0.13 * this.scale * this.flip;
+      b.hips.position.z -= Math.max(0, this.bodyOffset.hipsRotX) * this.offK * 0.13 * this.scale * this.flip;
       this.rot(b.hips, pose.hipsRotX, pose.hipsRotY, pose.hipsZ);
     }
+    // Верх тела из записи живого человека (если включено живое ожидание).
+    this.applyUpperLayer(dt);
     // Ступни стоят на полу: колени сгибаются сами под движение бёдер.
     this.plantFeet(pose);
     // Не даём кистям уйти внутрь тела: при необходимости отводим руки наружу.
@@ -917,7 +1000,8 @@ export class Character {
       }
 
       // Ступня, сдвинутая пальцем.
-      const footOff = this.dragPhys.foot[side]?.x ?? null; // с инерцией
+      const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
+      const footOff = footRaw ? footRaw.clone().multiplyScalar(this.offK) : null;
       if (footOff) target.add(footOff);
       target.y = Math.max(target.y, rest.pos.y - 0.05 * S * p2);
 
@@ -1274,8 +1358,8 @@ export class Character {
   // Цели, выставленные пальцем, догоняются пружиной (ω≈11, лёгкий перехлёст):
   // рука и нога ощущаются с массой и инерцией, а не прилипают к пальцу.
   updateDragPhysics(dt) {
-    const w = 11;
-    const zeta = 0.65;
+    const w = 9;
+    const zeta = 0.95; // почти без перехлёста: тяжесть есть, а «швыряния» нет
     const step = (state, raw) => {
       if (!raw) return null;
       if (!state) return { x: raw.clone(), v: new THREE.Vector3() };

@@ -5,7 +5,7 @@ import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationC
 import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { parseMixamo, mixamoClip } from './mixamo.js';
-import { MOCAP, loadMocap, mocapClip } from './mocap.js';
+import { MOCAP, loadMocap, mocapClip, mocapUpperClip } from './mocap.js';
 import { Character, POSES, LOOPS } from './character.js';
 import { REACTIONS, STROKES, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
@@ -1200,6 +1200,16 @@ async function playMocap(id) {
     if (currentAnim) { currentAnim = null; }
     character.dancing = false;
     character.loop = null;
+    if (entry.idle) {
+      // Живое ожидание: только верх тела из записи, ноги свои — не ходит и не скользит.
+      if (character.mixer) character.stopClip();
+      character.playUpperIdle(mocapUpperClip(data, character.vrm));
+      currentMocap = id;
+      clearTimeout(mocapOnceTimer);
+      renderAnims();
+      return;
+    }
+    character.stopUpperIdle();
     character.sit = 0;
     const loop = entry.idle || /Танец|Сальса|Чарльстон|походка/.test(entry.name);
     character.playClip(mocapClip(data, character.vrm), { loop });
@@ -1225,6 +1235,7 @@ function stopMocap() {
   currentMocap = null;
   liveIdle = false;
   character?.stopClip();
+  character?.stopUpperIdle();
   renderAnims();
 }
 
@@ -1235,8 +1246,8 @@ function nextIdle() {
 
 // Живое ожидание: сама сменяет записи ожидания перед их концом.
 function updateLiveIdle() {
-  if (!liveIdle || !character?.mixer || !currentMocap) return;
-  if (MOCAP.find((m) => m.id === currentMocap)?.idle && character.clipTimeLeft() < 0.8) playMocap(nextIdle());
+  if (!liveIdle || !character || !currentMocap) return;
+  if (MOCAP.find((m) => m.id === currentMocap)?.idle && character.clipTimeLeft() < 1.8) playMocap(nextIdle());
 }
 
 function renderMocap() {
@@ -1325,6 +1336,7 @@ async function playAnim(a) {
     clearTimeout(mocapOnceTimer);
     currentMocap = null;
     liveIdle = false;
+    character.stopUpperIdle();
     character.dancing = false;
     character.loop = null;
     character.playClip(clipFor(a, character.vrm));

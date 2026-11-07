@@ -67,3 +67,12 @@ export function mocapClip(data, vrm) {
   }
   return new THREE.AnimationClip(data.name, data.frames / data.fps, tracks);
 }
+
+// Только верх тела (для живого ожидания): позвоночник, плечи, руки, шея, голова.
+const UPPER = new Set(['spine', 'chest', 'upperChest', 'neck', 'head',
+  'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand',
+  'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand']);
+export function mocapUpperClip(data, vrm) {
+  const bones = Object.fromEntries(Object.entries(data.bones).filter(([b]) => UPPER.has(b)));
+  return mocapClip({ ...data, bones, hips: [] }, vrm);
+}
