@@ -99,6 +99,7 @@ export class Character {
     this.poseT = 1;
     this.twistQ = new THREE.Quaternion();
     this.dancing = false;
+    this.flip = vrm.meta?.metaVersion === '0' ? -1 : 1;
     this.mixer = null; // для mocap-анимаций (.vrma)
     this.axisX = new THREE.Vector3(1, 0, 0);
 
@@ -386,23 +387,29 @@ export class Character {
 
     // Применяем позу к нормализованным костям.
     const spineBone = b.chest ?? b.spine;
-    b.spine?.rotation.set(pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
-    spineBone?.rotation.set(pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
-    b.neck?.rotation.set(pose.headX * 0.4, pose.headY * 0.4, pose.headZ * 0.4);
-    b.head?.rotation.set(pose.headX * 0.6, pose.headY * 0.6, pose.headZ * 0.6);
-    b.leftUpperArm?.rotation.set(pose.lUpperX, 0, pose.lUpperZ);
-    b.rightUpperArm?.rotation.set(pose.rUpperX, 0, pose.rUpperZ);
-    b.leftUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.lUpperTwist));
-    b.rightUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.rUpperTwist));
-    b.leftLowerArm?.rotation.set(0, pose.lLowerY, pose.lLowerZ);
-    b.rightLowerArm?.rotation.set(0, pose.rLowerY, pose.rLowerZ);
+    this.rot(b.spine, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
+    this.rot(spineBone, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
+    this.rot(b.neck, pose.headX * 0.4, pose.headY * 0.4, pose.headZ * 0.4);
+    this.rot(b.head, pose.headX * 0.6, pose.headY * 0.6, pose.headZ * 0.6);
+    this.rot(b.leftUpperArm, pose.lUpperX, 0, pose.lUpperZ);
+    this.rot(b.rightUpperArm, pose.rUpperX, 0, pose.rUpperZ);
+    b.leftUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.lUpperTwist * this.flip));
+    b.rightUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.rUpperTwist * this.flip));
+    this.rot(b.leftLowerArm, 0, pose.lLowerY, pose.lLowerZ);
+    this.rot(b.rightLowerArm, 0, pose.rLowerY, pose.rLowerZ);
     if (b.hips) {
       b.hips.position.y += pose.hipsY;
-      b.hips.position.x += pose.hipsX;
-      b.hips.rotation.set(0, pose.hipsRotY, pose.hipsZ);
+      b.hips.position.x += pose.hipsX * this.flip;
+      this.rot(b.hips, 0, pose.hipsRotY, pose.hipsZ);
     }
 
     this.finishFrame(dt);
+  }
+
+  // Поворот нормализованной кости. У VRM 0.x модель развёрнута на 180°,
+  // поэтому оси X и Z у неё зеркальные — компенсируем знаком.
+  rot(bone, x, y, z) {
+    bone?.rotation.set(x * this.flip, y, z * this.flip);
   }
 
   finishFrame(dt) {

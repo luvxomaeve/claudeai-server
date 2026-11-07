@@ -200,7 +200,9 @@ async function loadModel(source) {
     }
     if (currentAnim) character.playClip(createVRMAnimationClip(currentAnim.animation, vrm));
     stockings = new Stockings(vrm);
+    loadLookFor(currentOutfit);
     applyLook();
+    if (!$('wardrobe').classList.contains('hidden')) renderWardrobe();
     buildHitboxes();
     frameCamera();
     $('loading').classList.add('done');
@@ -698,8 +700,7 @@ const CLOTH_COLORS = [
   { id: 'sky', name: 'Небо', color: 0x8fc4ee },
   { id: 'white', name: 'Белый', color: 0xf4f1f6 },
 ];
-let clothColor = 'original';
-try { clothColor = localStorage.getItem('waifu-cloth-color') || 'original'; } catch { /* ignore */ }
+let clothColor = 'original'; // хранится в образе модели (см. loadLookFor)
 
 // Перекрашивает материалы одежды (в моделях VRoid в их имени есть «CLOTH»).
 function applyClothColor() {
@@ -735,8 +736,17 @@ const HAIR_COLORS = [
   { id: 'red', name: 'Алые', color: 0x8c1c30 },
 ];
 const look = { hair: 'original', stockings: 'off', dark: false };
-try { Object.assign(look, JSON.parse(localStorage.getItem('waifu-look') || '{}')); } catch { /* ignore */ }
-const saveLook = () => { try { localStorage.setItem('waifu-look', JSON.stringify(look)); } catch { /* ignore */ } };
+// Образ запоминается отдельно для каждой модели: у одной чёрные волосы и чулки,
+// у другой — свои цвета.
+function loadLookFor(id) {
+  Object.assign(look, { hair: 'original', stockings: 'off', dark: false, cloth: 'original' });
+  try { Object.assign(look, JSON.parse(localStorage.getItem(`waifu-look:${id}`) || '{}')); } catch { /* ignore */ }
+  clothColor = look.cloth;
+}
+const saveLook = () => {
+  look.cloth = clothColor;
+  try { localStorage.setItem(`waifu-look:${currentOutfit}`, JSON.stringify(look)); } catch { /* ignore */ }
+};
 
 function tintMaterials(test, colorHex, shadeK) {
   character.vrm.scene.traverse((o) => {
@@ -872,7 +882,7 @@ function renderWardrobe() {
     b.innerHTML = `<span></span>${c.name}`;
     b.addEventListener('click', () => {
       clothColor = c.id;
-      try { localStorage.setItem('waifu-cloth-color', clothColor); } catch { /* ignore */ }
+      saveLook();
       applyClothColor();
       renderWardrobe();
       if (character) {
@@ -926,7 +936,7 @@ $('dark-toggle').addEventListener('click', () => {
 
 $('goth-preset').addEventListener('click', () => {
   clothColor = 'black';
-  try { localStorage.setItem('waifu-cloth-color', clothColor); } catch { /* ignore */ }
+  saveLook();
   Object.assign(look, { hair: 'black', stockings: 'black', dark: true });
   saveLook();
   applyLook();
