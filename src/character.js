@@ -1966,7 +1966,8 @@ export class Character {
       }
     }
     const eyesBusy = Math.max(this.exprCurrent.happy, this.exprCurrent.relaxed);
-    em.setValue('blink', Math.max(blink * (1 - eyesBusy), this.sleep)); // спит — глаза закрыты
+    this.eyesShutS = (this.eyesShutS ?? 0) + ((this.eyesShut ?? 0) - (this.eyesShutS ?? 0)) * (1 - Math.exp(-dt * 5));
+    em.setValue('blink', Math.max(blink * (1 - eyesBusy), this.sleep, this.eyesShutS)); // спит / закрыла глаза
 
     // Рот шевелится, пока она «говорит».
     this.talkTime -= dt;

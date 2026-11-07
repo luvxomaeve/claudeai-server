@@ -133,6 +133,14 @@ let camZoom = 1; // < 1 — ближе, > 1 — дальше
 const ZOOM_MIN = 0.35;
 const ZOOM_MAX = 3;
 
+// Середина тела лёжа (сглаженная, чтобы камера не дрожала от дыхания).
+const lieMid = new THREE.Vector3(0, 0.3, 0);
+function updateLieMid(dt) {
+  if (!character?.bones.hips || !character.bones.head) return;
+  const m = character.bones.hips.getWorldPosition(new THREE.Vector3())
+    .add(character.bones.head.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+  lieMid.lerp(m, 1 - Math.exp(-dt * 3));
+}
 function orbitTarget(out) {
   const d = camBase.dist * camZoom;
   // При приближении смещаем точку взгляда к лицу.
@@ -140,9 +148,26 @@ function orbitTarget(out) {
   let lookY = THREE.MathUtils.lerp(headY, camBase.cy, THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1));
   // Когда она садится, камера опускается вместе с ней.
   if (character) lookY -= (character.sitDropNow ?? 0) * 0.6;
-  out.look.set(0, lookY, 0);
-  const cp = Math.cos(camPitch);
-  out.pos.set(Math.sin(camYaw) * d * cp, lookY + Math.sin(camPitch) * d, Math.cos(camYaw) * d * cp);
+  // Лёжа тело вытянуто по полу: камера смотрит на середину тела, отъезжает и
+  // чуть приподнимается — видна вся, а не одна голова у края экрана.
+  let cx = 0;
+  let cz = 0;
+  let dd = d;
+  let pitch = camPitch;
+  if (character?.bones.hips && character.bones.head) {
+    const lie = THREE.MathUtils.smoothstep(character.sitS, 0.8, 1.25);
+    if (lie > 0) {
+      const mid = lieMid;
+      cx = mid.x * lie;
+      cz = mid.z * lie;
+      lookY = THREE.MathUtils.lerp(lookY, mid.y + 0.05 * camBase.S, lie);
+      dd = d * (1 + 0.35 * lie);
+      pitch = camPitch + 0.3 * lie;
+    }
+  }
+  out.look.set(cx, lookY, cz);
+  const cp = Math.cos(pitch);
+  out.pos.set(cx + Math.sin(camYaw) * dd * cp, lookY + Math.sin(pitch) * dd, cz + Math.cos(camYaw) * dd * cp);
   return out;
 }
 
@@ -173,7 +198,9 @@ function zoomBy(factor) {
 let camSitSeen = 0;
 function updateCamera(dt) {
   // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
-  if (character && camTween >= 1 && Math.abs(character.sitS - camSitSeen) > 0.002) {
+  updateLieMid(dt);
+  const lying = character && character.sitS > 0.8;
+  if (character && camTween >= 1 && (lying || Math.abs(character.sitS - camSitSeen) > 0.002)) {
     camSitSeen = character.sitS;
     applyOrbit();
   }
@@ -1818,6 +1845,27 @@ async function restoreLibrary() {
 const clock = new THREE.Clock();
 const anchor = new THREE.Vector3();
 const lookPoint = new THREE.Vector3();
+// Взгляд (кнопка у ⌂): 'follow' — следит за пальцем, 'me' — смотрит на тебя, 'closed' — глаза закрыты.
+let gazeMode = 'follow';
+try { const g = localStorage.getItem('waifu-gaze'); if (g === 'me' || g === 'closed') gazeMode = g; } catch { /* ignore */ }
+const GAZE_ICONS = {
+  follow: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  me: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="0.9" fill="currentColor"/><path d="M12 1.5v2M12 20.5v2"/>',
+  closed: '<path d="M3 11c2.5 3.5 5.5 5 9 5s6.5-1.5 9-5"/><path d="M6 14.5l-1.5 2M12 16v2.5M18 14.5l1.5 2"/>',
+};
+function renderGaze() {
+  const b = $('btn-gaze');
+  b.querySelector('svg').innerHTML = GAZE_ICONS[gazeMode];
+  b.classList.toggle('active', gazeMode !== 'follow');
+  b.title = { follow: 'Взгляд: за пальцем', me: 'Взгляд: на тебя', closed: 'Глаза закрыты' }[gazeMode];
+}
+$('btn-gaze').addEventListener('click', () => {
+  gazeMode = { follow: 'me', me: 'closed', closed: 'follow' }[gazeMode];
+  try { localStorage.setItem('waifu-gaze', gazeMode); } catch { /* ignore */ }
+  renderGaze();
+  showToast({ follow: '👀 Смотрит за пальцем', me: '💗 Смотрит на тебя', closed: '😌 Глаза закрыты' }[gazeMode]);
+});
+renderGaze();
 const lookNdc = new THREE.Vector2();
 let idleTime = 0;
 
@@ -1843,10 +1891,14 @@ function tick() {
       saccade.set((Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.04, 0);
     }
     lookPoint.add(saccade);
+    // Взгляд «на меня»: глаза в камеру, голова к тебе.
+    if (gazeMode === 'me') lookPoint.copy(camera.position).add(saccade);
     character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * 18));
     // Головой за пальцем следит только когда мы перед ней.
     const facing = Math.max(0, Math.cos(camYaw));
-    lookNdc.set(pointer.x * facing, pointer.y * facing);
+    if (gazeMode === 'follow') lookNdc.set(pointer.x * facing, pointer.y * facing);
+    else lookNdc.set(0, 0);
+    character.eyesShut = gazeMode === 'closed' ? 1 : 0;
     character.headLook.lerp(lookNdc, 1 - Math.exp(-dt * 4));
 
     const patTarget = petting && petting.ticks > 0 ? 1 : 0;
