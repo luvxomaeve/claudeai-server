@@ -924,3 +924,9 @@ body.posing #poses #btn-home { display: grid; }
 #poses #pose-list { margin-bottom: 52px; }
 #poses #pose-bar { margin-bottom: 52px; }
 body.posing #poses #pose-list { margin-bottom: 0; }
+
+/* Кнопка поз — компактнее, не наезжает на круглые кнопки. */
+#poses #poses-toggle { max-width: min(40vw, 170px); padding: 9px 12px 9px 10px; font-size: 13px; gap: 6px; }
+#poses #poses-toggle > span:not(.chev) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#poses #poses-toggle svg { width: 17px; height: 17px; flex: none; }
+#poses #poses-toggle .chev { display: none; }

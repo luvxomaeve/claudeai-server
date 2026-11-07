@@ -682,6 +682,24 @@ export class Character {
 
     // Голова чуть поворачивается за пальцем/курсором.
     pose.headY += this.headLook.x * 0.35;
+    // «Смотрит на тебя»: голова, шея и корпус поворачиваются к камере — как человек,
+    // который оборачивается через плечо (до ~170°: шея ~95°, корпус ~80°).
+    {
+      const k = 1 - Math.exp(-dt * 3);
+      const on = this.gazeTarget ? 1 : 0;
+      this.gazeW = (this.gazeW ?? 0) + (on - (this.gazeW ?? 0)) * k;
+      const yaw = (this.gazeYaw ?? 0);
+      const pitch = (this.gazePitch ?? 0);
+      this.gazeYawS = (this.gazeYawS ?? 0) + (yaw - (this.gazeYawS ?? 0)) * k;
+      this.gazePitchS = (this.gazePitchS ?? 0) + (pitch - (this.gazePitchS ?? 0)) * k;
+      const w = this.gazeW * (1 - 0.6 * THREE.MathUtils.smoothstep(this.sitS, 0.9, 1.3));
+      const total = THREE.MathUtils.clamp(this.gazeYawS, -3.0, 3.0) * w;
+      const head = THREE.MathUtils.clamp(total, -1.65, 1.65);
+      const body = THREE.MathUtils.clamp(total - head, -1.5, 1.5);
+      pose.headY += head;
+      pose.spineY += body;
+      pose.headX += THREE.MathUtils.clamp(-this.gazePitchS, -0.6, 0.7) * w;
+    }
     pose.headX += -this.headLook.y * 0.2;
 
     // Пока гладят — голова клонится и прижимается к руке.
@@ -926,6 +944,24 @@ export class Character {
     this.vrm.update(dt);
     this.vrm.scene.updateMatrixWorld(true);
     this.updateZones();
+    this.measureGaze();
+  }
+
+  // Куда повернуться, чтобы смотреть в камеру: угол в осях таза (с прошлого кадра).
+  measureGaze() {
+    const t = this.gazeTarget;
+    const b = this.bones;
+    if (!t || !b.hips || !b.neck || !b.leftUpperLeg || !b.rightUpperLeg) return;
+    const P = (n) => n.getWorldPosition(new THREE.Vector3());
+    const left = P(b.leftUpperLeg).sub(P(b.rightUpperLeg)).normalize();
+    const up = P(b.neck).sub(P(b.hips)).normalize();
+    const fwd = new THREE.Vector3().crossVectors(left, up).normalize();
+    const dir = t.clone().sub(P(b.head ?? b.neck)).normalize();
+    let yaw = Math.atan2(dir.dot(left), dir.dot(fwd));
+    // Камера ровно сзади — не перескакиваем с плеча на плечо.
+    if (Math.abs(yaw) > 2.7 && this.gazeYaw && Math.sign(yaw) !== Math.sign(this.gazeYaw)) yaw = Math.sign(this.gazeYaw) * 2.7;
+    this.gazeYaw = yaw;
+    this.gazePitch = Math.asin(THREE.MathUtils.clamp(dir.dot(up), -1, 1));
   }
 
   // Танец: пружинит коленями в такт (~120 BPM), переносит вес с ноги на ногу,

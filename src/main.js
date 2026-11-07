@@ -1914,6 +1914,7 @@ function tick() {
     if (gazeMode === 'follow') lookNdc.set(pointer.x * facing, pointer.y * facing);
     else lookNdc.set(0, 0);
     character.eyesShut = gazeMode === 'closed' ? 1 : 0;
+    character.gazeTarget = gazeMode === 'me' ? camera.position : null;
     character.headLook.lerp(lookNdc, 1 - Math.exp(-dt * 4));
 
     const patTarget = petting && petting.ticks > 0 ? 1 : 0;
