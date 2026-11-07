@@ -649,6 +649,44 @@ export class Character {
       t: new THREE.Vector3(), d: new THREE.Vector3(), p: new THREE.Vector3(),
       e: new THREE.Vector3(), q: new THREE.Quaternion(), q2: new THREE.Quaternion(),
     };
+    // Исходная поза конечностей: от неё каждый кадр строим ориентацию заново,
+    // поэтому кости не накапливают скручивание вокруг своей оси.
+    this.limbRest = new Map();
+    const limb = (u, l, e, pole0) => {
+      const upper = b[u];
+      const lower = b[l];
+      const end = b[e];
+      if (!upper || !lower || !end) return;
+      const a0 = upper.getWorldPosition(new THREE.Vector3());
+      const b0 = lower.getWorldPosition(new THREE.Vector3());
+      const c0 = end.getWorldPosition(new THREE.Vector3());
+      const dirU0 = b0.clone().sub(a0).normalize();
+      const dirL0 = c0.clone().sub(b0).normalize();
+      this.limbRest.set(upper.uuid, {
+        l1: a0.distanceTo(b0),
+        l2: b0.distanceTo(c0),
+        restQU: upper.getWorldQuaternion(new THREE.Quaternion()),
+        restQL: lower.getWorldQuaternion(new THREE.Quaternion()),
+        frameU0: this.limbFrame(dirU0, pole0),
+        frameL0: this.limbFrame(dirL0, pole0),
+      });
+    };
+    limb('leftUpperLeg', 'leftLowerLeg', 'leftFoot', new THREE.Vector3(0, 0, 1));
+    limb('rightUpperLeg', 'rightLowerLeg', 'rightFoot', new THREE.Vector3(0, 0, 1));
+    limb('leftUpperArm', 'leftLowerArm', 'leftHand', new THREE.Vector3(0, -0.5, -0.3));
+    limb('rightUpperArm', 'rightLowerArm', 'rightHand', new THREE.Vector3(0, -0.5, -0.3));
+  }
+
+  // Ортонормированная «рамка» кости: ось вдоль кости и направление сгиба.
+  // Возвращает кватернион этой рамки в мире.
+  limbFrame(dir, poleDir) {
+    const d = dir.clone().normalize();
+    const p = poleDir.clone().addScaledVector(d, -poleDir.dot(d));
+    if (p.lengthSq() < 1e-8) p.set(0, 0, 1).addScaledVector(d, -d.z);
+    p.normalize();
+    const side = new THREE.Vector3().crossVectors(d, p).normalize();
+    const m = new THREE.Matrix4().makeBasis(side, d, p);
+    return new THREE.Quaternion().setFromRotationMatrix(m);
   }
 
   // Поворачивает кость так, чтобы направление from (в мире) стало to.
@@ -669,16 +707,18 @@ export class Character {
   }
 
   // Двухзвенный IK: upper → lower → end дотягивается до target, сгиб в сторону pole.
+  // Ориентация каждой кости строится заново от исходной позы по плоскости сгиба —
+  // колено и локоть гнутся только как шарнир, без скручивания. Возвращает поворот
+  // голени/предплечья относительно исходной позы (нужен для стопы).
   twoBoneIK(upper, lower, end, target, pole) {
-    const { a, b, c, t, d, p, e } = this.ikTmp;
+    const rest = this.limbRest?.get(upper.uuid);
+    const { a, t, p, e, d } = this.ikTmp;
     upper.updateWorldMatrix(true, true);
     upper.getWorldPosition(a);
-    lower.getWorldPosition(b);
-    end.getWorldPosition(c);
-    const l1 = a.distanceTo(b);
-    const l2 = b.distanceTo(c);
+    const l1 = rest ? rest.l1 : a.distanceTo(lower.getWorldPosition(new THREE.Vector3()));
+    const l2 = rest ? rest.l2 : lower.getWorldPosition(new THREE.Vector3()).distanceTo(end.getWorldPosition(new THREE.Vector3()));
     t.copy(target).sub(a);
-    // Не даём цели оказаться ближе минимального вылета — иначе ногу/руку выкручивает.
+    // Не даём цели оказаться ближе минимального вылета — иначе конечность выкручивает.
     const dist = THREE.MathUtils.clamp(t.length(), Math.abs(l1 - l2) + 0.02 * (l1 + l2), (l1 + l2) * 0.999);
     t.normalize();
     const cosA = THREE.MathUtils.clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1);
@@ -687,12 +727,16 @@ export class Character {
     p.addScaledVector(t, -p.dot(t));
     if (p.lengthSq() < 1e-8) p.set(0, 0, 1);
     p.normalize();
-    e.copy(a).addScaledVector(t, cosA * l1).addScaledVector(p, sinA * l1); // новый локоть/колено
-    this.rotateBoneTo(upper, b.clone().sub(a), e.clone().sub(a));
-    lower.getWorldPosition(b);
-    end.getWorldPosition(c);
-    d.copy(a).addScaledVector(t, dist);
-    this.rotateBoneTo(lower, c.clone().sub(b), d.clone().sub(b));
+    e.copy(a).addScaledVector(t, cosA * l1).addScaledVector(p, sinA * l1); // локоть/колено
+    d.copy(a).addScaledVector(t, dist); // кисть/ступня
+    const dirU = e.clone().sub(a).normalize();
+    const dirL = d.clone().sub(e).normalize();
+    if (!rest) return null;
+    const QU = this.limbFrame(dirU, p).multiply(rest.frameU0.clone().invert());
+    const QL = this.limbFrame(dirL, p).multiply(rest.frameL0.clone().invert());
+    this.setWorldQuat(upper, QU.clone().multiply(rest.restQU));
+    this.setWorldQuat(lower, QL.clone().multiply(rest.restQL));
+    return QL;
   }
 
   plantFeet(pose) {
@@ -748,7 +792,7 @@ export class Character {
         knee.y - 0.5 * p2 + kneeUp * 0.5,
         knee.z + 0.6 + kneeUp,
       );
-      this.twoBoneIK(upper, lower, foot, target, pole);
+      const QL = this.twoBoneIK(upper, lower, foot, target, pole);
 
       // Ориентация стопы.
       // Стоя — ровно на полу; приподнятая пятка, присед на носках и поднятая
@@ -757,13 +801,10 @@ export class Character {
       const point = footOff ? Math.min(footOff.y / (0.3 * S), 1) * 0.7 : 0;
       const pitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + p1 * 0.55 * (1 - p2));
       let q = pitch.multiply(rest.quat.clone());
-      if (p2 > 0) {
-        const anklePos = foot.getWorldPosition(new THREE.Vector3());
-        const kneePos = lower.getWorldPosition(new THREE.Vector3());
-        const shin = anklePos.sub(kneePos);
-        shin.y = Math.min(shin.y, -0.02); // чуть вниз — ось поворота однозначна
-        const align = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), shin.normalize());
-        const kneelQ = align.multiply(rest.quat.clone());
+      if (p2 > 0 && QL) {
+        // На коленях стопа жёстко продолжает голень и вытянута носком назад.
+        const plantar = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 1.45);
+        const kneelQ = QL.clone().multiply(plantar).multiply(rest.quat.clone());
         q = q.slerp(kneelQ, p2);
       }
       this.setWorldQuat(foot, q);
