@@ -329,6 +329,7 @@ export class Character {
     // Mocap-анимация управляет телом сама; мимика и физика — как обычно.
     if (this.mixer) {
       this.mixer.update(dt);
+      this.floorPush(true);
       this.finishFrame(dt);
       return;
     }
@@ -642,6 +643,12 @@ export class Character {
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
     this.applyJointLimits();
+    // Пол для всего тела: колени, таз, руки, голова не проходят сквозь пол.
+    if (this.floorPush()) {
+      this.plantFeet(pose);
+      this.applyHandTargets();
+      this.applyJointLimits();
+    }
 
     this.finishFrame(dt);
   }
@@ -894,6 +901,50 @@ export class Character {
       this.setWorldQuat(foot, q);
     }
     if (leanN) this.shinLean += (leanSum / leanN - this.shinLean) * 0.3;
+  }
+
+  // ---------- Пол ----------
+  // Находим самую «утонувшую» часть тела и приподнимаем таз на эту глубину.
+  // withFeet — учитывать и ступни (в записях движений, где IK ступней нет).
+  floorPush(withFeet = false) {
+    const b = this.bones;
+    if (!b.hips) return false;
+    b.hips.updateWorldMatrix(true, true);
+    const S = this.scale;
+    const parts = [
+      ['leftLowerLeg', 0.05], ['rightLowerLeg', 0.05], ['hips', 0.1],
+      ['leftHand', 0.02], ['rightHand', 0.02], ['head', 0.1], ['chest', 0.1],
+      ['leftLowerArm', 0.03], ['rightLowerArm', 0.03],
+    ];
+    if (withFeet) parts.push(['leftFoot', 0.05], ['rightFoot', 0.05]);
+    const v = new THREE.Vector3();
+    let pen = 0;
+    for (const [name, r] of parts) {
+      const node = b[name] ?? this.vrm.humanoid.getNormalizedBoneNode(name);
+      if (!node) continue;
+      node.getWorldPosition(v);
+      pen = Math.max(pen, r * S - v.y);
+    }
+    if (pen <= 0.001) return false;
+    b.hips.position.y += pen;
+    b.hips.updateWorldMatrix(false, true);
+    return true;
+  }
+
+  // ---------- Толчок от касания ----------
+  // Касание чуть толкает тело: корпус откачивается от пальца и пружинисто
+  // возвращается, голова и бёдра догоняют с запаздыванием (через пружины позы).
+  nudge(dir, strength = 1) {
+    if (!this.spv) return;
+    const k = 2.2 * strength;
+    const add = (key, val) => { if (key in this.spv) this.spv[key] += val; };
+    // dir — направление касания в мире (от камеры в тело). В осях VRM 1.0:
+    // толчок спереди (dir.z < 0) — наклон назад; сбоку — наклон в сторону толчка.
+    add('spineX', dir.z * k);
+    add('spineZ', -dir.x * k);
+    add('headX', dir.z * k * 0.6);
+    add('headZ', -dir.x * k * 0.8);
+    add('hipsZ', dir.x * k * 0.3);
   }
 
   // ---------- Анатомические ограничения суставов ----------

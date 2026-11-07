@@ -551,6 +551,8 @@ function triggerReaction(zone, hit, e) {
   const expression = r.expressionByTier ? r.expressionByTier[t] : r.expression;
   const delta = r.affectionByTier ? r.affectionByTier[t] : r.affection;
   character.react({ expression, motion: r.motion, side: hit?.side });
+  // Тело чуть откачивается от касания и пружинисто возвращается.
+  if (hit) character.nudge(raycaster.ray.direction, zone === 'spam' ? 1.2 : 0.8);
   changeAffection(delta);
   if (delta > 0) floatHeart(e.clientX, e.clientY);
   const now = performance.now();
