@@ -155,6 +155,9 @@ function applyOrbit() {
   camera.lookAt(cameraLookAt);
 }
 
+// Для отладки и записи кадров.
+window.__setYaw = (y, pitch) => { camYaw = y; if (pitch != null) camPitch = pitch; applyOrbit(); };
+
 function rotateBy(delta, dPitch = 0) {
   camYaw = (camYaw + delta) % (Math.PI * 2);
   camPitch = THREE.MathUtils.clamp(camPitch + dPitch, -0.35, 1.35);
@@ -840,8 +843,29 @@ function updateHandles() {
 
 // Левый край экрана (обычный режим и камера): почти невидимая полоса —
 // веди вниз — присед → на колени → боком → лежит, вверх — встаёт.
-const SIT_MAX = 1.3;
 const sitSlider = $('sit-slider');
+// Лечь можно отключить (кнопка под полосой): тогда ниже «сидит боком» она не опускается.
+let allowLie = true;
+try { allowLie = localStorage.getItem('waifu-allow-lie') !== '0'; } catch { /* ignore */ }
+const sitMax = () => (allowLie ? 1.3 : 1.0);
+function renderLieToggle() {
+  $('lie-toggle').classList.toggle('off', !allowLie);
+  $('lie-toggle').title = allowLie ? 'Ложиться: вкл' : 'Ложиться: выкл';
+  sitSlider.classList.toggle('no-lie', !allowLie);
+  // Точки-отметки: стоит, присед, на коленях, боком, лёжа — по текущему пределу.
+  const marks = [0, 0.5, 0.8, 1.0, 1.3];
+  sitSlider.querySelectorAll('.track i').forEach((el, i) => { el.style.top = `${(marks[i] / sitMax()) * 100}%`; });
+}
+$('lie-toggle').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('lie-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  allowLie = !allowLie;
+  try { localStorage.setItem('waifu-allow-lie', allowLie ? '1' : '0'); } catch { /* ignore */ }
+  renderLieToggle();
+  if (!allowLie && character && character.sit > 1.0) sitBy((1.0 - character.sit) / 0.004);
+  showToast(allowLie ? 'Может прилечь' : 'Без «лечь»: только сидит');
+});
+renderLieToggle();
 // Палец ведёт относительно (без скачка к месту касания): вся высота полосы = от «стоит» до «лежит».
 let sliderDrag = null;
 sitSlider.addEventListener('pointerdown', (e) => {
@@ -849,14 +873,19 @@ sitSlider.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   e.stopPropagation();
   sitSlider.setPointerCapture(e.pointerId);
-  sliderDrag = { y: e.clientY };
+  sliderDrag = { y: e.clientY, t: performance.now() };
   sitSlider.classList.add('active');
 });
 sitSlider.addEventListener('pointermove', (e) => {
   if (!sliderDrag || !character) return;
   const h = sitSlider.querySelector('.track').getBoundingClientRect().height || 200;
-  const dv = ((e.clientY - sliderDrag.y) / h) * SIT_MAX;
+  const dv = ((e.clientY - sliderDrag.y) / h) * sitMax();
+  const now = performance.now();
+  // Скорость пальца → скорость движения: быстро ведёшь — быстрее, медленно — плавно.
+  const rate = Math.abs(dv) / Math.max(0.008, (now - sliderDrag.t) / 1000);
+  character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   sliderDrag.y = e.clientY;
+  sliderDrag.t = now;
   sitBy(dv / 0.004);
 });
 for (const ev of ['pointerup', 'pointercancel']) {
@@ -864,7 +893,7 @@ for (const ev of ['pointerup', 'pointercancel']) {
 }
 function updateSitSlider() {
   if (!character) return;
-  sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(character.sitS / SIT_MAX, 0, 1).toFixed(3));
+  sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(character.sitS / sitMax(), 0, 1).toFixed(3));
 }
 
 // Свайп вниз по пустому месту — садится на пол, вверх — встаёт.
@@ -873,7 +902,7 @@ function sitBy(dy) {
   if (!character) return;
   if (dy > 0 && character.mixer && currentMocap) stopMocap();
   const before = character.sit;
-  character.sit = THREE.MathUtils.clamp(character.sit + dy * 0.004, 0, 1.3); // до 1.3 — лечь на бок
+  character.sit = THREE.MathUtils.clamp(character.sit + dy * 0.004, 0, sitMax()); // до 1.3 — лечь на бок
   const now = performance.now();
   if (now - sitLineAt > 4000) {
     if (before < 0.9 && character.sit >= 0.9) { sitLineAt = now; say(pick(['Посижу немножко~', 'Ух, устала…', 'Сядешь рядом?'])); }

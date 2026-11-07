@@ -195,6 +195,7 @@ export class Character {
     this.sit = 0; // 0 — стоит, 1 — сидит на полу (свайп вниз)
     this.sitS = 0; // сглаженное значение
     this.sitV = 0; // скорость посадки (разгон и торможение плавные)
+    this.sitRate = 0; // насколько быстро ведут пальцем (ед./с) — ускоряет посадку
     this.offK = 1; // сколько от наклона/таза пальцем действует (в посадке — плавно уходит)
     // Верх тела из записи живого человека (живое ожидание): ноги при этом свои,
     // стоят на полу, поэтому она не ходит и не скользит.
@@ -501,9 +502,13 @@ export class Character {
     // чем садится, — без «падения», как бы резко ни свайпнули.
     {
       const c = THREE.MathUtils.clamp;
-      const vmax = this.sitS > 0.95 || this.sit > 1.0 ? 0.32 : 0.5;
-      const want = c((this.sit - this.sitS) * 2.6, -vmax, vmax);
-      this.sitV += c(want - this.sitV, -1.4 * dt, 1.4 * dt);
+      // Скорость следует за пальцем: медленно ведёшь — плавно, быстро — быстрее (но без рывка).
+      const base = this.sitS > 0.95 || this.sit > 1.0 ? 0.32 : 0.5;
+      const vmax = Math.max(base, Math.min(1.6, this.sitRate * 0.9));
+      const acc = 1.4 + this.sitRate * 2.2;
+      const want = c((this.sit - this.sitS) * (2.6 + this.sitRate), -vmax, vmax);
+      this.sitV += c(want - this.sitV, -acc * dt, acc * dt);
+      if (Math.abs(this.sit - this.sitS) < 0.02) this.sitRate *= Math.exp(-dt * 3);
       const before = this.sit - this.sitS;
       this.sitS += this.sitV * dt;
       if (Math.sign(this.sit - this.sitS) !== Math.sign(before) && before !== 0) { this.sitS = this.sit; this.sitV = 0; }
@@ -1022,10 +1027,11 @@ export class Character {
       // Лёжа на боку: ноги вместе вдоль пола, колени чуть согнуты вперёд.
       const { p4 } = this.sitPhases();
       if (p4 > 0) {
+        // Как лежат в жизни: ноги не палкой — верхняя чуть впереди, колени мягко согнуты.
         const lie = new THREE.Vector3(
-          this.restHips.x + (L ? 0.62 : 0.56) * S,
+          this.restHips.x + (L ? 0.5 : 0.47) * S,
           rest.pos.y - 0.04 * S,
-          this.restHips.z + (L ? -0.02 : 0.06) * S,
+          this.restHips.z + (L ? 0.16 : -0.02) * S,
         );
         target.lerp(lie, p4);
       }

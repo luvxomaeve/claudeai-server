@@ -790,3 +790,26 @@ body.posing #sit-slider { display: none; }
 }
 #poses #btn-home:active { background: var(--pink); color: #fff; }
 body.posing #poses #btn-home { display: none; }
+
+/* Кнопка «ложиться вкл/выкл» под полосой посадки — маленькая и полупрозрачная. */
+#sit-slider { flex-direction: column; align-items: center; padding-bottom: 6px; }
+#sit-slider .track { flex: 1; }
+#lie-toggle {
+  margin-top: 12px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--pink);
+  opacity: 0.75;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15);
+}
+#lie-toggle svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#lie-toggle.off { color: var(--ink); opacity: 0.4; }
+#lie-toggle.off svg { stroke-dasharray: 2 2.5; }
+#sit-slider.no-lie .track i:last-of-type { display: none; }
