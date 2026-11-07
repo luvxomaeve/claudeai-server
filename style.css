@@ -239,7 +239,7 @@ html, body {
   color: var(--pink);
   cursor: pointer;
 }
-#color-list {
+#color-list, .swatches {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
@@ -428,3 +428,25 @@ html, body {
   from { transform: translate(-50%, 0) scale(0.6); opacity: 1; }
   to { transform: translate(-50%, -70px) scale(1.2); opacity: 0; }
 }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.chip.active { border-color: var(--pink); background: var(--pink); color: #fff; }
+#goth-preset { background: #2b2530; color: #f3e9ff; margin-bottom: 4px; }
+
+/* Готичная атмосфера: тёмный фон с фиолетовым свечением. */
+body.dark {
+  background: radial-gradient(ellipse at 50% 35%, #4a2a5e 0%, #24152f 50%, #0d0812 100%);
+}
+body.dark #hint { color: #e9dcf5; }
+body.dark #loading { background: #0d0812; color: #e9dcf5; }

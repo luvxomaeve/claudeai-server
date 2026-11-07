@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { saveFile, deleteFile, listFiles } from './storage.js';
+import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { Character, POSES, BASE_POSE } from './character.js';
 import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
@@ -40,24 +41,47 @@ function resize() {
 window.addEventListener('resize', resize);
 
 let character = null;
+let fullBody = false;
+let camTween = 1;
+const camFrom = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
+const camTo = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
 
 function frameCamera() {
   // headHeight — высота кости головы (основание черепа).
   const H = character ? character.headHeight : 1.4;
   const S = H / 1.4;
-  // Кадр: от макушки с запасом под облачко до середины бёдер.
-  const top = H + 0.42 * S;
-  const bottom = H * 0.38;
+  // Кадр: от макушки с запасом под облачко до середины бёдер (или до пола).
+  // Во весь рост оставляем запас сверху под облачко и снизу под кнопку поз.
+  const top = H + (fullBody ? 0.7 : 0.42) * S;
+  const bottom = fullBody ? -0.16 * S : H * 0.38;
   const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
   const distV = (top - bottom) / 2 / Math.tan(halfFov);
   // На узком экране следим, чтобы влезли руки (~0.75 м в ширину).
   const distH = (0.75 * S) / 2 / (Math.tan(halfFov) * camera.aspect);
   const dist = Math.max(distV, distH);
   const cy = (top + bottom) / 2;
-  cameraLookAt.set(0, cy, 0);
-  camera.position.set(0, cy + 0.05 * S, dist);
-  camera.lookAt(cameraLookAt);
+  camFrom.pos.copy(camera.position);
+  camFrom.look.copy(cameraLookAt);
+  camTo.look.set(0, cy, 0);
+  camTo.pos.set(0, cy + 0.05 * S, dist);
+  camTween = character && animateCamera ? 0 : 1;
+  if (camTween === 1) {
+    camera.position.copy(camTo.pos);
+    cameraLookAt.copy(camTo.look);
+    camera.lookAt(cameraLookAt);
+  }
   camera.updateProjectionMatrix();
+}
+let animateCamera = false;
+
+// Плавный переезд камеры между «крупно» и «во весь рост».
+function updateCamera(dt) {
+  if (camTween >= 1) return;
+  camTween = Math.min(1, camTween + dt / 0.6);
+  const k = camTween < 0.5 ? 2 * camTween * camTween : 1 - Math.pow(-2 * camTween + 2, 2) / 2;
+  camera.position.lerpVectors(camFrom.pos, camTo.pos, k);
+  cameraLookAt.lerpVectors(camFrom.look, camTo.look, k);
+  camera.lookAt(cameraLookAt);
 }
 
 // ---------- Загрузка модели ----------
@@ -128,7 +152,8 @@ async function loadModel(source) {
       setActivePoseButton('stand');
     }
     if (currentAnim) character.playClip(createVRMAnimationClip(currentAnim.animation, vrm));
-    applyClothColor();
+    stockings = new Stockings(vrm);
+    applyLook();
     buildHitboxes();
     frameCamera();
     $('loading').classList.add('done');
@@ -504,6 +529,15 @@ $('editor-clear').addEventListener('click', () => {
   try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
 });
 
+$('btn-zoom').addEventListener('click', () => {
+  fullBody = !fullBody;
+  $('btn-zoom').classList.toggle('off', !fullBody);
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+});
+$('btn-zoom').classList.add('off');
+
 // ---------- Панели ----------
 
 function togglePanel(id, onOpen) {
@@ -560,6 +594,63 @@ function applyClothColor() {
   });
 }
 
+// ---------- Образ: волосы, чулки, атмосфера ----------
+
+let stockings = null;
+const HAIR_COLORS = [
+  { id: 'original', name: 'Свои', color: null },
+  { id: 'black', name: 'Чёрные', color: 0x2a2230 },
+  { id: 'plum', name: 'Слива', color: 0x4a2a5e },
+  { id: 'silver', name: 'Пепел', color: 0xc9c4d4 },
+  { id: 'pink', name: 'Розовые', color: 0xf0a0c8 },
+  { id: 'red', name: 'Алые', color: 0x8c1c30 },
+];
+const look = { hair: 'original', stockings: 'off', dark: false };
+try { Object.assign(look, JSON.parse(localStorage.getItem('waifu-look') || '{}')); } catch { /* ignore */ }
+const saveLook = () => { try { localStorage.setItem('waifu-look', JSON.stringify(look)); } catch { /* ignore */ } };
+
+function tintMaterials(test, colorHex, shadeK) {
+  character.vrm.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (!test.test(m.name) || !m.color) continue;
+      m.userData.origColor ??= m.color.clone();
+      if (m.shadeColorFactor) m.userData.origShade ??= m.shadeColorFactor.clone();
+      if (colorHex === null) {
+        m.color.copy(m.userData.origColor);
+        if (m.shadeColorFactor) m.shadeColorFactor.copy(m.userData.origShade);
+      } else {
+        const c = new THREE.Color(colorHex);
+        m.color.copy(c);
+        if (m.shadeColorFactor) m.shadeColorFactor.copy(c).multiplyScalar(shadeK);
+      }
+    }
+  });
+}
+
+function applyLook() {
+  if (!character) return;
+  applyClothColor();
+  tintMaterials(/HAIR/i, HAIR_COLORS.find((c) => c.id === look.hair)?.color ?? null, 0.6);
+  stockings?.apply(look.stockings);
+  document.body.classList.toggle('dark', look.dark);
+}
+
+function renderSwatches(boxId, items, current, onPick) {
+  const box = $(boxId);
+  box.innerHTML = '';
+  for (const c of items) {
+    const b = document.createElement('button');
+    b.className = 'swatch' + (c.id === current ? ' active' : '');
+    b.title = c.name;
+    const col = c.color === null || c.color === undefined ? 'transparent' : `#${c.color.toString(16).padStart(6, '0')}`;
+    b.style.setProperty('--swatch', col);
+    b.innerHTML = `<span></span>${c.name}`;
+    b.addEventListener('click', () => onPick(c));
+    box.appendChild(b);
+  }
+}
+
 function renderWardrobe() {
   const list = $('outfit-list');
   list.innerHTML = '';
@@ -607,7 +698,58 @@ function renderWardrobe() {
     });
     sw.appendChild(b);
   }
+
+  renderSwatches('hair-list', HAIR_COLORS, look.hair, (c) => {
+    look.hair = c.id;
+    saveLook();
+    applyLook();
+    renderWardrobe();
+    character?.react({ expression: 'happy', motion: 'touchHair' });
+    say(pick(['Новый цвет волос! Ну как?', 'Мне идёт?', 'Хе-хе, перекрасилась~']));
+  });
+
+  const st = $('stocking-list');
+  st.innerHTML = '';
+  if (stockings && !stockings.available) {
+    st.innerHTML = '<p class="panel-note">У этой модели чулки нарисовать не получится (нужна модель из VRoid).</p>';
+  } else {
+    for (const c of STOCKING_STYLES) {
+      const b = document.createElement('button');
+      b.className = 'chip' + (c.id === look.stockings ? ' active' : '');
+      b.textContent = c.name;
+      b.addEventListener('click', () => {
+        look.stockings = c.id;
+        saveLook();
+        applyLook();
+        renderWardrobe();
+        character?.react({ expression: 'happy', motion: 'sway' });
+        say(c.id === 'off' ? 'Так удобнее~' : pick(['Чулочки — моя слабость ♥', 'Красивые, правда?', 'Хи, нравятся?']));
+      });
+      st.appendChild(b);
+    }
+  }
+
+  $('dark-toggle').classList.toggle('active', look.dark);
+  $('dark-toggle').textContent = look.dark ? '🌙 Готичная атмосфера: вкл' : '🌙 Готичная атмосфера: выкл';
 }
+
+$('dark-toggle').addEventListener('click', () => {
+  look.dark = !look.dark;
+  saveLook();
+  applyLook();
+  renderWardrobe();
+});
+
+$('goth-preset').addEventListener('click', () => {
+  clothColor = 'black';
+  try { localStorage.setItem('waifu-cloth-color', clothColor); } catch { /* ignore */ }
+  Object.assign(look, { hair: 'black', stockings: 'black', dark: true });
+  saveLook();
+  applyLook();
+  renderWardrobe();
+  character?.react({ expression: 'relaxed', motion: 'tiltHead' });
+  say('Тьма мне к лицу, не находишь? ♥');
+});
 
 async function wearOutfit(id) {
   const o = outfits.find((x) => x.id === id);
@@ -754,6 +896,7 @@ function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
 
+  updateCamera(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
