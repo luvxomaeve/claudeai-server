@@ -28,7 +28,7 @@ const BASE_POSE = {
   spineX: 0, spineY: 0, spineZ: 0,
   headX: 0, headY: 0, headZ: 0,
   lUpperZ: -1.15, rUpperZ: 1.15,
-  lUpperX: 0.05, rUpperX: 0.05,
+  lUpperX: -0.06, rUpperX: -0.06,
   lUpperTwist: 0, rUpperTwist: 0,
   lLowerY: -0.45, rLowerY: 0.45,
   lLowerZ: 0, rLowerZ: 0,
@@ -39,39 +39,60 @@ const BASE_POSE = {
 
 export { BASE_POSE };
 
+// Позы задаются целиком, ноги и бёдра тоже — так поза выглядит цельной, а не «руки отдельно».
+// Если руки где-то заденут тело, их аккуратно отведёт solveArms().
 export const POSES = {
   stand: { label: 'Стоит' },
+  flirty: {
+    label: 'Кокетка',
+    // Левая рука на бедре, бедро в сторону, правая нога расслаблена, голова набок.
+    lUpperZ: -0.75, lUpperX: 0.2, lUpperTwist: 0.95, lLowerY: -1.5,
+    rUpperZ: 1.12, rUpperX: -0.05, rLowerY: 0.5,
+    hipsZ: 0.08, hipsX: 0.03, spineZ: -0.1, headZ: 0.16, headY: -0.08,
+    rKneeX: 0.28, rLegX: -0.12, lLegZ: -0.08, rLegZ: -0.08,
+  },
   hips: {
     label: 'Руки в боки',
     lUpperZ: -0.75, rUpperZ: 0.75, lUpperX: 0.2, rUpperX: 0.2,
     lUpperTwist: 0.95, rUpperTwist: 0.95, lLowerY: -1.5, rLowerY: 1.5,
-    hipsZ: 0.06, spineZ: -0.05, headZ: 0.08,
+    hipsZ: -0.04, spineZ: 0.03, headZ: 0.06, headX: -0.04, lKneeX: 0.15, lLegX: -0.06,
+  },
+  crossed: {
+    label: 'Скрестила руки',
+    lUpperZ: -1.0, lUpperX: -0.45, lUpperTwist: 0, lLowerY: -2.2,
+    rUpperZ: 1.0, rUpperX: -0.5, rUpperTwist: 0, rLowerY: 2.45,
+    spineX: -0.03, headX: -0.06, headZ: -0.08, hipsZ: 0.05, lKneeX: 0.2, lLegX: -0.08,
   },
   shy: {
     label: 'Скромница',
     lUpperZ: -0.85, rUpperZ: 0.85, lUpperX: 0.15, rUpperX: 0.15,
     lUpperTwist: 0.75, rUpperTwist: 0.75, lLowerY: -2.1, rLowerY: 2.1,
-    spineX: 0.05, headX: 0.15, headZ: 0.12,
+    spineX: 0.06, headX: 0.16, headZ: 0.12,
+    lLegZ: -0.05, rLegZ: 0.05, lKneeX: 0.18, lLegX: -0.08,
   },
   behind: {
     label: 'Руки за спиной',
+    armDir: 1,
     lUpperZ: -0.95, rUpperZ: 0.95, lUpperX: 0.1, rUpperX: 0.1,
     lUpperTwist: 1.3, rUpperTwist: 1.3, lLowerY: -1.6, rLowerY: 1.6,
-    spineX: -0.04, headZ: -0.1,
+    spineX: -0.05, headZ: -0.1, headX: -0.03, rKneeX: 0.2, rLegX: -0.08,
   },
   think: {
     label: 'Задумалась',
     lUpperZ: -0.85, lUpperX: 0.15, lUpperTwist: 0.75, lLowerY: -2.1,
     rUpperZ: 1.0, rUpperX: -0.7, rUpperTwist: 0.5, rLowerY: 2.6,
-    headZ: -0.12, headX: 0.05, spineZ: 0.04,
+    headZ: -0.12, headX: 0.05, spineZ: 0.04, hipsZ: -0.05, lKneeX: 0.18, lLegX: -0.07,
   },
   hello: {
     label: 'Привет',
     lUpperZ: 0.15, lLowerZ: 1.3, lLowerY: 0,
-    headZ: 0.1, spineZ: -0.04,
+    headZ: 0.1, spineZ: -0.04, hipsZ: 0.04, rKneeX: 0.15,
     wave: 'left',
   },
 };
+
+// Движения, которые сами управляют руками.
+const ARM_MOTIONS = new Set(['flinch', 'raiseHand', 'stretch', 'touchHair', 'turnAway', 'clasp', 'handOnHip', 'nails']);
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
@@ -152,7 +173,7 @@ export class Character {
     // Масштаб зон относительно «стандартной» модели с головой на 1.4 м.
     this.scale = this.headHeight / 1.4;
     this.measureBody();
-    this.armFix = { left: 0, right: 0 };
+    this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
 
     this.zones = ZONE_DEFS
@@ -470,6 +491,10 @@ export class Character {
       }
     }
 
+    // Пружины: каждый сустав догоняет цель с инерцией (бёдра тяжёлые,
+    // голова и руки чуть запаздывают) — движения становятся плавными и живыми.
+    Object.assign(pose, this.springPose(pose, dt));
+
     // Применяем позу к нормализованным костям.
     const spineBone = b.chest ?? b.spine;
     this.rot(b.spine, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
@@ -550,6 +575,39 @@ export class Character {
     blendArm(pose, 'right', { upZ: -1.05, upX: -0.3 - 0.4 * swing, tw: 0.4, loY: -1.5 - 0.2 * bounce, loZ: 0 }, 1);
   }
 
+  springPose(target, dt) {
+    if (!this.sp) {
+      this.sp = { ...target };
+      this.spv = Object.fromEntries(Object.keys(target).map((k) => [k, 0]));
+    }
+    const fast = this.motions.some((m) => m.name === 'flinch' || m.name === 'hop');
+    const out = {};
+    for (const key in target) {
+      let w = 8;
+      if (key.startsWith('hips')) w = 4.5;
+      else if (key.startsWith('spine')) w = 6;
+      else if (key.startsWith('head')) w = 6.5;
+      else if (/Shoulder/.test(key)) w = 10;
+      else if (/Leg|Knee/.test(key)) w = 7;
+      else if (/Upper|Lower/.test(key)) w = fast ? 16 : 9;
+      if (this.dancing) w *= 2.2;
+      let x = this.sp[key] ?? target[key];
+      let v = this.spv[key] ?? 0;
+      // Критически демпфированная пружина, с подшагами для устойчивости.
+      const steps = Math.max(1, Math.ceil((w * dt) / 0.25));
+      const h = dt / steps;
+      for (let i = 0; i < steps; i++) {
+        const a = w * w * (target[key] - x) - 2 * w * v;
+        v += a * h;
+        x += v * h;
+      }
+      this.sp[key] = x;
+      this.spv[key] = v;
+      out[key] = x;
+    }
+    return out;
+  }
+
   // Меряем «объём» тела в исходной позе: для каждой высоты (шаг 2 см) — полуширину
   // и переднюю/заднюю границы туловища вместе с одеждой. По ним потом проверяем,
   // не попала ли кисть внутрь тела.
@@ -596,12 +654,12 @@ export class Character {
     return x * x + z * z < 1;
   }
 
-  applyUpperArm(side, pose, extra) {
+  applyUpperArm(side, pose, extra, extraX = 0) {
     const L = side === 'left';
     const bone = L ? this.bones.leftUpperArm : this.bones.rightUpperArm;
     if (!bone) return;
     const z = L ? pose.lUpperZ + extra : pose.rUpperZ - extra;
-    this.rot(bone, L ? pose.lUpperX : pose.rUpperX, 0, z);
+    this.rot(bone, (L ? pose.lUpperX : pose.rUpperX) + extraX, 0, z);
     bone.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, (L ? pose.lUpperTwist : pose.rUpperTwist) * this.flip));
   }
 
@@ -616,21 +674,33 @@ export class Character {
       const handNode = this.bones[`${side}Hand`];
       const lower = this.bones[`${side}LowerArm`];
       if (!handNode || !lower) continue;
-      // Ищем минимальный отвод руки, при котором кисть и предплечье снаружи.
+      // Ищем минимальную поправку: рука уходит немного наружу и вперёд
+      // (если кисть перед телом) или назад (если за спиной) — как у человека.
+      this.applyUpperArm(side, pose, 0);
+      this.bones[`${side}UpperArm`].updateWorldMatrix(true, true);
+      handNode.getWorldPosition(hand);
+      const bin = this.bodyBins.get(Math.round((hand.y - shift.y) / 0.02));
+      const front = bin ? hand.z - shift.z > (bin.zMin + bin.zMax) / 2 : true;
+      // В позе «за спиной» руки всегда отводим назад, иначе — по положению кисти.
+      const armBusy = this.dancing || this.motions.some((m) => ARM_MOTIONS.has(m.name));
+      const hint = armBusy ? undefined : POSES[this.poseName]?.armDir;
+      const dir = hint ?? (front ? -1 : 1); // минус по X — рука вперёд
       let need = 0;
       for (let i = 0; i <= 10; i++) {
-        this.applyUpperArm(side, pose, need);
+        this.applyUpperArm(side, pose, need * 0.6, need * dir);
         this.bones[`${side}UpperArm`].updateWorldMatrix(true, true);
         handNode.getWorldPosition(hand);
         lower.getWorldPosition(elbow);
         mid.lerpVectors(elbow, hand, 0.5);
         if (!this.insideBody(hand, shift) && !this.insideBody(mid, shift)) break;
-        need += 0.07;
+        need += 0.06;
       }
       // Плавно, чтобы рука не дёргалась.
-      const k = 1 - Math.exp(-dt * (need > this.armFix[side] ? 14 : 4));
-      this.armFix[side] += (need - this.armFix[side]) * k;
-      this.applyUpperArm(side, pose, this.armFix[side]);
+      const fix = this.armFix[side];
+      const k = 1 - Math.exp(-dt * (need > fix.need ? 14 : 4));
+      fix.need += (need - fix.need) * k;
+      fix.dir += (dir - fix.dir) * (1 - Math.exp(-dt * 6));
+      this.applyUpperArm(side, pose, fix.need * 0.6, fix.need * fix.dir);
     }
   }
 

@@ -502,3 +502,96 @@ body.dark #loading { background: #0d0812; color: #e9dcf5; }
 }
 #toast.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 #cam-controls #btn-zoom:not(.off) { background: var(--pink); color: #fff; }
+
+/* ---------- Единый стиль кнопок ---------- */
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(90, 40, 100, 0.14);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+.icon-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+#buttons { gap: 8px; }
+#buttons .icon-btn.off { opacity: 0.5; }
+#buttons .icon-btn.active { background: var(--pink); color: #fff; border-color: transparent; }
+
+/* Панель камеры — внизу, над кнопкой поз, в одну линию. */
+#cam-controls {
+  position: static;
+  transform: none;
+  flex-direction: row;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(90, 40, 100, 0.18);
+  display: flex;
+  animation: popUp 0.2s ease-out;
+}
+#cam-controls[hidden] { display: none; }
+#cam-controls .icon-btn {
+  width: 42px;
+  height: 42px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  font: inherit;
+  touch-action: none;
+}
+#cam-controls .icon-btn:active { background: rgba(255, 111, 168, 0.18); }
+#cam-controls #btn-zoom.off { opacity: 1; }
+#cam-controls #btn-zoom:not(.off) { background: var(--pink); color: #fff; }
+
+/* Кнопка поз. */
+#poses #poses-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  font-size: 15px;
+  font-weight: 600;
+}
+#poses-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#poses-toggle b { font-weight: 800; }
+#poses-toggle .chev { font-size: 11px; opacity: 0.6; transition: transform 0.2s ease; }
+#poses-toggle.open .chev { transform: rotate(180deg); }
+
+@media (max-width: 600px) {
+  #buttons { gap: 6px; }
+  #buttons .icon-btn { width: 40px; height: 40px; }
+  #cam-controls .icon-btn { width: 40px; height: 40px; }
+}

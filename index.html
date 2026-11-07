@@ -26,12 +26,12 @@
       <span id="affection-label">Незнакомец</span>
     </div>
     <div id="buttons">
-      <button id="btn-voice" title="Озвучка">🔊</button>
-      <button id="btn-camera" title="Режим камеры: вращать и приближать">🎥</button>
-      <button id="btn-wardrobe" title="Гардероб">👗</button>
-      <button id="btn-anims" title="Анимации и танец">🎬</button>
-      <button id="btn-editor" title="Редактор поз">✏️</button>
-      <button id="btn-hitbox" title="Показать зоны касаний">🎯</button>
+      <button id="btn-voice" class="icon-btn" title="Озвучка"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></button>
+      <button id="btn-camera" class="icon-btn" title="Режим камеры: вращать и приближать"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="12.5" height="10" rx="2.5"/><path d="M15.5 11l5-3v8l-5-3"/></svg></button>
+      <button id="btn-wardrobe" class="icon-btn" title="Гардероб"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7.5a2 2 0 1 1 2-2"/><path d="M12 7.5v1.2L3.5 14.5a1.2 1.2 0 0 0 .7 2.2h15.6a1.2 1.2 0 0 0 .7-2.2L12 8.7"/></svg></button>
+      <button id="btn-anims" class="icon-btn" title="Анимации и танец"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 17.5V6l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/></svg></button>
+      <button id="btn-editor" class="icon-btn" title="Редактор поз"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4.5L15.5 5a2 2 0 0 1 2.8 0l.7.7a2 2 0 0 1 0 2.8L8.5 19z"/><path d="M13.5 7l3.5 3.5"/></svg></button>
+      <button id="btn-hitbox" class="icon-btn" title="Показать зоны касаний"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8"/></svg></button>
     </div>
   </div>
 
@@ -39,17 +39,17 @@
 
   <div id="toast"></div>
 
-  <div id="cam-controls" hidden>
-    <button id="btn-zoom" title="Во весь рост / крупно">⛶</button>
-    <button id="cam-in" title="Приблизить">＋</button>
-    <button id="cam-out" title="Отдалить">−</button>
-    <button id="cam-left" title="Повернуть влево">⟲</button>
-    <button id="cam-right" title="Повернуть вправо">⟳</button>
-    <button id="cam-reset" title="Вернуть вид">⌂</button>
-  </div>
   <div id="poses">
     <div id="pose-list" hidden></div>
-    <button id="poses-toggle" aria-expanded="false">🧍 Поза: <span id="pose-current">Стоит</span> ▴</button>
+    <div id="cam-controls" hidden>
+      <button id="btn-zoom" class="icon-btn" title="Во весь рост / крупно"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg></button>
+      <button id="cam-out" class="icon-btn" title="Отдалить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+      <button id="cam-in" class="icon-btn" title="Приблизить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button id="cam-left" class="icon-btn" title="Повернуть влево"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v4h4"/></svg></button>
+      <button id="cam-right" class="icon-btn" title="Повернуть вправо"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M20 4.5v4h-4"/></svg></button>
+      <button id="cam-reset" class="icon-btn" title="Вернуть вид"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6.5 9.5V19h11V9.5"/></svg></button>
+    </div>
+    <button id="poses-toggle" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 8v6M12 14l-3 6M12 14l3 6M7 10.5l5-1.5 5 1.5"/></svg><span>Поза: <b id="pose-current">Стоит</b></span><span class="chev">▴</span></button>
   </div>
 
   <div id="wardrobe" class="panel hidden">
