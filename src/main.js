@@ -5,7 +5,7 @@ import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationC
 import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { Character, POSES, BASE_POSE } from './character.js';
-import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
+import { REACTIONS, STROKES, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
 // положи файл рядом, например models/waifu.vrm, и укажи путь здесь,
@@ -182,6 +182,7 @@ async function loadModel(source) {
     scene.add(vrm.scene);
     character = new Character(vrm);
     window.__waifu = character; // для отладки из консоли
+    window.__cam = camera;
     if (prev) {
       character.setPose(prev.poseName);
       character.poseT = 1;
@@ -299,6 +300,7 @@ function zoneAt(e) {
 // Активные касания: для щипка (зум) двумя пальцами и поворота свайпом по фону.
 const touches = new Map();
 let orbitDrag = null; // { lastX }
+let stroking = null; // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
 
 function pinchDistance() {
@@ -328,6 +330,7 @@ canvas.addEventListener('pointerdown', (e) => {
     // Второй палец в обычном режиме: отменяем поглаживание.
     pinchDist = pinchDistance();
     petting = null;
+    stroking = null;
     orbitDrag = null;
     canvas.classList.remove('petting');
     return;
@@ -337,12 +340,20 @@ canvas.addEventListener('pointerdown', (e) => {
   const hit = zoneAt(e);
   if (!hit) return;
 
+  // Одежда и волосы рядом с пальцем качнулись от прикосновения.
+  character.poke(hit.point, raycaster.ray.direction, 0.8);
+
   if (hit.zone === 'headpat') {
     petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 0 };
     canvas.classList.add('petting');
     return;
   }
+  // Ждём: если палец поведут — это поглаживание, если отпустят — тычок.
+  stroking = { hit, lastX: e.clientX, lastY: e.clientY, moved: 0, dist: 0, ticks: 0 };
+});
 
+// Тычок: срабатывает, когда палец отпустили, не поведя им.
+function tapReaction(hit, e) {
   // Слишком частые тычки — обижается.
   const now = performance.now();
   recentTaps = recentTaps.filter((t) => now - t < 2500);
@@ -353,7 +364,38 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   triggerReaction(hit.zone, hit, e);
-});
+}
+
+// Поглаживание любой зоны, кроме головы: мягкая реакция раз в ~80px.
+let lastStrokeLineAt = 0;
+function strokeTick(e) {
+  const r = STROKES[stroking.hit.zone];
+  if (!r) return;
+  const t = tier();
+  stroking.ticks++;
+  // Одежду ведёт за пальцем.
+  const hit = zoneAt(e);
+  if (hit) character.poke(hit.point, dragDirection(e), 0.7);
+  if (stroking.ticks % 3 === 1 && !character.motions.some((m) => m.name === r.motion)) {
+    character.react({ expression: r.expression[t], motion: r.motion, side: stroking.hit.side, strength: 0.7 });
+  }
+  changeAffection(r.affection[t]);
+  if (r.affection[t] > 0 && stroking.ticks % 2 === 0) floatHeart(e.clientX, e.clientY);
+  const now = performance.now();
+  if (now - lastStrokeLineAt > 2600 && now - lastSpokeAt > 1800) {
+    lastStrokeLineAt = now;
+    say(pick(r.lines[t]));
+  }
+}
+
+// Направление движения пальца в мире (по горизонтали).
+const dragVec = new THREE.Vector3();
+function dragDirection(e) {
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+  const fwd = raycaster.ray.direction.clone();
+  const dx = Math.sign(e.clientX - stroking.lastX) || 0;
+  return dragVec.copy(fwd).multiplyScalar(0.6).addScaledVector(right, dx);
+}
 
 canvas.addEventListener('pointermove', (e) => {
   toNdc(e);
@@ -369,7 +411,26 @@ canvas.addEventListener('pointermove', (e) => {
     orbitDrag.lastX = e.clientX;
     return;
   }
+  if (stroking) {
+    const d = Math.hypot(e.clientX - stroking.lastX, e.clientY - stroking.lastY);
+    stroking.moved += d;
+    stroking.dist += d;
+    if (stroking.moved > 18) {
+      while (stroking.dist > 80) {
+        stroking.dist -= 80;
+        strokeTick(e);
+      }
+    }
+    stroking.lastX = e.clientX;
+    stroking.lastY = e.clientY;
+    return;
+  }
   if (!petting) return;
+  // Поглаживание головы тоже качает волосы.
+  if (petting.dist > 35) {
+    const hit = zoneAt(e);
+    if (hit) character.poke(hit.point, raycaster.ray.direction, 0.4);
+  }
   const dx = e.clientX - petting.lastX;
   const dy = e.clientY - petting.lastY;
   petting.dist += Math.hypot(dx, dy);
@@ -398,6 +459,10 @@ function endPointer(e) {
     // Просто нажали на голову без движения — одиночное поглаживание.
     if (petting.ticks === 0) triggerReaction('headpat', null, e);
     petting = null;
+  }
+  if (stroking) {
+    if (stroking.moved <= 18) tapReaction(stroking.hit, e);
+    stroking = null;
   }
 }
 canvas.addEventListener('pointerup', endPointer);
@@ -657,6 +722,7 @@ function setCameraMode(on) {
   $('cam-controls').hidden = !on;
   canvas.classList.toggle('camera', on);
   petting = null;
+  stroking = null;
   orbitDrag = null;
   showToast(on ? '🎥 Режим камеры: крути пальцем, щипок — приблизить' : '👆 Обычный режим: касайся её');
 }

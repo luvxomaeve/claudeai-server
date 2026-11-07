@@ -83,6 +83,18 @@ function envelope(t, dur) {
   return 1;
 }
 
+// Плавно ведёт руку к целевой позе. target задаётся для левой руки,
+// для правой знаки зеркалятся (поворот плеча — тот же знак).
+function blendArm(pose, side, target, e) {
+  const L = side === 'left';
+  const set = (key, value) => { pose[key] += (value - pose[key]) * e; };
+  set(L ? 'lUpperZ' : 'rUpperZ', L ? target.upZ : -target.upZ);
+  set(L ? 'lUpperX' : 'rUpperX', target.upX);
+  set(L ? 'lUpperTwist' : 'rUpperTwist', target.tw);
+  set(L ? 'lLowerY' : 'rLowerY', L ? target.loY : -target.loY);
+  set(L ? 'lLowerZ' : 'rLowerZ', L ? target.loZ : -target.loZ);
+}
+
 export class Character {
   constructor(vrm) {
     this.vrm = vrm;
@@ -101,6 +113,7 @@ export class Character {
     this.poseT = 1;
     this.twistQ = new THREE.Quaternion();
     this.dancing = false;
+    this.poked = new Set();
     this.flip = vrm.meta?.metaVersion === '0' ? -1 : 1;
     this.mixer = null; // для mocap-анимаций (.vrma)
     this.axisX = new THREE.Vector3(1, 0, 0);
@@ -159,6 +172,7 @@ export class Character {
     const durations = {
       tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6,
       lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4,
+      squirm: 1.3, shyLegs: 1.8,
     };
     this.motions = this.motions.filter((m) => m.name !== name);
     this.motions.push({ name, side, t: 0, dur: durations[name] ?? 1.5 });
@@ -307,37 +321,27 @@ export class Character {
     pose.headZ += this.patAmount * 0.18 * Math.sin(t * 2.2);
     pose.headX += this.patAmount * 0.12;
 
-    // Движения-реакции.
+    // Движения-реакции. Руки не «прибавляются» к текущей позе (из-за этого их
+    // выворачивало), а плавно переходят в позу реакции и обратно.
     for (const m of this.motions) {
       m.t += dt;
       const e = envelope(m.t, m.dur);
       const s = m.side === 'left' ? 1 : -1;
+      const arm = (side, target) => blendArm(pose, side, target, e);
       switch (m.name) {
         case 'tiltHead':
           pose.headZ += 0.25 * e * s;
           pose.spineZ += 0.05 * e * s;
           break;
         case 'flinch':
-          pose.spineX -= 0.18 * e;
-          pose.headX -= 0.15 * e;
-          // Руки вперёд и к груди — «прикрывается».
-          pose.lUpperX -= 0.55 * e;
-          pose.rUpperX -= 0.55 * e;
-          pose.lUpperZ += 0.15 * e;
-          pose.rUpperZ -= 0.15 * e;
-          pose.lLowerY -= 2.0 * e;
-          pose.rLowerY += 2.0 * e;
+          // «Ой!» — отшатнулась, ладошки к лицу.
+          pose.spineX -= 0.15 * e;
+          pose.headX -= 0.12 * e;
+          arm('left', { upZ: -1.1, upX: -0.47, tw: 0, loY: -2.4, loZ: 0 });
+          arm('right', { upZ: -1.1, upX: -0.47, tw: 0, loY: -2.4, loZ: 0 });
           break;
         case 'raiseHand':
-          if (m.side === 'left') {
-            pose.lUpperZ += (0.15 + 1.22) * e;
-            pose.lLowerZ += (1.3 + Math.sin(m.t * 10) * 0.25) * e;
-            pose.lLowerY += 0.25 * e;
-          } else {
-            pose.rUpperZ -= (0.15 + 1.22) * e;
-            pose.rLowerZ -= (1.3 + Math.sin(m.t * 10) * 0.25) * e;
-            pose.rLowerY -= 0.25 * e;
-          }
+          arm(m.side, { upZ: 0.15, upX: 0, tw: 0, loY: -0.15, loZ: 1.3 + Math.sin(m.t * 10) * 0.25 });
           pose.headZ += 0.12 * e * s;
           pose.headY += 0.2 * e * s;
           break;
@@ -350,6 +354,27 @@ export class Character {
           pose.spineZ += Math.sin(m.t * 18) * 0.06 * e;
           pose.headZ += Math.sin(m.t * 18) * 0.08 * e;
           break;
+        case 'squirm':
+          // Ёжится от прикосновения: плечи вверх, мелкое смущённое покачивание.
+          pose.lShoulderZ += 0.12 * e;
+          pose.rShoulderZ -= 0.12 * e;
+          pose.spineZ += Math.sin(m.t * 11) * 0.035 * e;
+          pose.spineX += 0.05 * e;
+          pose.headX += 0.1 * e;
+          pose.headZ += 0.08 * e * s;
+          break;
+        case 'shyLegs':
+          // Смущённо сводит колени, переминается.
+          pose.lLegZ -= 0.07 * e;
+          pose.rLegZ += 0.07 * e;
+          pose.lKneeX += (0.12 + Math.max(0, Math.sin(m.t * 5)) * 0.12) * e;
+          pose.rKneeX += (0.12 + Math.max(0, -Math.sin(m.t * 5)) * 0.12) * e;
+          pose.lLegX -= 0.06 * e;
+          pose.rLegX -= 0.06 * e;
+          pose.hipsY -= 0.012 * e * this.scale;
+          pose.headX += 0.12 * e;
+          pose.spineX += 0.04 * e;
+          break;
         case 'lookAround': {
           // Оглядывается: сначала в одну сторону, потом в другую.
           const p = m.t / m.dur;
@@ -359,10 +384,8 @@ export class Character {
         }
         case 'stretch':
           // Потягивается: руки вверх, спина назад.
-          pose.lUpperZ += 1.9 * e;
-          pose.rUpperZ -= 1.9 * e;
-          pose.lLowerZ += 0.4 * e;
-          pose.rLowerZ -= 0.4 * e;
+          arm('left', { upZ: 0.65, upX: 0, tw: 0, loY: 0, loZ: 0.4 });
+          arm('right', { upZ: 0.65, upX: 0, tw: 0, loY: 0, loZ: 0.4 });
           pose.spineX -= 0.12 * e;
           pose.headX -= 0.2 * e;
           break;
@@ -374,15 +397,7 @@ export class Character {
           break;
         case 'touchHair':
           // Поправляет волосы у виска.
-          if (m.side === 'left') {
-            pose.lUpperZ += 1.15 * e;
-            pose.lUpperX -= 0.55 * e;
-            pose.lLowerZ += 2.4 * e;
-          } else {
-            pose.rUpperZ -= 1.15 * e;
-            pose.rUpperX -= 0.55 * e;
-            pose.rLowerZ -= 2.4 * e;
-          }
+          arm(m.side, { upZ: -0.1, upX: -0.55, tw: 0, loY: -0.2, loZ: 2.4 });
           pose.headZ += 0.14 * e * s;
           pose.headY -= 0.12 * e * s;
           break;
@@ -392,13 +407,12 @@ export class Character {
           pose.headX += Math.sin(m.t * 9) * 0.03 * e;
           break;
         case 'turnAway':
+          // Обиделась: отвернулась, руки скрещены.
           pose.spineY += 0.45 * e * s;
           pose.headY += 0.5 * e * s;
           pose.headX += 0.12 * e;
-          pose.lUpperZ += 0.3 * e; // руки скрещены (примерно)
-          pose.rUpperZ -= 0.3 * e;
-          pose.lLowerY -= 1.9 * e;
-          pose.rLowerY += 1.9 * e;
+          arm('left', { upZ: -0.95, upX: -0.2, tw: 0, loY: -2.3, loZ: 0 });
+          arm('right', { upZ: -0.95, upX: -0.2, tw: 0, loY: -2.3, loZ: 0 });
           break;
       }
     }
@@ -465,6 +479,7 @@ export class Character {
   }
 
   finishFrame(dt) {
+    this.restorePokes();
     if (this.dancing && !this.mixer) this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.5);
     this.updateExpressions(dt);
     this.vrm.update(dt);
@@ -472,26 +487,68 @@ export class Character {
     this.updateZones();
   }
 
-  // Танец: пружинит в такт (~120 BPM), качает бёдрами, по очереди машет руками.
+  // Танец: пружинит коленями в такт (~120 BPM), переносит вес с ноги на ногу,
+  // согнутые руки качаются вперёд-назад, голова кивает.
   applyDance(pose, t) {
-    const beat = t * Math.PI * 2; // 1 цикл в секунду = 2 «удара»
-    const side = Math.sin(beat * 0.5);
-    pose.hipsY += Math.abs(Math.sin(beat)) * 0.03 * this.scale;
-    pose.hipsZ += side * 0.1;
-    pose.hipsX += side * 0.02 * this.scale;
-    pose.spineZ -= side * 0.12;
-    pose.hipsRotY += Math.sin(beat * 0.25) * 0.2;
-    pose.spineY -= Math.sin(beat * 0.25) * 0.1;
-    pose.headX += Math.sin(beat * 2) * 0.05;
-    pose.headZ += side * 0.15;
-    const l = 0.5 + 0.5 * Math.sin(beat * 0.5);
-    const r = 1 - l;
-    pose.lUpperZ += (0.4 + 1.1 * l);
-    pose.lLowerZ += 0.3 + 1.0 * l;
-    pose.lUpperX -= 0.3;
-    pose.rUpperZ -= (0.4 + 1.1 * r);
-    pose.rLowerZ -= 0.3 + 1.0 * r;
-    pose.rUpperX -= 0.3;
+    const b = t * Math.PI * 2; // 1 цикл в секунду = 2 «удара»
+    const bounce = Math.abs(Math.sin(b));
+    const w = Math.sin(b * 0.5); // шаг в сторону раз в такт
+    const knee = 0.12 + 0.2 * bounce;
+    pose.lKneeX += knee + Math.max(0, -w) * 0.25;
+    pose.rKneeX += knee + Math.max(0, w) * 0.25;
+    pose.lLegX -= (knee + Math.max(0, -w) * 0.25) * 0.5;
+    pose.rLegX -= (knee + Math.max(0, w) * 0.25) * 0.5;
+    pose.hipsY -= (0.012 + 0.022 * bounce) * this.scale;
+    pose.hipsX += w * 0.04 * this.scale;
+    pose.hipsZ += w * 0.09;
+    pose.lLegZ -= w * 0.09;
+    pose.rLegZ -= w * 0.09;
+    pose.spineZ -= w * 0.13;
+    pose.hipsRotY += Math.sin(b * 0.25) * 0.25;
+    pose.spineY -= Math.sin(b * 0.25) * 0.12;
+    pose.headX += Math.sin(b * 2) * 0.06;
+    pose.headZ += w * 0.12;
+    pose.lShoulderZ += bounce * 0.05;
+    pose.rShoulderZ -= bounce * 0.05;
+    const swing = Math.sin(b * 0.5);
+    blendArm(pose, 'left', { upZ: -1.05, upX: -0.3 + 0.4 * swing, tw: 0.4, loY: -1.5 - 0.2 * bounce, loZ: 0 }, 1);
+    blendArm(pose, 'right', { upZ: -1.05, upX: -0.3 - 0.4 * swing, tw: 0.4, loY: -1.5 - 0.2 * bounce, loZ: 0 }, 1);
+  }
+
+  // Касание толкает одежду и волосы с физикой (spring bones) рядом с точкой касания.
+  // Толкаем только горизонтально — в сторону от камеры и вбок, не вверх.
+  poke(point, dir, strength = 1) {
+    const joints = this.vrm.springBoneManager?.joints;
+    if (!joints) return;
+    const push = new THREE.Vector3(dir.x, 0, dir.z);
+    if (push.lengthSq() < 1e-6) return;
+    push.normalize();
+    const radius = 0.22 * this.scale;
+    const pos = new THREE.Vector3();
+    for (const j of joints) {
+      j.bone.getWorldPosition(pos);
+      const d = pos.distanceTo(point);
+      if (d > radius) continue;
+      j.userData ??= {};
+      if (!j.userData.poke) {
+        j.userData.poke = { power: j.settings.gravityPower, dir: j.settings.gravityDir.clone() };
+      }
+      const k = (1 - d / radius) * strength;
+      j.settings.gravityDir.copy(push);
+      j.settings.gravityPower = Math.max(j.settings.gravityPower, 1.6 * k);
+      j.userData.pokeUntil = this.time + 0.22;
+      this.poked.add(j);
+    }
+  }
+
+  restorePokes() {
+    for (const j of this.poked) {
+      if (this.time < j.userData.pokeUntil) continue;
+      j.settings.gravityPower = j.userData.poke.power;
+      j.settings.gravityDir.copy(j.userData.poke.dir);
+      j.userData.poke = null;
+      this.poked.delete(j);
+    }
   }
 
   updateExpressions(dt) {
