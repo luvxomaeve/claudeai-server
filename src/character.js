@@ -83,6 +83,19 @@ export const POSES = {
     rUpperZ: 1.0, rUpperX: -0.7, rUpperTwist: 0.5, rLowerY: 2.6,
     headZ: -0.12, headX: 0.05, spineZ: 0.04, hipsZ: -0.05, lKneeX: 0.18, lLegX: -0.07,
   },
+  hair: {
+    label: 'Поправляет волосы',
+    // Правая рука у виска, левая на талии, голова чуть набок, вес на одной ноге.
+    rUpperZ: 0.1, rUpperX: -0.55, rUpperTwist: 0, rLowerY: 0.2, rLowerZ: -2.4,
+    lUpperZ: -0.75, lUpperX: 0.2, lUpperTwist: 0.95, lLowerY: -1.5,
+    headZ: -0.14, headY: 0.12, hipsZ: 0.05, spineZ: -0.05, rKneeX: 0.2, rLegX: -0.08,
+  },
+  cheek: {
+    label: 'Ладонь у щеки',
+    // Левая ладонь у щеки, правая расслаблена; голова склонена к руке.
+    lUpperZ: -1.1, lUpperX: -0.5, lUpperTwist: 0, lLowerY: -2.3, lLowerZ: 0.2,
+    headZ: 0.16, headX: 0.06, hipsZ: -0.04, spineZ: 0.04, lKneeX: 0.16, lLegX: -0.06,
+  },
   hello: {
     label: 'Привет',
     lUpperZ: 0.15, lLowerZ: 1.3, lLowerY: 0,
@@ -1994,6 +2007,9 @@ export class Character {
       this.applyUpperArm(side, pose, 0);
       this.bones[`${side}UpperArm`].updateWorldMatrix(true, true);
       handNode.getWorldPosition(hand);
+      // Кисть выше плеча (у щеки, у волос) — это задумано, руку не выталкиваем наружу.
+      const shoulderY = this.bones[`${side}UpperArm`].getWorldPosition(new THREE.Vector3()).y;
+      if (hand.y > shoulderY - 0.06 * this.scale) continue;
       const bin = this.bodyBins.get(Math.round((hand.y - shift.y) / 0.02));
       const front = bin ? hand.z - shift.z > (bin.zMin + bin.zMax) / 2 : true;
       // В позе «за спиной» руки всегда отводим назад, иначе — по положению кисти.

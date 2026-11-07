@@ -817,6 +817,8 @@ $('btn-hitbox').addEventListener('click', () => {
 // ---------- Позы ----------
 
 const POSE_LINES = {
+  hair: 'Волосы растрепались~',
+  cheek: 'Хи~',
   stand: 'Ну, стою. И?',
   flirty: 'Ну как я тебе? ♥',
   hips: 'Хмф! Ну и чего ты хочешь?',
@@ -1482,12 +1484,26 @@ let uiIdleTimer = 0;
 function wakeUi() {
   document.body.classList.remove('ui-hidden');
   clearTimeout(uiIdleTimer);
+  // Во вкладке «Позы» кнопок больше — прячем быстрее.
   uiIdleTimer = setTimeout(() => {
-    if (document.querySelector('.panel:not(.hidden)') || !$('pose-list').hidden || poseDrag) { wakeUi(); return; }
+    if (document.querySelector('.panel:not(.hidden)') || !$('pose-list').hidden || poseDrag || $('pose-save-form').hidden === false) { wakeUi(); return; }
     document.body.classList.add('ui-hidden');
-  }, 4000);
+  }, poseMode ? 2500 : 4000);
 }
-for (const ev of ['pointerdown', 'pointermove', 'keydown']) window.addEventListener(ev, wakeUi, { capture: true, passive: true });
+// Кнопки возвращаются от короткого касания (тап), а не от перетаскивания:
+// крутишь камеру, тянешь её за руку или ведёшь полосу — экран остаётся чистым.
+let tapStart = null;
+window.addEventListener('pointerdown', (e) => {
+  tapStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+  if (!document.body.classList.contains('ui-hidden')) wakeUi(); // кнопки видны — продлеваем
+}, { capture: true, passive: true });
+window.addEventListener('pointerup', (e) => {
+  if (!tapStart) return;
+  const quick = performance.now() - tapStart.t < 300 && Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y) < 12;
+  tapStart = null;
+  if (quick || !document.body.classList.contains('ui-hidden')) wakeUi();
+}, { capture: true, passive: true });
+window.addEventListener('keydown', wakeUi, { capture: true });
 wakeUi();
 
 // ---------- Панели ----------
