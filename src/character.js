@@ -716,13 +716,13 @@ export class Character {
       const { p1, p2 } = this.sitPhases();
       target.z += p1 * 0.3 * this.scale;
       if (p2 > 0) {
-        // Сидит на полу: ступни по бокам от бёдер, чуть позади.
-        const duck = new THREE.Vector3(
-          hipsPos.x + outSign * 0.17 * this.scale,
+        // На коленях: голени лежат на полу, ступни под ягодицами носками назад.
+        const kneel = new THREE.Vector3(
+          hipsPos.x + outSign * 0.07 * this.scale,
           rest.pos.y,
-          this.restHips.z - 0.04 * this.scale,
+          this.restHips.z - 0.12 * this.scale,
         );
-        target.lerp(duck, p2);
+        target.lerp(kneel, p2);
       }
       // Ступня, сдвинутая пальцем.
       if (this.footOffset[side]) target.add(this.footOffset[side]);
@@ -828,7 +828,7 @@ export class Character {
   }
 
   // Посадка в две фазы: 0…0.6 — глубокий присед (ступни вперёд),
-  // 0.6…1 — садится на пол по-анимешному (колени на полу, ступни по бокам).
+  // 0.6…1 — опускается на колени и садится на пятки (сейдза), руки на коленях.
   sitPhases(s = this.sitS) {
     const ease = (x) => x * x * (3 - 2 * x);
     return { p1: ease(Math.min(s / 0.6, 1)), p2: ease(THREE.MathUtils.clamp((s - 0.6) / 0.4, 0, 1)) };
@@ -837,7 +837,7 @@ export class Character {
   sitDropFor(s) {
     const restY = this.restHips.y;
     const squatY = restY * 0.5;
-    const floorY = 0.13 * this.scale;
+    const floorY = 0.25 * this.scale; // сидит на пятках
     const { p1, p2 } = this.sitPhases(s);
     const y = p2 > 0 ? THREE.MathUtils.lerp(squatY, floorY, p2) : THREE.MathUtils.lerp(restY, squatY, p1);
     return Math.max(0, restY - y);
@@ -854,17 +854,13 @@ export class Character {
     if (!upper || !lower || !hand || !knee) return;
     const q1 = upper.quaternion.clone();
     const q2 = lower.quaternion.clone();
-    // В приседе — на колени; сидя на полу — на пол между коленями.
+    // Ладони на коленях; когда она на коленях — чуть ближе к себе, на бёдрах.
     const { p2 } = this.sitPhases();
     const kneePos = knee.getWorldPosition(new THREE.Vector3());
-    const onKnee = kneePos.clone().add(new THREE.Vector3(0, 0.05 * this.scale, 0.03 * this.scale));
     const hipsPos = this.bones.hips.getWorldPosition(new THREE.Vector3());
-    const onFloor = new THREE.Vector3(
-      THREE.MathUtils.lerp(kneePos.x, hipsPos.x, 0.55),
-      0.03 * this.scale,
-      kneePos.z + 0.02 * this.scale,
-    );
-    const target = onKnee.lerp(onFloor, p2);
+    const target = kneePos.clone()
+      .lerp(hipsPos, 0.3 * p2)
+      .add(new THREE.Vector3(0, 0.05 * this.scale, 0.03 * this.scale * (1 - p2)));
     const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.4, -0.4));
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);

@@ -309,7 +309,8 @@ function zoneAt(e) {
 // Активные касания: для щипка (зум) двумя пальцами и поворота свайпом по фону.
 const touches = new Map();
 let orbitDrag = null; // { lastX }
-let stroking = null; // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
+let stroking = null;
+let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
 
 function pinchDistance() {
@@ -332,6 +333,10 @@ canvas.addEventListener('pointerdown', (e) => {
 
   // Режим камеры: пальцы крутят и приближают, реакций нет.
   if (cameraMode) {
+    if (touches.size === 1 && zoneAt(e) && performance.now() - camHintAt > 5000) {
+      camHintAt = performance.now();
+      showToast('🎥 Режим камеры: касания выключены. Нажми камеру ещё раз');
+    }
     if (touches.size === 2) {
       pinchDist = pinchDistance();
       orbitDrag = null;
@@ -353,7 +358,11 @@ canvas.addEventListener('pointerdown', (e) => {
   if (touches.size > 2) return;
 
   const hit = zoneAt(e);
-  if (!hit) return;
+  if (!hit) {
+    // Пустое место в обычном режиме: свайп вверх/вниз — встать/сесть.
+    bgSwipe = { sy: e.clientY, sx: e.clientX, lastY: e.clientY, axis: null };
+    return;
+  }
 
   // Одежда и волосы рядом с пальцем качнулись от прикосновения.
   character.poke(hit.point, raycaster.ray.direction, 0.8);
@@ -436,6 +445,14 @@ canvas.addEventListener('pointermove', (e) => {
     orbitDrag.lastY = e.clientY;
     return;
   }
+  if (bgSwipe) {
+    if (!bgSwipe.axis && Math.hypot(e.clientX - bgSwipe.sx, e.clientY - bgSwipe.sy) > 10) {
+      bgSwipe.axis = Math.abs(e.clientY - bgSwipe.sy) > Math.abs(e.clientX - bgSwipe.sx) ? 'y' : 'x';
+    }
+    if (bgSwipe.axis === 'y') sitBy(e.clientY - bgSwipe.lastY);
+    bgSwipe.lastY = e.clientY;
+    return;
+  }
   if (stroking) {
     const d = Math.hypot(e.clientX - stroking.lastX, e.clientY - stroking.lastY);
     stroking.moved += d;
@@ -476,6 +493,7 @@ canvas.addEventListener('pointermove', (e) => {
 function endPointer(e) {
   touches.delete(e.pointerId);
   poseDrag = null;
+  bgSwipe = null;
   if (touches.size < 2) pinchDist = 0;
   orbitDrag = null;
   if (touches.size > 0) return;
@@ -852,6 +870,7 @@ $('pose-clear').addEventListener('click', () => {
 // ---------- Режим камеры ----------
 
 let cameraMode = false;
+let camHintAt = 0;
 function setCameraMode(on) {
   if (on && poseMode) setPoseMode(false);
   cameraMode = on;
