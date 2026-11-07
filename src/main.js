@@ -648,7 +648,7 @@ function setPoseMode(on) {
   closePoseSaveForm();
   if (on) {
     setPoseListOpen(false);
-    showToast('✋ Тяни за точки на теле · свайп по фону вниз — сесть');
+    showToast('✋ Тяни за точки · по фону: вбок — повернуть, вниз — сесть');
   }
 }
 $('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
@@ -732,7 +732,8 @@ function sitBy(dy) {
 function poseDragStart(e) {
   const hit = zoneAt(e);
   if (!hit) {
-    poseDrag = { kind: 'sit', lastY: e.clientY };
+    // Пустое место: вбок — крутим камеру, вверх/вниз — сесть/встать.
+    poseDrag = { kind: 'bg', sx: e.clientX, sy: e.clientY, lastX: e.clientX, lastY: e.clientY, axis: null };
     return;
   }
   if (hit.zone === 'hand' || hit.zone === 'arm') {
@@ -770,8 +771,13 @@ function poseDragMove(e) {
     }
     return;
   }
-  if (poseDrag.kind === 'sit') {
-    sitBy(e.clientY - poseDrag.lastY);
+  if (poseDrag.kind === 'bg') {
+    if (!poseDrag.axis && Math.hypot(e.clientX - poseDrag.sx, e.clientY - poseDrag.sy) > 10) {
+      poseDrag.axis = Math.abs(e.clientX - poseDrag.sx) > Math.abs(e.clientY - poseDrag.sy) ? 'x' : 'y';
+    }
+    if (poseDrag.axis === 'x') rotateBy(-(e.clientX - poseDrag.lastX) * 0.01);
+    else if (poseDrag.axis === 'y') sitBy(e.clientY - poseDrag.lastY);
+    poseDrag.lastX = e.clientX;
     poseDrag.lastY = e.clientY;
     return;
   }
