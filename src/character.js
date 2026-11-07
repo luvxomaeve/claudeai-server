@@ -32,7 +32,7 @@ const BASE_POSE = {
   lUpperTwist: 0, rUpperTwist: 0,
   lLowerY: -0.25, rLowerY: 0.25,
   lLowerZ: 0, rLowerZ: 0,
-  hipsY: 0, hipsZ: 0,
+  hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0,
 };
 
 export { BASE_POSE };
@@ -98,6 +98,8 @@ export class Character {
     this.posePrev = { ...BASE_POSE };
     this.poseT = 1;
     this.twistQ = new THREE.Quaternion();
+    this.dancing = false;
+    this.mixer = null; // для mocap-анимаций (.vrma)
     this.axisX = new THREE.Vector3(1, 0, 0);
 
     this.lookTarget = new THREE.Object3D();
@@ -119,7 +121,6 @@ export class Character {
     this.zones = ZONE_DEFS
       .map((d) => ({ ...d, node: vrm.humanoid.getRawBoneNode(d.bone), center: new THREE.Vector3() }))
       .filter((z) => z.node);
-    this.hipsBaseY = this.bones.hips?.position.y ?? 0;
   }
 
   // ---------- Реакции ----------
@@ -136,7 +137,10 @@ export class Character {
   }
 
   playMotion(name, side = Math.random() < 0.5 ? 'left' : 'right') {
-    const durations = { tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6, lookAround: 3.2, stretch: 2.8, shift: 3.0 };
+    const durations = {
+      tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6,
+      lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4,
+    };
     this.motions = this.motions.filter((m) => m.name !== name);
     this.motions.push({ name, side, t: 0, dur: durations[name] ?? 1.5 });
   }
@@ -166,6 +170,20 @@ export class Character {
     const out = {};
     for (const key in BASE_POSE) out[key] = this.posePrev[key] + (target[key] - this.posePrev[key]) * k;
     return out;
+  }
+
+  // ---------- Mocap (.vrma) ----------
+
+  playClip(clip) {
+    this.stopClip();
+    this.mixer = new THREE.AnimationMixer(this.vrm.scene);
+    this.mixer.clipAction(clip).play();
+  }
+
+  stopClip() {
+    if (!this.mixer) return;
+    this.mixer.stopAllAction();
+    this.mixer = null;
   }
 
   talk(seconds) {
@@ -207,12 +225,19 @@ export class Character {
     const t = this.time;
     const b = this.bones;
 
-    // Сбрасываем позу в базовую: руки опущены.
-    for (const n in b) b[n]?.rotation.set(0, 0, 0);
-    if (b.hips) b.hips.position.y = this.hipsBaseY;
+    // Сбрасываем все кости в исходную позу, дальше накладываем слои.
+    this.vrm.humanoid.resetNormalizedPose();
+
+    // Mocap-анимация управляет телом сама; мимика и физика — как обычно.
+    if (this.mixer) {
+      this.mixer.update(dt);
+      this.finishFrame(dt);
+      return;
+    }
 
     this.poseT += dt;
-    const pose = this.currentBasePose();
+    // В танце руки свободны, поэтому берём стойку «Стоит».
+    const pose = this.dancing ? { ...BASE_POSE } : this.currentBasePose();
     const poseDef = POSES[this.poseName];
     if (poseDef.wave === 'left') pose.lLowerZ += Math.sin(t * 9) * 0.25;
 
@@ -221,9 +246,21 @@ export class Character {
     pose.spineX += breath * 0.015;
     pose.lUpperZ += breath * 0.02;
     pose.rUpperZ -= breath * 0.02;
-    pose.hipsZ += Math.sin(t * 0.6) * 0.02;
-    pose.spineZ -= Math.sin(t * 0.6) * 0.025;
-    pose.headZ += Math.sin(t * 0.6 + 0.8) * 0.03;
+    // «Живое» покачивание: перенос веса с ноги на ногу, лёгкий поворот бёдер,
+    // корпус и голова компенсируют — так стоят живые люди, а не манекен.
+    const sway = Math.sin(t * 0.55);
+    const twist = Math.sin(t * 0.37 + 1.3);
+    pose.hipsZ += sway * 0.035;
+    pose.hipsX += sway * 0.012 * this.scale;
+    pose.spineZ -= sway * 0.05;
+    pose.headZ += Math.sin(t * 0.55 + 0.9) * 0.035;
+    pose.hipsRotY += twist * 0.06;
+    pose.spineY -= twist * 0.04;
+    pose.lUpperX += twist * 0.04;
+    pose.rUpperX -= twist * 0.04;
+    pose.headX += Math.sin(t * 0.23) * 0.03;
+
+    if (this.dancing) this.applyDance(pose, t);
 
     // Голова чуть поворачивается за пальцем/курсором.
     pose.headY += this.headLook.x * 0.35;
@@ -298,6 +335,25 @@ export class Character {
           pose.spineZ -= 0.09 * e * s;
           pose.headZ += 0.06 * e * s;
           break;
+        case 'touchHair':
+          // Поправляет волосы у виска.
+          if (m.side === 'left') {
+            pose.lUpperZ += 1.15 * e;
+            pose.lUpperX -= 0.55 * e;
+            pose.lLowerZ += 2.4 * e;
+          } else {
+            pose.rUpperZ -= 1.15 * e;
+            pose.rUpperX -= 0.55 * e;
+            pose.rLowerZ -= 2.4 * e;
+          }
+          pose.headZ += 0.14 * e * s;
+          pose.headY -= 0.12 * e * s;
+          break;
+        case 'bounce':
+          // Пружинит на носочках.
+          pose.hipsY += Math.abs(Math.sin(m.t * Math.PI * 2 / 0.7)) * 0.02 * e * this.scale;
+          pose.headX += Math.sin(m.t * 9) * 0.03 * e;
+          break;
         case 'turnAway':
           pose.spineY += 0.45 * e * s;
           pose.headY += 0.5 * e * s;
@@ -318,9 +374,12 @@ export class Character {
       if (this.motions.length === 0 && this.patAmount < 0.1) {
         const r = Math.random();
         const busyArms = this.poseName !== 'stand';
-        if (r < 0.35) this.playMotion('shift');
-        else if (r < 0.65) this.playMotion('lookAround');
-        else if (r < 0.85 || busyArms) this.playMotion('tiltHead');
+        if (this.dancing) { /* в танце и так весело */ }
+        else if (r < 0.25) this.playMotion('shift');
+        else if (r < 0.45) this.playMotion('lookAround');
+        else if (r < 0.6) this.playMotion('bounce');
+        else if (r < 0.75 || busyArms) this.playMotion('tiltHead');
+        else if (r < 0.9) this.playMotion('touchHair');
         else this.playMotion('stretch');
       }
     }
@@ -338,14 +397,42 @@ export class Character {
     b.leftLowerArm?.rotation.set(0, pose.lLowerY, pose.lLowerZ);
     b.rightLowerArm?.rotation.set(0, pose.rLowerY, pose.rLowerZ);
     if (b.hips) {
-      b.hips.position.y = this.hipsBaseY + pose.hipsY;
-      b.hips.rotation.z = pose.hipsZ;
+      b.hips.position.y += pose.hipsY;
+      b.hips.position.x += pose.hipsX;
+      b.hips.rotation.set(0, pose.hipsRotY, pose.hipsZ);
     }
 
+    this.finishFrame(dt);
+  }
+
+  finishFrame(dt) {
+    if (this.dancing && !this.mixer) this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.5);
     this.updateExpressions(dt);
     this.vrm.update(dt);
     this.vrm.scene.updateMatrixWorld(true);
     this.updateZones();
+  }
+
+  // Танец: пружинит в такт (~120 BPM), качает бёдрами, по очереди машет руками.
+  applyDance(pose, t) {
+    const beat = t * Math.PI * 2; // 1 цикл в секунду = 2 «удара»
+    const side = Math.sin(beat * 0.5);
+    pose.hipsY += Math.abs(Math.sin(beat)) * 0.03 * this.scale;
+    pose.hipsZ += side * 0.1;
+    pose.hipsX += side * 0.02 * this.scale;
+    pose.spineZ -= side * 0.12;
+    pose.hipsRotY += Math.sin(beat * 0.25) * 0.2;
+    pose.spineY -= Math.sin(beat * 0.25) * 0.1;
+    pose.headX += Math.sin(beat * 2) * 0.05;
+    pose.headZ += side * 0.15;
+    const l = 0.5 + 0.5 * Math.sin(beat * 0.5);
+    const r = 1 - l;
+    pose.lUpperZ += (0.4 + 1.1 * l);
+    pose.lLowerZ += 0.3 + 1.0 * l;
+    pose.lUpperX -= 0.3;
+    pose.rUpperZ -= (0.4 + 1.1 * r);
+    pose.rLowerZ -= 0.3 + 1.0 * r;
+    pose.rUpperX -= 0.3;
   }
 
   updateExpressions(dt) {

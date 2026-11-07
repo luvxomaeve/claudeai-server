@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
+import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Character, POSES, BASE_POSE } from './character.js';
 import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
 // положи файл рядом, например models/waifu.vrm, и укажи путь здесь,
-// или просто перетащи .vrm в окно / нажми 📂.
+// или просто перетащи .vrm в окно / добавь через 👗 Гардероб.
 const DEFAULT_MODEL = window.WAIFU_MODEL_URL ??
   'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v3.1.0/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm';
 
@@ -62,6 +64,7 @@ function frameCamera() {
 
 const loader = new GLTFLoader();
 loader.register((parser) => new VRMLoaderPlugin(parser));
+loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
 let hitboxGroup = null;
 
@@ -71,19 +74,29 @@ async function loadPackedModel(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const { vrm } = await res.json();
-  const bytes = Uint8Array.from(atob(vrm), (c) => c.charCodeAt(0));
-  return loader.parseAsync(bytes.buffer, '');
+  return Uint8Array.from(atob(vrm), (c) => c.charCodeAt(0)).buffer;
 }
 
-async function loadModel(url) {
-  $('loading').classList.remove('done');
-  $('loading-text').textContent = 'Загрузка…';
+// source: { url } — ссылка на .vrm (или упакованный .json), { buffer } — содержимое файла.
+async function parseModel(source) {
+  if (source.buffer) return loader.parseAsync(source.buffer.slice(0), '');
+  if (source.url.endsWith('.json')) return loader.parseAsync(await loadPackedModel(source.url), '');
+  return loader.loadAsync(source.url, (e) => {
+    if (e.total) $('loading-text').textContent = `Загрузка… ${Math.round((e.loaded / e.total) * 100)}%`;
+  });
+}
+
+let firstLoad = true;
+
+async function loadModel(source) {
+  if (firstLoad) {
+    $('loading').classList.remove('done');
+    $('loading-text').textContent = 'Загрузка…';
+  } else {
+    $('flash').classList.add('on'); // вспышка, пока переодевается
+  }
   try {
-    const gltf = url.endsWith('.json')
-      ? await loadPackedModel(url)
-      : await loader.loadAsync(url, (e) => {
-        if (e.total) $('loading-text').textContent = `Загрузка… ${Math.round((e.loaded / e.total) * 100)}%`;
-      });
+    const gltf = await parseModel(source);
     const vrm = gltf.userData.vrm;
     if (!vrm) throw new Error('Это не VRM-файл');
 
@@ -91,22 +104,47 @@ async function loadModel(url) {
     (VRMUtils.combineSkeletons ?? VRMUtils.removeUnnecessaryJoints)?.(gltf.scene);
     VRMUtils.rotateVRM0(vrm); // VRM 0.x смотрит назад — разворачиваем к камере
     vrm.scene.traverse((o) => { o.frustumCulled = false; });
+    // Нужен, чтобы mocap-анимации могли управлять взглядом.
+    if (vrm.lookAt) {
+      const proxy = new VRMLookAtQuaternionProxy(vrm.lookAt);
+      proxy.name = 'VRMLookAtQuaternionProxy';
+      vrm.scene.add(proxy);
+    }
 
-    if (character) {
-      scene.remove(character.vrm.scene);
-      VRMUtils.deepDispose(character.vrm.scene);
+    // Переносим состояние со старой модели на новую.
+    const prev = character;
+    if (prev) {
+      scene.remove(prev.vrm.scene);
+      VRMUtils.deepDispose(prev.vrm.scene);
     }
     scene.add(vrm.scene);
     character = new Character(vrm);
     window.__waifu = character; // для отладки из консоли
-    setActivePoseButton('stand');
+    if (prev) {
+      character.setPose(prev.poseName);
+      character.poseT = 1;
+      character.dancing = prev.dancing;
+    } else {
+      setActivePoseButton('stand');
+    }
+    if (currentAnim) character.playClip(createVRMAnimationClip(currentAnim.animation, vrm));
+    applyClothColor();
     buildHitboxes();
     frameCamera();
     $('loading').classList.add('done');
-    setTimeout(() => say(pick(IDLE_LINES[tier()])), 600);
+    if (firstLoad) {
+      setTimeout(() => say(pick(IDLE_LINES[tier()])), 600);
+    } else {
+      character.react({ expression: 'happy', motion: 'tiltHead' });
+      setTimeout(() => say(pick(['Ну как я тебе? ♥', 'Та-дам! Нравится?', 'Хе-хе, переоделась~', 'Мне идёт?'])), 300);
+    }
+    firstLoad = false;
   } catch (err) {
     console.error(err);
-    $('loading-text').textContent = `Не удалось загрузить модель: ${err.message}`;
+    if (firstLoad) $('loading-text').textContent = `Не удалось загрузить модель: ${err.message}`;
+    else say('Ой… этот наряд не открывается. Точно .vrm?', 'sad');
+  } finally {
+    setTimeout(() => $('flash').classList.remove('on'), 150);
   }
 }
 
@@ -325,6 +363,8 @@ function addPoseButton(name, def) {
   btn.dataset.pose = name;
   btn.addEventListener('click', () => {
     if (!character) return;
+    if (currentAnim) stopAnim();
+    character.dancing = false;
     character.setPose(name);
     setActivePoseButton(name);
     say(POSE_LINES[name] ?? pick(['Так?', 'Ну как я тебе?', 'Вот так нормально?']));
@@ -375,7 +415,6 @@ function openEditor() {
   character.setCustomPose(editorParams);
   setActivePoseButton('custom');
   renderSliders();
-  $('editor').classList.remove('hidden');
 }
 
 function renderSliders() {
@@ -409,11 +448,7 @@ function renderSliders() {
   }
 }
 
-$('btn-editor').addEventListener('click', () => {
-  if ($('editor').classList.contains('hidden')) openEditor();
-  else $('editor').classList.add('hidden');
-});
-$('editor-close').addEventListener('click', () => $('editor').classList.add('hidden'));
+$('btn-editor').addEventListener('click', () => togglePanel('editor', openEditor));
 $('editor-reset').addEventListener('click', () => {
   editorParams = { ...BASE_POSE };
   character.setCustomPose(editorParams);
@@ -459,21 +494,244 @@ $('editor-clear').addEventListener('click', () => {
   try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
 });
 
-// ---------- Своя модель ----------
+// ---------- Панели ----------
 
-function loadFile(file) {
-  if (!file || !file.name.toLowerCase().endsWith('.vrm')) return;
-  const url = URL.createObjectURL(file);
-  loadModel(url).finally(() => URL.revokeObjectURL(url));
+function togglePanel(id, onOpen) {
+  const panel = $(id);
+  const willOpen = panel.classList.contains('hidden');
+  for (const p of document.querySelectorAll('.panel')) p.classList.add('hidden');
+  if (willOpen) {
+    onOpen?.();
+    panel.classList.remove('hidden');
+  }
 }
-$('file-input').addEventListener('change', (e) => loadFile(e.target.files[0]));
+for (const btn of document.querySelectorAll('.panel-close')) {
+  btn.addEventListener('click', () => btn.closest('.panel').classList.add('hidden'));
+}
+
+// ---------- Гардероб ----------
+
+const DEFAULT_OUTFIT = { id: 'default', name: 'Базовый', source: { url: DEFAULT_MODEL } };
+let outfits = [DEFAULT_OUTFIT];
+let currentOutfit = 'default';
+
+const CLOTH_COLORS = [
+  { id: 'original', name: 'Оригинал', color: null },
+  { id: 'black', name: 'Готика', color: 0x2b2530 },
+  { id: 'wine', name: 'Бордо', color: 0x6e1f33 },
+  { id: 'violet', name: 'Фиалка', color: 0x5b3a8c },
+  { id: 'rose', name: 'Роза', color: 0xf2a7c3 },
+  { id: 'red', name: 'Алый', color: 0xc8283c },
+  { id: 'sky', name: 'Небо', color: 0x8fc4ee },
+  { id: 'white', name: 'Белый', color: 0xf4f1f6 },
+];
+let clothColor = 'original';
+try { clothColor = localStorage.getItem('waifu-cloth-color') || 'original'; } catch { /* ignore */ }
+
+// Перекрашивает материалы одежды (в моделях VRoid в их имени есть «CLOTH»).
+function applyClothColor() {
+  if (!character) return;
+  const def = CLOTH_COLORS.find((c) => c.id === clothColor) ?? CLOTH_COLORS[0];
+  character.vrm.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (!/CLOTH/i.test(m.name) || !m.color) continue;
+      m.userData.origColor ??= m.color.clone();
+      if (m.shadeColorFactor) m.userData.origShade ??= m.shadeColorFactor.clone();
+      if (def.color === null) {
+        m.color.copy(m.userData.origColor);
+        if (m.shadeColorFactor) m.shadeColorFactor.copy(m.userData.origShade);
+      } else {
+        const c = new THREE.Color(def.color);
+        m.color.copy(c);
+        if (m.shadeColorFactor) m.shadeColorFactor.copy(c).multiplyScalar(0.55);
+      }
+    }
+  });
+}
+
+function renderWardrobe() {
+  const list = $('outfit-list');
+  list.innerHTML = '';
+  for (const o of outfits) {
+    const row = document.createElement('div');
+    row.className = 'outfit' + (o.id === currentOutfit ? ' active' : '');
+    const wear = document.createElement('button');
+    wear.className = 'outfit-wear';
+    wear.textContent = o.name;
+    wear.addEventListener('click', () => wearOutfit(o.id));
+    row.appendChild(wear);
+    if (o.id !== 'default') {
+      const del = document.createElement('button');
+      del.className = 'outfit-del';
+      del.title = 'Убрать наряд';
+      del.textContent = '✕';
+      del.addEventListener('click', async () => {
+        await deleteFile(o.id);
+        outfits = outfits.filter((x) => x.id !== o.id);
+        if (currentOutfit === o.id) wearOutfit('default');
+        else renderWardrobe();
+      });
+      row.appendChild(del);
+    }
+    list.appendChild(row);
+  }
+
+  const sw = $('color-list');
+  sw.innerHTML = '';
+  for (const c of CLOTH_COLORS) {
+    const b = document.createElement('button');
+    b.className = 'swatch' + (c.id === clothColor ? ' active' : '');
+    b.title = c.name;
+    b.style.setProperty('--swatch', c.color === null ? 'transparent' : `#${c.color.toString(16).padStart(6, '0')}`);
+    b.innerHTML = `<span></span>${c.name}`;
+    b.addEventListener('click', () => {
+      clothColor = c.id;
+      try { localStorage.setItem('waifu-cloth-color', clothColor); } catch { /* ignore */ }
+      applyClothColor();
+      renderWardrobe();
+      if (character) {
+        character.react({ expression: 'happy', motion: 'sway' });
+        say(c.id === 'black' ? 'Мрачненько… мне нравится ♥' : pick(['Ну как?', 'Мне идёт этот цвет?', 'Хе-хе, обновочка~']));
+      }
+    });
+    sw.appendChild(b);
+  }
+}
+
+async function wearOutfit(id) {
+  const o = outfits.find((x) => x.id === id);
+  if (!o || !character) return;
+  currentOutfit = id;
+  try { localStorage.setItem('waifu-outfit', id); } catch { /* ignore */ }
+  renderWardrobe();
+  await loadModel(o.source);
+}
+
+async function addOutfit(file) {
+  const buffer = await file.arrayBuffer();
+  const record = { id: `outfit-${Date.now()}`, kind: 'outfit', name: file.name.replace(/\.vrm$/i, '').slice(0, 24), data: buffer, created: Date.now() };
+  await saveFile(record);
+  outfits.push({ id: record.id, name: record.name, source: { buffer } });
+  await wearOutfit(record.id);
+}
+
+$('btn-wardrobe').addEventListener('click', () => togglePanel('wardrobe', renderWardrobe));
+$('outfit-input').addEventListener('change', (e) => {
+  if (e.target.files[0]) addOutfit(e.target.files[0]);
+  e.target.value = '';
+});
+
+// ---------- Анимации ----------
+
+let anims = [];
+let currentAnim = null; // { id, name, animation }
+
+async function parseAnimation(buffer) {
+  const gltf = await loader.parseAsync(buffer.slice(0), '');
+  const animation = gltf.userData.vrmAnimations?.[0];
+  if (!animation) throw new Error('В файле нет VRM-анимации');
+  return animation;
+}
+
+function renderAnims() {
+  $('btn-dance').classList.toggle('active', !!character?.dancing && !currentAnim);
+  $('btn-dance').textContent = character?.dancing && !currentAnim ? '💃 Танцует — остановить' : '💃 Танцевать';
+  const list = $('anim-list');
+  list.innerHTML = '';
+  if (!anims.length) {
+    const empty = document.createElement('p');
+    empty.className = 'panel-note';
+    empty.textContent = 'Пока пусто. Добавь mocap-анимацию в формате .vrma — она заменит позы.';
+    list.appendChild(empty);
+  }
+  for (const a of anims) {
+    const row = document.createElement('div');
+    row.className = 'outfit' + (currentAnim?.id === a.id ? ' active' : '');
+    const play = document.createElement('button');
+    play.className = 'outfit-wear';
+    play.textContent = (currentAnim?.id === a.id ? '■ ' : '▶ ') + a.name;
+    play.addEventListener('click', () => (currentAnim?.id === a.id ? stopAnim() : playAnim(a)));
+    const del = document.createElement('button');
+    del.className = 'outfit-del';
+    del.title = 'Удалить анимацию';
+    del.textContent = '✕';
+    del.addEventListener('click', async () => {
+      if (currentAnim?.id === a.id) stopAnim();
+      await deleteFile(a.id);
+      anims = anims.filter((x) => x.id !== a.id);
+      renderAnims();
+    });
+    row.append(play, del);
+    list.appendChild(row);
+  }
+}
+
+async function playAnim(a) {
+  if (!character) return;
+  try {
+    a.animation ??= await parseAnimation(a.data);
+    currentAnim = a;
+    character.dancing = false;
+    character.playClip(createVRMAnimationClip(a.animation, character.vrm));
+  } catch (err) {
+    console.error(err);
+    say('Не получается так двигаться… файл точно .vrma?', 'sad');
+  }
+  renderAnims();
+}
+
+function stopAnim() {
+  currentAnim = null;
+  character?.stopClip();
+  renderAnims();
+}
+
+async function addAnim(file) {
+  const data = await file.arrayBuffer();
+  const record = { id: `anim-${Date.now()}`, kind: 'anim', name: file.name.replace(/\.vrma$/i, '').slice(0, 24), data, created: Date.now() };
+  await saveFile(record);
+  anims.push(record);
+  await playAnim(record);
+}
+
+$('btn-anims').addEventListener('click', () => togglePanel('anims', renderAnims));
+$('btn-dance').addEventListener('click', () => {
+  if (!character) return;
+  if (currentAnim) stopAnim();
+  character.dancing = !character.dancing;
+  if (character.dancing) say(pick(['Смотри, как я умею~', 'Музыку погромче!', 'Танцуем! ♥']), 'happy');
+  renderAnims();
+});
+$('anim-input').addEventListener('change', (e) => {
+  if (e.target.files[0]) addAnim(e.target.files[0]);
+  e.target.value = '';
+});
+
+// ---------- Перетаскивание файлов ----------
+
 window.addEventListener('dragover', (e) => { e.preventDefault(); $('drop-overlay').classList.remove('hidden'); });
 window.addEventListener('dragleave', () => $('drop-overlay').classList.add('hidden'));
 window.addEventListener('drop', (e) => {
   e.preventDefault();
   $('drop-overlay').classList.add('hidden');
-  loadFile(e.dataTransfer.files[0]);
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.vrma')) addAnim(file);
+  else if (name.endsWith('.vrm')) addOutfit(file);
 });
+
+// Сохранённые наряды и анимации из прошлых сессий.
+async function restoreLibrary() {
+  for (const r of await listFiles('outfit')) outfits.push({ id: r.id, name: r.name, source: { buffer: r.data } });
+  anims = await listFiles('anim');
+  let saved = 'default';
+  try { saved = localStorage.getItem('waifu-outfit') || 'default'; } catch { /* ignore */ }
+  const start = outfits.find((o) => o.id === saved) ?? DEFAULT_OUTFIT;
+  currentOutfit = start.id;
+  await loadModel(start.source);
+}
 
 // ---------- Цикл ----------
 
@@ -529,4 +787,4 @@ function tick() {
 
 resize();
 tick();
-loadModel(DEFAULT_MODEL);
+restoreLibrary();
