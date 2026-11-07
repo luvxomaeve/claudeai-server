@@ -83,7 +83,7 @@ const camBase = { dist: 2, cy: 1, S: 1 };
 let camYaw = 0;
 let camZoom = 1; // < 1 — ближе, > 1 — дальше
 const ZOOM_MIN = 0.35;
-const ZOOM_MAX = 1.8;
+const ZOOM_MAX = 3;
 
 function orbitTarget(out) {
   const d = camBase.dist * camZoom;
@@ -329,9 +329,22 @@ canvas.addEventListener('pointerdown', (e) => {
   pointerActive = true;
   $('hint').style.opacity = 0;
 
+  // Два пальца в любом режиме — щипок: приблизить/отдалить.
+  if (touches.size === 2) {
+    pinchDist = pinchDistance();
+    poseDrag = null;
+    orbitDrag = null;
+    bgSwipe = null;
+    petting = null;
+    stroking = null;
+    canvas.classList.remove('petting');
+    return;
+  }
+  if (touches.size > 2) return;
+
   // Режим позы: хватаем руку или голову.
   if (poseMode) {
-    if (touches.size === 1) poseDragStart(e);
+    poseDragStart(e);
     return;
   }
 
@@ -339,7 +352,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (cameraMode) {
     if (touches.size === 1 && zoneAt(e) && performance.now() - camHintAt > 5000) {
       camHintAt = performance.now();
-      showToast('🎥 Режим камеры: касания выключены. Нажми камеру ещё раз');
+      showToast('Касания выключены — нажми 🎥 ещё раз');
     }
     if (touches.size === 2) {
       pinchDist = pinchDistance();
@@ -428,14 +441,14 @@ function dragDirection(e) {
 canvas.addEventListener('pointermove', (e) => {
   toNdc(e);
   if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (poseDrag) {
-    poseDragMove(e);
-    return;
-  }
-  if (cameraMode && touches.size === 2 && pinchDist > 0) {
+  if (touches.size === 2 && pinchDist > 0) {
     const d = pinchDistance();
     zoomBy(pinchDist / d);
     pinchDist = d;
+    return;
+  }
+  if (poseDrag) {
+    poseDragMove(e);
     return;
   }
   if (orbitDrag) {
@@ -515,7 +528,6 @@ function endPointer(e) {
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('wheel', (e) => {
-  if (!cameraMode) return;
   e.preventDefault();
   zoomBy(Math.exp(e.deltaY * 0.001));
 }, { passive: false });
@@ -533,8 +545,6 @@ function holdButton(id, action) {
   });
   for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
 }
-holdButton('cam-left', () => rotateBy(-0.06));
-holdButton('cam-right', () => rotateBy(0.06));
 holdButton('cam-in', () => zoomBy(0.96));
 holdButton('cam-out', () => zoomBy(1.04));
 $('cam-reset').addEventListener('click', () => {
@@ -631,6 +641,28 @@ function addPoseButton(name, def) {
   const btn = document.createElement('button');
   btn.textContent = def.label;
   btn.dataset.pose = name;
+  if (name.startsWith('saved:')) {
+    // Своя поза: крестик удаляет (второе нажатие подтверждает).
+    const del = document.createElement('span');
+    del.className = 'del';
+    del.textContent = '×';
+    btn.appendChild(del);
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!btn.classList.contains('armed')) {
+        btn.classList.add('armed');
+        setTimeout(() => btn.classList.remove('armed'), 2500);
+        showToast('Нажми × ещё раз — удалить');
+        return;
+      }
+      const n = name.slice(6);
+      delete savedPoses[n];
+      delete POSES[name];
+      try { localStorage.setItem(POSES_KEY, JSON.stringify(savedPoses)); } catch { /* ignore */ }
+      btn.remove();
+      showToast('Поза удалена');
+    });
+  }
   btn.addEventListener('click', () => {
     if (!character) return;
     if (currentAnim) stopAnim();
@@ -671,10 +703,15 @@ function setPoseMode(on) {
   poseDrag = null;
   $('btn-editor').classList.toggle('active', on);
   $('pose-bar').hidden = !on;
+  document.body.classList.toggle('posing', on);
+  $('cam-controls').hidden = !(on || cameraMode);
   closePoseSaveForm();
   if (on) {
     setPoseListOpen(false);
-    showToast('✋ Тяни за точки · по фону: вбок — повернуть, вниз — сесть');
+    // Позируем во весь рост — видно и руки, и ноги.
+    if (!fullBody) setFullBody(true);
+    $('hint').style.opacity = 0;
+    hintOnce('pose', 'Тяни за точки · два пальца — зум');
   }
 }
 $('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
@@ -858,27 +895,6 @@ function savePoseAs(rawName) {
   return true;
 }
 
-// Удаление своих поз в два нажатия: первое спрашивает, второе удаляет.
-let clearArmed = false;
-$('pose-clear').addEventListener('click', () => {
-  if (!Object.keys(savedPoses).length) { showToast('Сохранённых поз пока нет'); return; }
-  if (!clearArmed) {
-    clearArmed = true;
-    $('pose-clear').textContent = 'Точно?';
-    setTimeout(() => { clearArmed = false; $('pose-clear').textContent = 'Удалить мои'; }, 3000);
-    return;
-  }
-  clearArmed = false;
-  $('pose-clear').textContent = 'Удалить мои';
-  for (const name of Object.keys(savedPoses)) {
-    delete POSES[`saved:${name}`];
-    document.querySelector(`#pose-list button[data-pose="saved:${CSS.escape(name)}"]`)?.remove();
-  }
-  savedPoses = {};
-  try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
-  showToast('Свои позы удалены');
-});
-
 // ---------- Режим камеры ----------
 
 let cameraMode = false;
@@ -887,14 +903,22 @@ function setCameraMode(on) {
   if (on && poseMode) setPoseMode(false);
   cameraMode = on;
   $('btn-camera').classList.toggle('active', on);
-  $('cam-controls').hidden = !on;
+  $('cam-controls').hidden = !(on || poseMode);
   canvas.classList.toggle('camera', on);
   petting = null;
   stroking = null;
   orbitDrag = null;
-  showToast(on ? '🎥 Режим камеры: крути пальцем, щипок — приблизить' : '👆 Обычный режим: касайся её');
+  if (on) hintOnce('cam', 'Крути пальцем · два пальца — зум');
 }
 $('btn-camera').addEventListener('click', () => setCameraMode(!cameraMode));
+
+// Подсказка режима — только в первый раз, чтобы не мешала.
+const hintsShown = new Set();
+function hintOnce(key, text) {
+  if (hintsShown.has(key)) return;
+  hintsShown.add(key);
+  showToast(text);
+}
 
 let toastTimer = 0;
 function showToast(text) {
@@ -905,6 +929,14 @@ function showToast(text) {
   toastTimer = setTimeout(() => t.classList.remove('on'), 2200);
 }
 
+function setFullBody(on) {
+  fullBody = on;
+  camZoom = 1;
+  $('btn-zoom').classList.toggle('off', !fullBody);
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+}
 $('btn-zoom').addEventListener('click', () => {
   fullBody = !fullBody;
   camZoom = 1;

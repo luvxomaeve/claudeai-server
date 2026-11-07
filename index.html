@@ -40,28 +40,26 @@
   <div id="toast"></div>
   <div id="handles" hidden></div>
 
+  <div id="cam-controls" hidden>
+    <button id="cam-in" class="icon-btn" title="Приблизить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg></button>
+    <button id="cam-out" class="icon-btn" title="Отдалить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+    <button id="btn-zoom" class="icon-btn" title="Во весь рост / крупно"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg></button>
+    <button id="cam-reset" class="icon-btn" title="Вернуть вид"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6.5 9.5V19h11V9.5"/></svg></button>
+  </div>
+
   <div id="poses">
     <div id="pose-list" hidden></div>
     <div id="pose-bar" hidden>
       <div id="pose-bar-buttons">
-        <button id="pose-reset">Сброс</button>
-        <button id="pose-clear">Удалить мои</button>
-        <button id="pose-save">Сохранить</button>
-        <button id="pose-done" class="primary">Готово</button>
+        <button id="pose-reset" class="pb-icon" title="Сбросить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v4h4"/></svg></button>
+        <button id="pose-save" class="pb-icon" title="Сохранить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.6.9 5.2-4.6-2.4-4.6 2.4.9-5.2-3.8-3.6 5.2-.8z"/></svg></button>
+        <button id="pose-done" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Готово</button>
       </div>
       <form id="pose-save-form" hidden>
         <input id="pose-save-name" type="text" maxlength="20" placeholder="Название позы" autocomplete="off" />
         <button type="submit" class="primary">OK</button>
         <button type="button" id="pose-save-cancel">✕</button>
       </form>
-    </div>
-    <div id="cam-controls" hidden>
-      <button id="btn-zoom" class="icon-btn" title="Во весь рост / крупно"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg></button>
-      <button id="cam-out" class="icon-btn" title="Отдалить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
-      <button id="cam-in" class="icon-btn" title="Приблизить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
-      <button id="cam-left" class="icon-btn" title="Повернуть влево"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v4h4"/></svg></button>
-      <button id="cam-right" class="icon-btn" title="Повернуть вправо"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M20 4.5v4h-4"/></svg></button>
-      <button id="cam-reset" class="icon-btn" title="Вернуть вид"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6.5 9.5V19h11V9.5"/></svg></button>
     </div>
     <button id="poses-toggle" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 8v6M12 14l-3 6M12 14l3 6M7 10.5l5-1.5 5 1.5"/></svg><span>Поза: <b id="pose-current">Стоит</b></span><span class="chev">▴</span></button>
   </div>
