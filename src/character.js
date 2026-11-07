@@ -32,7 +32,7 @@ const BASE_POSE = {
   lUpperTwist: 0, rUpperTwist: 0,
   lLowerY: -0.45, rLowerY: 0.45,
   lLowerZ: 0, rLowerZ: 0,
-  hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0,
+  hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0, lFootIn: 0, rFootIn: 0,
   lLegX: 0, rLegX: 0, lLegZ: 0, rLegZ: 0, lKneeX: 0, rKneeX: 0,
   lShoulderZ: 0, rShoulderZ: 0, handBend: 0.25,
 };
@@ -148,7 +148,7 @@ export class Character {
     const names = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
       'leftShoulder', 'rightShoulder',
       'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand',
-      'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg'];
+      'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot'];
     for (const n of names) this.bones[n] = vrm.humanoid.getNormalizedBoneNode(n);
     // Пальцы: [кость, сторона, сила сгиба]. Прямые пальцы — главный признак «манекена».
     this.fingers = [];
@@ -173,6 +173,9 @@ export class Character {
     // Масштаб зон относительно «стандартной» модели с головой на 1.4 м.
     this.scale = this.headHeight / 1.4;
     this.measureBody();
+    this.initIK();
+    this.handTargets = { left: null, right: null }; // позы «пальцем»: цель кисти в системе груди
+    this.headOffset = { x: 0, y: 0 };
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
 
@@ -218,6 +221,7 @@ export class Character {
 
   setPose(name) {
     if (!POSES[name] || name === this.poseName) return;
+    this.importTouchPose(POSES[name].touch);
     this.posePrev = this.currentBasePose();
     this.poseName = name;
     this.poseT = 0;
@@ -316,6 +320,7 @@ export class Character {
     const relaxR = Math.max(0, w); // правая нога расслаблена
     pose.hipsX += w * 0.035 * this.scale;
     pose.hipsZ += w * 0.075;
+    pose.hipsY -= Math.abs(w) * 0.01 * this.scale;
     pose.lLegZ -= w * 0.075; // ноги остаются вертикальными, бёдра наклоняются
     pose.rLegZ -= w * 0.075;
     pose.spineZ -= w * 0.12;
@@ -339,6 +344,10 @@ export class Character {
     pose.headZ += Math.sin(t * 0.47 + 0.9) * 0.04;
 
     if (this.dancing) this.applyDance(pose, t);
+
+    // Поворот головы, заданный пальцем в режиме позы.
+    pose.headY += this.headOffset.y;
+    pose.headX += this.headOffset.x;
 
     // Голова чуть поворачивается за пальцем/курсором.
     pose.headY += this.headLook.x * 0.35;
@@ -392,8 +401,8 @@ export class Character {
           break;
         case 'shyLegs':
           // Смущённо сводит колени, переминается.
-          pose.lLegZ -= 0.07 * e;
-          pose.rLegZ += 0.07 * e;
+          pose.lFootIn += 0.035 * e * this.scale;
+          pose.rFootIn += 0.035 * e * this.scale;
           pose.lKneeX += (0.12 + Math.max(0, Math.sin(m.t * 5)) * 0.12) * e;
           pose.rKneeX += (0.12 + Math.max(0, -Math.sin(m.t * 5)) * 0.12) * e;
           pose.lLegX -= 0.06 * e;
@@ -521,13 +530,17 @@ export class Character {
       if (f.thumb) this.rot(f.node, 0, -s * f.curl * curl, 0);
       else this.rot(f.node, 0, 0, s * f.curl * curl);
     }
-    // Не даём кистям уйти внутрь тела: при необходимости отводим руки наружу.
-    this.solveArms(pose, dt);
     if (b.hips) {
       b.hips.position.y += pose.hipsY;
       b.hips.position.x += pose.hipsX * this.flip;
       this.rot(b.hips, 0, pose.hipsRotY, pose.hipsZ);
     }
+    // Ступни стоят на полу: колени сгибаются сами под движение бёдер.
+    this.plantFeet(pose);
+    // Не даём кистям уйти внутрь тела: при необходимости отводим руки наружу.
+    this.solveArms(pose, dt);
+    // Руки, выставленные пальцем, тянутся к своим точкам.
+    this.applyHandTargets();
 
     this.finishFrame(dt);
   }
@@ -573,6 +586,158 @@ export class Character {
     const swing = Math.sin(b * 0.5);
     blendArm(pose, 'left', { upZ: -1.05, upX: -0.3 + 0.4 * swing, tw: 0.4, loY: -1.5 - 0.2 * bounce, loZ: 0 }, 1);
     blendArm(pose, 'right', { upZ: -1.05, upX: -0.3 - 0.4 * swing, tw: 0.4, loY: -1.5 - 0.2 * bounce, loZ: 0 }, 1);
+  }
+
+  // ---------- IK (обратная кинематика) ----------
+
+  initIK() {
+    const b = this.bones;
+    this.restFoot = {};
+    for (const side of ['left', 'right']) {
+      const foot = b[`${side}Foot`];
+      if (!foot) continue;
+      foot.updateWorldMatrix(true, false);
+      this.restFoot[side] = {
+        pos: foot.getWorldPosition(new THREE.Vector3()),
+        quat: foot.getWorldQuaternion(new THREE.Quaternion()),
+      };
+    }
+    this.ikTmp = {
+      a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(),
+      t: new THREE.Vector3(), d: new THREE.Vector3(), p: new THREE.Vector3(),
+      e: new THREE.Vector3(), q: new THREE.Quaternion(), q2: new THREE.Quaternion(),
+    };
+  }
+
+  // Поворачивает кость так, чтобы направление from (в мире) стало to.
+  rotateBoneTo(bone, from, to) {
+    const { q, q2 } = this.ikTmp;
+    if (from.lengthSq() < 1e-10 || to.lengthSq() < 1e-10) return;
+    q.setFromUnitVectors(from.clone().normalize(), to.clone().normalize());
+    bone.getWorldQuaternion(q2);
+    q2.premultiply(q);
+    this.setWorldQuat(bone, q2);
+  }
+
+  setWorldQuat(bone, worldQuat) {
+    const parent = new THREE.Quaternion();
+    bone.parent.getWorldQuaternion(parent);
+    bone.quaternion.copy(parent.invert().multiply(worldQuat));
+    bone.updateWorldMatrix(false, true);
+  }
+
+  // Двухзвенный IK: upper → lower → end дотягивается до target, сгиб в сторону pole.
+  twoBoneIK(upper, lower, end, target, pole) {
+    const { a, b, c, t, d, p, e } = this.ikTmp;
+    upper.updateWorldMatrix(true, true);
+    upper.getWorldPosition(a);
+    lower.getWorldPosition(b);
+    end.getWorldPosition(c);
+    const l1 = a.distanceTo(b);
+    const l2 = b.distanceTo(c);
+    t.copy(target).sub(a);
+    const dist = THREE.MathUtils.clamp(t.length(), 1e-4, (l1 + l2) * 0.999);
+    t.normalize();
+    const cosA = THREE.MathUtils.clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1);
+    const sinA = Math.sqrt(1 - cosA * cosA);
+    p.copy(pole).sub(a);
+    p.addScaledVector(t, -p.dot(t));
+    if (p.lengthSq() < 1e-8) p.set(0, 0, 1);
+    p.normalize();
+    e.copy(a).addScaledVector(t, cosA * l1).addScaledVector(p, sinA * l1); // новый локоть/колено
+    this.rotateBoneTo(upper, b.clone().sub(a), e.clone().sub(a));
+    lower.getWorldPosition(b);
+    end.getWorldPosition(c);
+    d.copy(a).addScaledVector(t, dist);
+    this.rotateBoneTo(lower, c.clone().sub(b), d.clone().sub(b));
+  }
+
+  plantFeet(pose) {
+    const b = this.bones;
+    if (!b.hips || !this.restFoot.left) return;
+    b.hips.updateWorldMatrix(true, true);
+    const hipsPos = b.hips.getWorldPosition(new THREE.Vector3());
+    const fwd = new THREE.Vector3(0, 0, 1);
+    for (const side of ['left', 'right']) {
+      const L = side === 'left';
+      const upper = b[`${side}UpperLeg`];
+      const lower = b[`${side}LowerLeg`];
+      const foot = b[`${side}Foot`];
+      const rest = this.restFoot[side];
+      if (!upper || !lower || !foot || !rest) continue;
+      // Нога, которой «хотят» согнуть колено, приподнимает пятку и чуть выходит вперёд.
+      // Пятку поднимает только та нога, что согнута сильнее другой (расслабленная).
+      const bend = (L ? pose.lKneeX - pose.rKneeX : pose.rKneeX - pose.lKneeX);
+      const lift = THREE.MathUtils.clamp(bend, 0, 0.6);
+      const target = rest.pos.clone();
+      target.y += lift * 0.06 * this.scale;
+      target.z += lift * 0.08 * this.scale;
+      const inward = L ? pose.lFootIn : pose.rFootIn;
+      target.x += Math.sign(hipsPos.x - rest.pos.x) * inward;
+      const knee = lower.getWorldPosition(new THREE.Vector3());
+      const pole = knee.addScaledVector(fwd, 0.6);
+      this.twoBoneIK(upper, lower, foot, target, pole);
+      // Стопа ровно на полу (при поднятой пятке носок смотрит вниз).
+      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7);
+      this.setWorldQuat(foot, tilt.multiply(rest.quat.clone()));
+    }
+  }
+
+  // ---------- Поза пальцем ----------
+
+  chestNode() {
+    return this.bones.upperChest ?? this.bones.chest ?? this.bones.spine;
+  }
+
+  setHandTarget(side, worldPoint) {
+    const chest = this.chestNode();
+    chest.updateWorldMatrix(true, false);
+    this.handTargets[side] = chest.worldToLocal(worldPoint.clone());
+  }
+
+  handWorld(side) {
+    return this.bones[`${side}Hand`]?.getWorldPosition(new THREE.Vector3());
+  }
+
+  clearTouchPose() {
+    this.handTargets = { left: null, right: null };
+    this.headOffset = { x: 0, y: 0 };
+  }
+
+  exportTouchPose() {
+    return {
+      left: this.handTargets.left?.toArray() ?? null,
+      right: this.handTargets.right?.toArray() ?? null,
+      head: { ...this.headOffset },
+    };
+  }
+
+  importTouchPose(data) {
+    this.clearTouchPose();
+    if (!data) return;
+    if (data.left) this.handTargets.left = new THREE.Vector3().fromArray(data.left);
+    if (data.right) this.handTargets.right = new THREE.Vector3().fromArray(data.right);
+    if (data.head) this.headOffset = { ...data.head };
+  }
+
+  applyHandTargets() {
+    const chest = this.chestNode();
+    if (!chest) return;
+    chest.updateWorldMatrix(true, false);
+    for (const side of ['left', 'right']) {
+      const local = this.handTargets[side];
+      if (!local) continue;
+      const upper = this.bones[`${side}UpperArm`];
+      const lower = this.bones[`${side}LowerArm`];
+      const hand = this.bones[`${side}Hand`];
+      if (!upper || !lower || !hand) continue;
+      const target = chest.localToWorld(local.clone());
+      // Локоть смотрит вниз-назад и немного наружу, как у человека.
+      const shoulder = upper.getWorldPosition(new THREE.Vector3());
+      const outward = Math.sign(shoulder.x - chest.getWorldPosition(new THREE.Vector3()).x) || 1;
+      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(outward * 0.3, -0.5, -0.3));
+      this.twoBoneIK(upper, lower, hand, target, pole);
+    }
   }
 
   springPose(target, dt) {

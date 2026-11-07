@@ -315,6 +315,12 @@ canvas.addEventListener('pointerdown', (e) => {
   pointerActive = true;
   $('hint').style.opacity = 0;
 
+  // Режим позы: хватаем руку или голову.
+  if (poseMode) {
+    if (touches.size === 1) poseDragStart(e);
+    return;
+  }
+
   // Режим камеры: пальцы крутят и приближают, реакций нет.
   if (cameraMode) {
     if (touches.size === 2) {
@@ -400,6 +406,10 @@ function dragDirection(e) {
 canvas.addEventListener('pointermove', (e) => {
   toNdc(e);
   if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (poseDrag) {
+    poseDragMove(e);
+    return;
+  }
   if (cameraMode && touches.size === 2 && pinchDist > 0) {
     const d = pinchDistance();
     zoomBy(pinchDist / d);
@@ -450,6 +460,7 @@ canvas.addEventListener('pointermove', (e) => {
 
 function endPointer(e) {
   touches.delete(e.pointerId);
+  poseDrag = null;
   if (touches.size < 2) pinchDist = 0;
   orbitDrag = null;
   if (touches.size > 0) return;
@@ -669,7 +680,84 @@ function renderSliders() {
   }
 }
 
-$('btn-editor').addEventListener('click', () => togglePanel('editor', openEditor));
+// ---------- Поза пальцем ----------
+// Режим ✏️: тянешь её за руку — рука идёт за пальцем (локоть сгибается сам),
+// тянешь за голову — поворачивает голову.
+
+let poseMode = false;
+let poseDrag = null; // { kind: 'hand' | 'head', side, plane, lastX, lastY }
+
+function setPoseMode(on) {
+  if (on && cameraMode) setCameraMode(false);
+  poseMode = on;
+  poseDrag = null;
+  $('btn-editor').classList.toggle('active', on);
+  $('pose-bar').hidden = !on;
+  closePoseSaveForm();
+  if (on) {
+    setPoseListOpen(false);
+    showToast('✋ Тяни её за руки и голову');
+  } else {
+    $('editor').classList.add('hidden');
+  }
+}
+$('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
+$('pose-done').addEventListener('click', () => setPoseMode(false));
+$('pose-reset').addEventListener('click', () => {
+  character?.clearTouchPose();
+  showToast('Поза сброшена');
+});
+$('pose-sliders').addEventListener('click', () => togglePanel('editor', openEditor));
+// Сохранение прямо в нижней панели: кнопки сменяются полем для названия.
+$('pose-save').addEventListener('click', () => {
+  $('pose-bar-buttons').hidden = true;
+  $('pose-save-form').hidden = false;
+  $('pose-save-name').focus();
+});
+function closePoseSaveForm() {
+  $('pose-save-form').hidden = true;
+  $('pose-bar-buttons').hidden = false;
+  $('pose-save-name').value = '';
+}
+$('pose-save-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  editorParams = null; // берём текущую позу целиком
+  if (savePoseAs($('pose-save-name').value)) {
+    closePoseSaveForm();
+    showToast('Поза сохранена — она в списке «Поза»');
+  }
+});
+$('pose-save-cancel').addEventListener('click', closePoseSaveForm);
+
+function poseDragStart(e) {
+  const hit = zoneAt(e);
+  if (!hit) return;
+  if (hit.zone === 'hand' || hit.zone === 'arm') {
+    const handPos = character.handWorld(hit.side);
+    const normal = new THREE.Vector3();
+    camera.getWorldDirection(normal);
+    poseDrag = { kind: 'hand', side: hit.side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, handPos) };
+    poseDragMove(e);
+  } else if (hit.zone === 'headpat' || hit.zone === 'face') {
+    poseDrag = { kind: 'head', lastX: e.clientX, lastY: e.clientY };
+  }
+}
+
+const dragPoint = new THREE.Vector3();
+function poseDragMove(e) {
+  if (!poseDrag) return;
+  if (poseDrag.kind === 'hand') {
+    toNdc(e);
+    raycaster.setFromCamera(pointer, camera);
+    if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) character.setHandTarget(poseDrag.side, dragPoint);
+  } else {
+    const o = character.headOffset;
+    o.y = THREE.MathUtils.clamp(o.y + (e.clientX - poseDrag.lastX) * 0.006 * Math.cos(camYaw), -0.9, 0.9);
+    o.x = THREE.MathUtils.clamp(o.x + (e.clientY - poseDrag.lastY) * 0.005, -0.5, 0.5);
+    poseDrag.lastX = e.clientX;
+    poseDrag.lastY = e.clientY;
+  }
+}
 $('editor-reset').addEventListener('click', () => {
   editorParams = { ...BASE_POSE };
   character.setCustomPose(editorParams);
@@ -681,20 +769,28 @@ $('editor-save').addEventListener('click', () => {
 });
 $('editor-save-row').addEventListener('submit', (e) => {
   e.preventDefault();
-  const name = $('pose-name').value.trim().slice(0, 20);
-  if (!name) return;
+  if (savePoseAs($('pose-name').value)) {
+    $('pose-name').value = '';
+    $('editor-save-row').hidden = true;
+  }
+});
+
+function savePoseAs(rawName) {
+  const name = rawName.trim().slice(0, 20);
+  if (!name || !character) return false;
   const key = `saved:${name}`;
   const isNew = !POSES[key];
-  savedPoses[name] = { ...editorParams };
-  POSES[key] = { label: `★ ${name}`, ...editorParams };
+  editorParams ??= { ...character.getPoseParams() };
+  const touch = character.exportTouchPose();
+  savedPoses[name] = { ...editorParams, touch };
+  POSES[key] = { label: `★ ${name}`, ...editorParams, touch };
   try { localStorage.setItem(POSES_KEY, JSON.stringify(savedPoses)); } catch { /* ignore */ }
   if (isNew) addPoseButton(key, POSES[key]);
   character.setPose(key);
   setActivePoseButton(key);
-  $('pose-name').value = '';
-  $('editor-save-row').hidden = true;
   say('Запомнила эту позу~');
-});
+  return true;
+}
 
 // Удаление в два нажатия: первое спрашивает, второе удаляет.
 let clearArmed = false;
@@ -719,6 +815,7 @@ $('editor-clear').addEventListener('click', () => {
 
 let cameraMode = false;
 function setCameraMode(on) {
+  if (on && poseMode) setPoseMode(false);
   cameraMode = on;
   $('btn-camera').classList.toggle('active', on);
   $('cam-controls').hidden = !on;

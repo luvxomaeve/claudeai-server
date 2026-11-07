@@ -595,3 +595,41 @@ body.dark #loading { background: #0d0812; color: #e9dcf5; }
   #buttons .icon-btn { width: 40px; height: 40px; }
   #cam-controls .icon-btn { width: 40px; height: 40px; }
 }
+
+/* Панель режима «поза пальцем». */
+#pose-bar {
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(90, 40, 100, 0.18);
+  animation: popUp 0.2s ease-out;
+}
+#pose-bar[hidden] { display: none; }
+#poses #pose-bar button {
+  border: none;
+  border-radius: 999px;
+  padding: 9px 13px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+#poses #pose-bar button.primary { background: var(--pink); color: #fff; }
+
+#pose-bar-buttons, #pose-save-form { display: flex; gap: 4px; align-items: center; }
+#pose-bar-buttons[hidden], #pose-save-form[hidden] { display: none; }
+#pose-save-name {
+  width: 150px;
+  min-width: 0;
+  border: 1px solid rgba(120, 60, 120, 0.25);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--ink);
+}
