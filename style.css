@@ -883,8 +883,6 @@ body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }
 /* Режим позы: полоса = наклон вперёд/назад — без отметок посадки и кнопки «лечь». */
 #sit-slider.bend .track i, #sit-slider.pose-mode #lie-toggle { display: none; }
 #sit-slider.bend .track::before { background: linear-gradient(var(--pink), #b56cff); }
-#poses #pose-bar button#pose-eye.on { background: rgba(255, 111, 168, 0.22); color: var(--pink); }
-#poses #pose-bar button#pose-eye.on svg { stroke-dasharray: 3 2.5; }
 
 /* Кнопка взгляда — рядом с ⌂ (видна и на главном экране, и в режиме позы). */
 #poses #btn-gaze {
@@ -901,3 +899,28 @@ body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }
 }
 #poses #btn-gaze.active { background: var(--pink); color: #fff; border-color: transparent; }
 body.posing #poses #btn-home { display: grid; }
+
+/* Нижняя панель: вкладки ⌂ Домой и ✏️ Позы, 👁 взгляд, точки (во вкладке «Позы»); список поз — справа. */
+#btn-editor { display: none !important; }
+#pose-done { display: none !important; }
+#poses #btn-tab-pose, #poses #btn-handles {
+  position: fixed;
+  bottom: 16px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+#poses #btn-tab-pose { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 52px); }
+#poses #btn-gaze { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 104px); }
+#poses #btn-handles { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 156px); }
+#poses #btn-handles[hidden] { display: none; }
+#poses #btn-home.active, #poses #btn-tab-pose.active { background: var(--pink); color: #fff; border-color: transparent; }
+#poses #btn-handles.active { background: rgba(255, 111, 168, 0.2); color: var(--pink); }
+#poses #poses-toggle { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 16px; padding: 10px 14px 10px 12px; }
+#poses #pose-list { margin-bottom: 52px; }
+#poses #pose-bar { margin-bottom: 52px; }
+body.posing #poses #pose-list { margin-bottom: 0; }

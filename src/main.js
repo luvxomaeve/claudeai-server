@@ -709,7 +709,11 @@ function resetView() {
 }
 $('cam-reset').addEventListener('click', resetView);
 // ⌂ на главном экране: камера спереди, она лицом к тебе и сразу встаёт.
+// Нижние вкладки: ⌂ «Домой» и ✏️ «Позы».
+$('btn-tab-pose').addEventListener('click', () => { if (!poseMode) setPoseMode(true); });
 $('btn-home').addEventListener('click', () => {
+  // Из вкладки «Позы» — просто домой (поза остаётся). Уже дома — вид спереди и встать.
+  if (poseMode) { setPoseMode(false); return; }
   resetView();
   if (character && character.sit > 0) sitBy(-character.sit / 0.004);
 });
@@ -870,6 +874,9 @@ function setPoseMode(on) {
   poseDrag = null;
   renderPoseSliderBtn();
   $('btn-editor').classList.toggle('active', on);
+  $('btn-tab-pose').classList.toggle('active', on);
+  $('btn-home').classList.toggle('active', !on);
+  $('btn-handles').hidden = !on;
   $('pose-bar').hidden = !on;
   document.body.classList.toggle('posing', on);
   $('cam-controls').hidden = !(on || cameraMode);
@@ -994,12 +1001,20 @@ let activeHandle = null; // какая точка сейчас в руке — �
 const HANDLE_LABELS = { handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра', footL: 'Левая нога', footR: 'Правая нога' };
 // 👁 в режиме позы: спрятать точки — смотреть на позу чисто, полоса слева всё так же наклоняет.
 let handlesHidden = false;
-$('pose-eye').addEventListener('click', () => {
+try { handlesHidden = localStorage.getItem('waifu-handles-hidden') === '1'; } catch { /* ignore */ }
+function renderHandlesBtn() {
+  $('btn-handles').classList.toggle('active', !handlesHidden);
+  $('btn-handles').title = handlesHidden ? 'Показать точки' : 'Спрятать точки';
+}
+$('btn-handles').addEventListener('click', () => {
   handlesHidden = !handlesHidden;
-  $('pose-eye').classList.toggle('on', handlesHidden);
-  $('pose-eye').title = handlesHidden ? 'Показать точки' : 'Спрятать точки';
-  showToast(handlesHidden ? 'Точки спрятаны · полоса слева — наклон' : 'Точки снова видны');
+  try { localStorage.setItem('waifu-handles-hidden', handlesHidden ? '1' : '0'); } catch { /* ignore */ }
+  renderHandlesBtn();
+  showToast(handlesHidden ? 'Точки спрятаны — тянуть за тело и полоса работают' : 'Точки видны');
 });
+renderHandlesBtn();
+$('btn-handles').hidden = true;
+$('btn-home').classList.add('active');
 function updateHandles() {
   const show = poseMode && !!character && (!handlesHidden || !!poseDrag);
   $('handles').hidden = !show;

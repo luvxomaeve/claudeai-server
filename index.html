@@ -58,7 +58,6 @@
     <div id="pose-bar" hidden>
       <div id="pose-bar-buttons">
         <button id="pose-reset" class="pb-icon" title="Сбросить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v4h4"/></svg></button>
-        <button id="pose-eye" class="pb-icon" title="Спрятать точки"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
         <button id="pose-save" class="pb-icon" title="Сохранить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.6.9 5.2-4.6-2.4-4.6 2.4.9-5.2-3.8-3.6 5.2-.8z"/></svg></button>
         <button id="pose-done" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Готово</button>
       </div>
@@ -68,6 +67,8 @@
         <button type="button" id="pose-save-cancel">✕</button>
       </form>
     </div>
+    <button id="btn-tab-pose" class="icon-btn" title="Позы"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4.5L15.5 5a2 2 0 0 1 2.8 0l.7.7a2 2 0 0 1 0 2.8L8.5 19z"/><path d="M13.5 7l3.5 3.5"/></svg></button>
+    <button id="btn-handles" class="icon-btn" title="Точки"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg></button>
     <button id="btn-gaze" class="icon-btn" title="Взгляд"><svg viewBox="0 0 24 24" aria-hidden="true"></svg></button>
     <button id="btn-home" class="icon-btn" title="Вид спереди, встать"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6.5 9.5V19h11V9.5"/></svg></button>
     <button id="poses-toggle" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 8v6M12 14l-3 6M12 14l3 6M7 10.5l5-1.5 5 1.5"/></svg><span>Поза: <b id="pose-current">Стоит</b></span><span class="chev">▴</span></button>
