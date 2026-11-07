@@ -375,6 +375,8 @@ function pinchDistance() {
 
 canvas.addEventListener('pointerdown', (e) => {
   if (!character) return;
+  // Открыт список поз — касание по сцене просто закрывает его.
+  if (!$('pose-list').hidden) { setPoseListOpen(false); return; }
   canvas.setPointerCapture(e.pointerId);
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   pointerActive = true;
@@ -680,7 +682,10 @@ function setPoseListOpen(open) {
   $('pose-list').hidden = !open;
   $('poses-toggle').setAttribute('aria-expanded', String(open));
   $('poses-toggle').classList.toggle('open', open);
-  if (open) $('hint').style.opacity = 0;
+  if (open) {
+    $('hint').style.opacity = 0;
+    $('pose-list').querySelector('button.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }
 }
 $('poses-toggle').addEventListener('click', () => setPoseListOpen($('pose-list').hidden));
 
@@ -719,28 +724,12 @@ function addPoseButton(name, def) {
     character.setPose(name);
     if (character.sit > 0) sitBy(-character.sit / 0.004);
     setActivePoseButton(name);
-    setPoseListOpen(false);
+    // Список не закрываем — можно быстро перебирать позы одну за другой.
     say(POSE_LINES[name] ?? pick(['Так?', 'Ну как я тебе?', 'Вот так нормально?']));
   });
   $('pose-list').appendChild(btn);
 }
 for (const [name, def] of Object.entries(POSES)) addPoseButton(name, def);
-// Посадка одним касанием: присела, на коленях, сидит, лежит.
-for (const [label, v] of [['Присела', 0.45], ['На коленях', 0.8], ['Сидит', 1.0], ['Лежит', 1.3]]) {
-  const btn = document.createElement('button');
-  btn.className = 'sit-chip';
-  btn.textContent = label;
-  btn.addEventListener('click', () => {
-    if (!character) return;
-    if (currentAnim) stopAnim();
-    if (currentMocap && character.mixer) stopMocap();
-    character.dancing = false;
-    character.loop = null;
-    sitBy((v - character.sit) / 0.004);
-    setPoseListOpen(false);
-  });
-  $('pose-list').appendChild(btn);
-}
 
 // ---------- Редактор поз ----------
 
@@ -843,7 +832,34 @@ function updateHandles() {
   }
 }
 
+// Левый край экрана (обычный режим и камера): почти невидимая полоса —
+// веди вниз — присед → на колени → боком → лежит, вверх — встаёт.
 const SIT_MAX = 1.3;
+const sitSlider = $('sit-slider');
+// Палец ведёт относительно (без скачка к месту касания): вся высота полосы = от «стоит» до «лежит».
+let sliderDrag = null;
+sitSlider.addEventListener('pointerdown', (e) => {
+  if (!character) return;
+  e.preventDefault();
+  e.stopPropagation();
+  sitSlider.setPointerCapture(e.pointerId);
+  sliderDrag = { y: e.clientY };
+  sitSlider.classList.add('active');
+});
+sitSlider.addEventListener('pointermove', (e) => {
+  if (!sliderDrag || !character) return;
+  const h = sitSlider.querySelector('.track').getBoundingClientRect().height || 200;
+  const dv = ((e.clientY - sliderDrag.y) / h) * SIT_MAX;
+  sliderDrag.y = e.clientY;
+  sitBy(dv / 0.004);
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
+}
+function updateSitSlider() {
+  if (!character) return;
+  sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(character.sitS / SIT_MAX, 0, 1).toFixed(3));
+}
 
 // Свайп вниз по пустому месту — садится на пол, вверх — встаёт.
 let sitLineAt = 0;
@@ -1535,6 +1551,7 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
 
   updateCamera(dt);
+  updateSitSlider();
   updateHandles();
   updateBlob();
   updateLiveIdle();

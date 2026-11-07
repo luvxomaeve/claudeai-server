@@ -755,7 +755,22 @@ body.posing #poses #poses-toggle, body.posing #poses #pose-list { display: none;
 
 /* Полоска невидимая: просто зона свайпа у левого края. Тонкий индикатор
    появляется только пока ведёшь пальцем. */
-#sit-slider .track { opacity: 0; transition: opacity 0.4s ease; }
+/* Почти прозрачная: еле заметная линия у края, ярче — пока ведёшь пальцем. */
+#sit-slider .track { opacity: 0.22; transition: opacity 0.4s ease; }
 #sit-slider.active .track { opacity: 1; transition-duration: 0.15s; }
+body.posing #sit-slider { display: none; }
 #poses #pose-list .sit-chip { background: rgba(255, 111, 168, 0.13); }
 #poses #pose-list .sit-chip:active { background: var(--pink); color: #fff; }
+
+/* Список поз — одна строка, листается пальцем вбок, не закрывается после выбора. */
+#pose-list {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  max-width: min(520px, calc(100vw - 24px));
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+#pose-list::-webkit-scrollbar { display: none; }
+#poses #pose-list button { flex: none; scroll-snap-align: center; white-space: nowrap; }
