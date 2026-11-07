@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Waifu Touch</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+        "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.1.0/lib/three-vrm.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="hud">
+    <div id="affection">
+      <span class="heart">♥</span>
+      <div class="bar"><div class="fill" id="affection-fill"></div></div>
+      <span id="affection-label">Незнакомец</span>
+    </div>
+    <div id="buttons">
+      <button id="btn-voice" title="Озвучка">🔊</button>
+      <button id="btn-hitbox" title="Показать зоны касаний">🎯</button>
+      <label class="btn" title="Загрузить свою модель (.vrm)">
+        📂<input id="file-input" type="file" accept=".vrm" hidden />
+      </label>
+    </div>
+  </div>
+
+  <div id="bubble" class="hidden"></div>
+  <div id="hint">Гладь по голове, бери за руку… просто попробуй 😉</div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div id="loading-text">Загрузка…</div>
+  </div>
+
+  <div id="drop-overlay" class="hidden">Отпусти, чтобы загрузить .vrm</div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
