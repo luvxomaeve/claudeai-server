@@ -5,6 +5,7 @@ import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationC
 import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { parseMixamo, mixamoClip } from './mixamo.js';
+import { MOCAP, loadMocap, mocapClip } from './mocap.js';
 import { Character, POSES, LOOPS } from './character.js';
 import { REACTIONS, STROKES, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
@@ -200,6 +201,7 @@ async function loadModel(source) {
       setActivePoseButton('stand');
     }
     if (currentAnim) character.playClip(clipFor(currentAnim, vrm));
+    else if (currentMocap) playMocap(currentMocap);
     stockings = new Stockings(vrm);
     loadLookFor(currentOutfit);
     applyLook();
@@ -628,6 +630,7 @@ function addPoseButton(name, def) {
   btn.addEventListener('click', () => {
     if (!character) return;
     if (currentAnim) stopAnim();
+    if (currentMocap) stopMocap();
     character.dancing = false;
     character.loop = null;
     character.setPose(name);
@@ -738,6 +741,7 @@ function updateHandles() {
 let sitLineAt = 0;
 function sitBy(dy) {
   if (!character) return;
+  if (dy > 0 && character.mixer && currentMocap) stopMocap();
   const before = character.sit;
   character.sit = THREE.MathUtils.clamp(character.sit + dy * 0.004, 0, 1);
   const now = performance.now();
@@ -1173,8 +1177,83 @@ async function parseAnimation(buffer) {
   return animation;
 }
 
+// ---------- База движений (mocap CMU) ----------
+
+let currentMocap = null;
+let liveIdle = false;
+let mocapOnceTimer = 0;
+
+async function playMocap(id) {
+  if (!character) return;
+  const entry = MOCAP.find((m) => m.id === id);
+  if (!entry) return;
+  try {
+    const data = await loadMocap(id);
+    if (currentAnim) { currentAnim = null; }
+    character.dancing = false;
+    character.loop = null;
+    character.sit = 0;
+    const loop = entry.idle || /Танец|Сальса|Чарльстон|походка/.test(entry.name);
+    character.playClip(mocapClip(data, character.vrm), { loop });
+    currentMocap = id;
+    clearTimeout(mocapOnceTimer);
+    // Жест играет один раз, потом — обратно в живое ожидание или обычный покой.
+    if (!loop) {
+      mocapOnceTimer = setTimeout(() => {
+        if (currentMocap !== id) return;
+        if (liveIdle) playMocap(nextIdle());
+        else stopMocap();
+      }, (data.frames / data.fps - 0.5) * 1000);
+    }
+  } catch (err) {
+    console.error(err);
+    say('Не получилось загрузить движение…', 'sad');
+  }
+  renderAnims();
+}
+
+function stopMocap() {
+  clearTimeout(mocapOnceTimer);
+  currentMocap = null;
+  liveIdle = false;
+  character?.stopClip();
+  renderAnims();
+}
+
+function nextIdle() {
+  const idles = MOCAP.filter((m) => m.idle && m.id !== currentMocap);
+  return idles[Math.floor(Math.random() * idles.length)].id;
+}
+
+// Живое ожидание: сама сменяет записи ожидания перед их концом.
+function updateLiveIdle() {
+  if (!liveIdle || !character?.mixer || !currentMocap) return;
+  if (MOCAP.find((m) => m.id === currentMocap)?.idle && character.clipTimeLeft() < 0.8) playMocap(nextIdle());
+}
+
+function renderMocap() {
+  const box = $('mocap-list');
+  box.innerHTML = '';
+  for (const m of MOCAP) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (currentMocap === m.id ? ' active' : '');
+    b.textContent = m.name;
+    b.addEventListener('click', () => (currentMocap === m.id ? stopMocap() : playMocap(m.id)));
+    box.appendChild(b);
+  }
+  $('btn-live-idle').classList.toggle('active', liveIdle);
+  $('btn-live-idle').textContent = liveIdle ? '✨ Живое ожидание — выключить' : '✨ Живое ожидание';
+}
+
+$('btn-live-idle').addEventListener('click', () => {
+  if (liveIdle) { stopMocap(); return; }
+  liveIdle = true;
+  playMocap(nextIdle());
+});
+
 function setLoop(id) {
   if (!character) return;
+  if (currentMocap) stopMocap();
   if (currentAnim) stopAnim();
   character.dancing = false;
   character.loop = character.loop === id ? null : id;
@@ -1189,6 +1268,7 @@ function setLoop(id) {
 }
 
 function renderAnims() {
+  renderMocap();
   $('btn-dance').classList.toggle('active', !!character?.dancing && !currentAnim);
   $('btn-dance').textContent = character?.dancing && !currentAnim ? '💃 Танцует — остановить' : '💃 Танцевать';
   const loops = $('loop-list');
@@ -1234,6 +1314,9 @@ async function playAnim(a) {
   if (!character) return;
   try {
     await prepareAnim(a);
+    clearTimeout(mocapOnceTimer);
+    currentMocap = null;
+    liveIdle = false;
     character.dancing = false;
     character.loop = null;
     character.playClip(clipFor(a, character.vrm));
@@ -1264,6 +1347,7 @@ $('btn-anims').addEventListener('click', () => togglePanel('anims', renderAnims)
 $('btn-dance').addEventListener('click', () => {
   if (!character) return;
   if (currentAnim) stopAnim();
+  if (currentMocap) stopMocap();
   character.loop = null;
   character.dancing = !character.dancing;
   if (character.dancing) say(pick(['Смотри, как я умею~', 'Музыку погромче!', 'Танцуем! ♥']), 'happy');
@@ -1313,6 +1397,7 @@ function tick() {
 
   updateCamera(dt);
   updateHandles();
+  updateLiveIdle();
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);

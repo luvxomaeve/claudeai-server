@@ -258,16 +258,30 @@ export class Character {
 
   // ---------- Mocap (.vrma) ----------
 
-  playClip(clip) {
-    this.stopClip();
-    this.mixer = new THREE.AnimationMixer(this.vrm.scene);
-    this.mixer.clipAction(clip).play();
+  // Плавный переход между анимациями (кроссфейд), без рывков.
+  playClip(clip, { loop = true, fade = 0.6 } = {}) {
+    if (!this.mixer) this.mixer = new THREE.AnimationMixer(this.vrm.scene);
+    const action = this.mixer.clipAction(clip);
+    action.reset();
+    action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+    action.clampWhenFinished = !loop;
+    action.play();
+    if (this.action && this.action !== action) this.action.crossFadeTo(action, fade, false);
+    else action.fadeIn(fade);
+    this.action = action;
+  }
+
+  // Сколько осталось до конца текущей анимации (сек).
+  clipTimeLeft() {
+    if (!this.action) return Infinity;
+    return this.action.getClip().duration - this.action.time;
   }
 
   stopClip() {
     if (!this.mixer) return;
     this.mixer.stopAllAction();
     this.mixer = null;
+    this.action = null;
   }
 
   talk(seconds) {

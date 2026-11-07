@@ -27,6 +27,9 @@
   - поза пальцем: `setHandTarget/setFootTarget/headOffset/bodyOffset`, `export/importTouchPose`.
 - `src/dialogue.js` — реплики и реакции по зонам (`REACTIONS`, `STROKES`) и уровням симпатии.
 - `src/stockings.js` — нарисованные чулки на текстуре кожи (только модели VRoid).
+- `src/mocap.js` + `mocap/*.json` — база движений CMU (свободная лицензия), сконвертирована `tools/cmu-convert.mjs`
+  (BVH → повороты нормализованных костей VRM, T-поза из 1-го кадра, средний поворот развёрнут к камере).
+  Чтобы добавить запись: найти id в индексе Shriinivas/cmubvh, скачать BVH, прогнать конвертер, добавить в `MOCAP`.
 - `src/mixamo.js` — перенос анимаций Mixamo `.fbx` на скелет VRM (учитывает VRM 0.x).
 - `src/storage.js` — IndexedDB для загруженных нарядов (.vrm) и анимаций (.vrma/.fbx).
 
@@ -54,7 +57,7 @@
 - Страница артефакта — `index.html` без `<html>/<head>/<body>`: `<title>`, meta viewport-fit-sides,
   `<link style.css>`, importmap, затем `<script>window.WAIFU_MODEL_URL = 'models/baby.json';</script>`,
   затем содержимое `<body>`.
-- Файлы: `style.css`, `src/*.js` и `models/baby.json`.
+- Файлы: `style.css`, `src/*.js`, `mocap/*.json` и `models/baby.json`.
 - **Модель пользователя «baby»** (VRM 0.x, автор LUV XO, лицензия «только автор, распространение запрещено»)
   лежит **только в артефакте** как `models/baby.json` = `{"vrm": "<base64 .vrm>"}` (артефакты не отдают .vrm/.glb).
   **Никогда не клади её в публичный репозиторий.** Достать: Artifact `action: "read"`, `path: "models/baby.json"`.
