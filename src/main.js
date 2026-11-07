@@ -302,6 +302,7 @@ async function loadModel(source) {
     vrm.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
     scene.add(vrm.scene);
     character = new Character(vrm);
+    if (typeof lieMode !== 'undefined' && lieMode !== 'off') character.lieStyle = lieMode;
     window.__waifu = character; // для отладки из консоли
     window.__cam = camera;
     if (prev) {
@@ -803,8 +804,12 @@ function addPoseButton(name, def) {
     if (currentMocap) stopMocap();
     character.dancing = false;
     character.loop = null;
+    const before = character.sit;
     character.setPose(name);
-    if (character.sit > 0) sitBy(-character.sit / 0.004);
+    // Своя сохранённая поза помнит посадку (сидит/лежит); обычные позы — стоя.
+    const want = POSES[name]?.touch && typeof POSES[name].touch.sit === 'number' ? character.sit : 0;
+    character.sit = before;
+    if (Math.abs(want - before) > 0.001) sitBy((want - before) / 0.004);
     setActivePoseButton(name);
     // Список не закрываем — можно быстро перебирать позы одну за другой.
     say(POSE_LINES[name] ?? pick(['Так?', 'Ну как я тебе?', 'Вот так нормально?']));
@@ -994,12 +999,26 @@ function updateHandles() {
 // веди вниз — присед → на колени → боком → лежит, вверх — встаёт.
 const sitSlider = $('sit-slider');
 // Лечь можно отключить (кнопка под полосой): тогда ниже «сидит боком» она не опускается.
-let allowLie = true;
-try { allowLie = localStorage.getItem('waifu-allow-lie') !== '0'; } catch { /* ignore */ }
+// Кнопка под полосой по кругу: на бок → на живот (спать) → не ложиться.
+let lieMode = 'side';
+try {
+  const v = localStorage.getItem('waifu-lie');
+  if (v === 'side' || v === 'belly' || v === 'off') lieMode = v;
+  else if (localStorage.getItem('waifu-allow-lie') === '0') lieMode = 'off';
+} catch { /* ignore */ }
+let allowLie = lieMode !== 'off';
 const sitMax = () => (allowLie ? 1.3 : 1.0);
+const LIE_ICONS = {
+  side: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11.5" r="1.8"/>',
+  belly: '<path d="M14.5 4.5a6.5 6.5 0 1 0 5 10.5A7.5 7.5 0 0 1 14.5 4.5z"/><path d="M17 4h3l-3 3h3"/>',
+  off: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><path d="M4 4l16 16"/>',
+};
 function renderLieToggle() {
+  allowLie = lieMode !== 'off';
   $('lie-toggle').classList.toggle('off', !allowLie);
-  $('lie-toggle').title = allowLie ? 'Ложиться: вкл' : 'Ложиться: выкл';
+  $('lie-toggle').querySelector('svg').innerHTML = LIE_ICONS[lieMode];
+  $('lie-toggle').title = { side: 'Ложится на бок', belly: 'Ложится на живот, спать', off: 'Не ложится' }[lieMode];
+  if (character && allowLie) character.setLieStyle(lieMode);
   sitSlider.classList.toggle('no-lie', !allowLie);
   // Точки-отметки: стоит, присед, на коленях, боком, лёжа — по текущему пределу.
   const marks = [0, 0.5, 0.8, 1.0, 1.3];
@@ -1008,11 +1027,11 @@ function renderLieToggle() {
 $('lie-toggle').addEventListener('pointerdown', (e) => e.stopPropagation());
 $('lie-toggle').addEventListener('click', (e) => {
   e.stopPropagation();
-  allowLie = !allowLie;
-  try { localStorage.setItem('waifu-allow-lie', allowLie ? '1' : '0'); } catch { /* ignore */ }
+  lieMode = { side: 'belly', belly: 'off', off: 'side' }[lieMode];
+  try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
   renderLieToggle();
   if (!allowLie && character && character.sit > 1.0) sitBy((1.0 - character.sit) / 0.004);
-  showToast(allowLie ? 'Может прилечь' : 'Без «лечь»: только сидит');
+  showToast({ side: 'Ляжет на бок', belly: 'Ляжет на живот — спать 😴', off: 'Не ложится: только сидит' }[lieMode]);
 });
 renderLieToggle();
 // Палец ведёт относительно (без скачка к месту касания): вся высота полосы = от «стоит» до «лежит».
@@ -1035,7 +1054,7 @@ sitSlider.addEventListener('pointermove', (e) => {
   character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
-  if (poseMode) {
+  if (poseMode && character.sit < 0.05) {
     // В режиме позы полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
     const o = character.bodyOffset;
@@ -1056,8 +1075,10 @@ const BEND_MAX = 1.1;
 const BEND_RANGE = BEND_MAX - BEND_MIN;
 function updateSitSlider() {
   if (!character) return;
-  sitSlider.classList.toggle('bend', poseMode);
-  const k = poseMode
+  // В режиме позы стоя — наклон; если она сидит/лежит — полоса поднимает/опускает её.
+  const bendMode = poseMode && character.sit < 0.05;
+  sitSlider.classList.toggle('bend', bendMode);
+  const k = bendMode
     ? (character.bodyOffset.hipsRotX - BEND_MIN) / BEND_RANGE
     : character.sitS / sitMax();
   sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(k, 0, 1).toFixed(3));
@@ -1074,7 +1095,10 @@ function sitBy(dy) {
   if (now - sitLineAt > 4000) {
     if (before < 0.9 && character.sit >= 0.9) { sitLineAt = now; say(pick(['Посижу немножко~', 'Ух, устала…', 'Сядешь рядом?'])); }
     if (before > 0.1 && character.sit <= 0.1) { sitLineAt = now; say(pick(['Ладно, встаю!', 'Опа!', 'Всё, отдохнула~'])); }
-    if (before < 1.25 && character.sit >= 1.25) { sitLineAt = now; say(pick(['Полежу немножко~', 'Как уютно…', 'Ммм, хорошо~'])); }
+    if (before < 1.25 && character.sit >= 1.25) {
+      sitLineAt = now;
+      say(character.lieStyle === 'belly' ? pick(['Посплю немножко… 😴', 'Спокойной ночи~', 'Ммм… zzz']) : pick(['Полежу немножко~', 'Как уютно…', 'Ммм, хорошо~']));
+    }
   }
 }
 

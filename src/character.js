@@ -197,6 +197,8 @@ export class Character {
     this.sitS = 0; // сглаженное значение
     this.sitV = 0; // скорость посадки (разгон и торможение плавные)
     this.sitRate = 0; // насколько быстро ведут пальцем (ед./с) — ускоряет посадку
+    this.lieStyle = 'side'; // 'side' — на бок на локоть, 'belly' — на живот, спать
+    this.sleep = 0; // 0..1 — глаза закрываются, когда спит на животе
     this.offK = 1; // сколько от наклона/таза пальцем действует (в посадке — плавно уходит)
     // Верх тела из записи живого человека (живое ожидание): ноги при этом свои,
     // стоят на полу, поэтому она не ходит и не скользит.
@@ -564,6 +566,13 @@ export class Character {
     // Наклон и сдвиг таза пальцем — для стоя; в посадке плавно уходят,
     // иначе таз перекручивает и ногу выбрасывает.
     this.offK = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.03, 0.3);
+    // Смена «на бок / на живот» — только когда она уже поднялась до колен (без скачка).
+    if (this.pendingLieStyle && this.sitS <= 0.81) {
+      this.lieStyle = this.pendingLieStyle;
+      this.pendingLieStyle = null;
+      if (this.pendingSit != null) { this.sit = this.pendingSit; this.pendingSit = null; }
+    }
+    this.sleep += ((this.sitPhases().b4 > 0.85 ? 1 : 0) - this.sleep) * (1 - Math.exp(-dt * 1.2));
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     this.sitSideNow = 0;
@@ -617,6 +626,17 @@ export class Character {
         pose.spineY += 0.2 * p4;
         pose.headZ -= 0.55 * p4;
         pose.headX += 0.05 * p4;
+      }
+      const { b3, b4 } = this.sitPhases(s);
+      if (b3 > 0) {
+        // С колен — плавный наклон вперёд к полу: таз остаётся на пятках,
+        // спина округляется, плечи и голова опускаются, руки тянутся вперёд.
+        const fold = b3 * (1 - b4);
+        pose.hipsRotX += 0.95 * fold + 1.39 * b4; // на животе тело горизонтально
+        pose.spineX += 0.45 * fold;
+        pose.headX += 0.25 * fold - 0.3 * b4; // лёжа голова чуть приподнята на руках
+        pose.headY += 1.05 * b4; // щекой на руки, лицом к тебе
+        pose.headZ += 0.15 * b4;
       }
     }
 
@@ -1105,6 +1125,18 @@ export class Character {
         }
         target.lerp(lie, p4);
       }
+      // На животе: ноги вытянуты назад, носки к полу.
+      const { b4 } = this.sitPhases();
+      if (b4 > 0) {
+        const legLen = this.restHips.y - rest.pos.y;
+        // Ноги почти прямые (иначе колено уходит под пол и тело «всплывает»).
+        const prone = new THREE.Vector3(
+          rest.pos.x * 1.1 + (L ? 0.02 : -0.02) * S,
+          0.11 * S,
+          this.restHips.z - legLen * 1.02,
+        );
+        target.lerp(prone, b4);
+      }
 
       // Ступня, сдвинутая пальцем.
       const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
@@ -1124,6 +1156,7 @@ export class Character {
         knee.y - 0.5 * p2 * (1 - p3) + 0.2 * p3 + kneeUp * 0.5,
         knee.z + 0.6 + kneeUp,
       );
+      if (b4 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y - 0.15, knee.z - 0.6), b4); // на животе колени к полу, ноги прямые
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
       // Угол голени вперёд — для баланса корпуса в следующем кадре.
       {
@@ -1415,6 +1448,8 @@ export class Character {
       right: this.handTargets.right?.toArray() ?? null,
       head: { ...this.headOffset },
       presets: { ...this.armPreset },
+      sit: this.sit, // сохранённая поза помнит, сидит она или лежит (и как)
+      lie: this.lieStyle,
       body: { ...this.bodyOffset },
       feet: {
         left: this.footOffset.left?.toArray() ?? null,
@@ -1430,6 +1465,16 @@ export class Character {
     if (data.right) this.handTargets.right = new THREE.Vector3().fromArray(data.right);
     if (data.head) this.headOffset = { ...data.head };
     if (data.presets) this.armPreset = { left: data.presets.left ?? null, right: data.presets.right ?? null };
+    if (typeof data.sit === 'number') {
+      if (data.lie && data.sit > 0.8 && data.lie !== this.lieStyle && this.sitS > 0.81) {
+        // Сначала поднимется до колен, сменит способ и опустится в сохранённое положение.
+        this.setLieStyle(data.lie);
+        this.pendingSit = data.sit;
+      } else {
+        if (data.lie && data.sit > 0.8) this.lieStyle = data.lie;
+        this.sit = data.sit;
+      }
+    }
     if (data.body) Object.assign(this.bodyOffset, data.body);
     for (const side of ['left', 'right']) {
       if (data.feet?.[side]) this.footOffset[side] = new THREE.Vector3().fromArray(data.feet[side]);
@@ -1509,15 +1554,28 @@ export class Character {
 
   // Посадка в две фазы: 0…0.6 — глубокий присед (ступни вперёд),
   // 0.6…1 — опускается на колени и садится на пятки (сейдза), руки на коленях.
+  setLieStyle(style) {
+    if (style === this.lieStyle) { this.pendingLieStyle = null; return; }
+    if (this.sitS > 0.81) { this.pendingLieStyle = style; this.sit = Math.min(this.sit, 0.8); }
+    else this.lieStyle = style;
+  }
+
   sitPhases(s = this.sitS) {
     // 0…0.5 — присед, 0.5…0.8 — на колени, 0.8…1 — садится боком на пол.
     const ease = (x) => x * x * (3 - 2 * x);
     const c = THREE.MathUtils.clamp;
+    const q3 = ease(c((s - 0.8) / 0.2, 0, 1));
+    const q4 = ease(c((s - 1.0) / 0.3, 0, 1));
+    // lieStyle 'belly': вместо «сидит боком → на бок» — наклон вперёд к полу (b3)
+    // и ложится на живот спать (b4).
+    const belly = this.lieStyle === 'belly';
     return {
       p1: ease(c(s / 0.5, 0, 1)),
       p2: ease(c((s - 0.5) / 0.3, 0, 1)),
-      p3: ease(c((s - 0.8) / 0.2, 0, 1)),
-      p4: ease(c((s - 1.0) / 0.3, 0, 1)), // 1.0…1.3 — ложится на бок, на локоть
+      p3: belly ? 0 : q3,
+      p4: belly ? 0 : q4, // 1.0…1.3 — ложится на бок, на локоть
+      b3: belly ? q3 : 0,
+      b4: belly ? q4 : 0,
     };
   }
 
@@ -1532,6 +1590,9 @@ export class Character {
     if (p2 > 0) y = THREE.MathUtils.lerp(squatY, floorY, p2);
     if (p3 > 0) y = THREE.MathUtils.lerp(floorY, sideY, p3);
     if (p4 > 0) y = THREE.MathUtils.lerp(sideY, 0.13 * this.scale, p4); // лёжа на боку
+    const { b3, b4 } = this.sitPhases(s);
+    if (b3 > 0) y = THREE.MathUtils.lerp(floorY, floorY * 0.9, b3); // наклон к полу, таз на пятках
+    if (b4 > 0) y = THREE.MathUtils.lerp(floorY * 0.9, 0.11 * this.scale, b4); // на животе
     return Math.max(0, restY - y);
   }
 
@@ -1540,7 +1601,10 @@ export class Character {
     let w = THREE.MathUtils.smoothstep(this.sitS, 0.25, 0.6);
     // Руки в выбранной позе (или примагничены) — так и остаются, когда она садится;
     // берём руку только для опоры о пол, когда она сидит боком или лежит.
-    if (this.armPreset[side] || this.poseName !== 'stand') w *= this.sitPhases().p3;
+    if (this.armPreset[side] || this.poseName !== 'stand') {
+      const ph = this.sitPhases();
+      w *= Math.max(ph.p3, ph.b3);
+    }
     if (w <= 0) return;
     const upper = this.bones[`${side}UpperArm`];
     const lower = this.bones[`${side}LowerArm`];
@@ -1578,6 +1642,18 @@ export class Character {
       target.lerp(lie, p4);
       const lieElbow = side === 'right' ? new THREE.Vector3(0, -0.6, -0.3) : new THREE.Vector3(0, 0.5, -0.4);
       pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(lieElbow), p4);
+    }
+    // На животе: сначала ладони тянутся вперёд по полу, потом руки сложены под головой.
+    const { b3, b4 } = this.sitPhases();
+    if (b3 > 0) {
+      const S = this.scale;
+      const out = side === 'left' ? 1 : -1;
+      const fwd = new THREE.Vector3(hipsPos.x + out * 0.16 * S, 0.04 * S, hipsPos.z + 0.55 * S);
+      target.lerp(fwd, b3 * (1 - b4));
+      const headP = this.bones.head.getWorldPosition(new THREE.Vector3());
+      const pillow = new THREE.Vector3(headP.x + out * 0.13 * S, 0.05 * S, headP.z - 0.02 * S);
+      target.lerp(pillow, b4);
+      pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(out * 0.6, -0.2, -0.2)), b3);
     }
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);
@@ -1879,7 +1955,7 @@ export class Character {
       }
     }
     const eyesBusy = Math.max(this.exprCurrent.happy, this.exprCurrent.relaxed);
-    em.setValue('blink', blink * (1 - eyesBusy));
+    em.setValue('blink', Math.max(blink * (1 - eyesBusy), this.sleep)); // спит — глаза закрыты
 
     // Рот шевелится, пока она «говорит».
     this.talkTime -= dt;
