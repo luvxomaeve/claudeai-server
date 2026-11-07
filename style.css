@@ -948,3 +948,8 @@ body.bg-stars {
     radial-gradient(ellipse at 50% 110%, #3a2f7a 0%, #161036 55%, #07061a 100%);
 }
 body.bg-room { background: linear-gradient(180deg, #f6dccb 0%, #eec4c8 55%, #b98f9f 78%, #8b6878 100%); }
+
+/* Список поз — только во вкладке «Позы» (дома она остаётся как ты её оставил). */
+body:not(.posing) #poses #poses-toggle, body:not(.posing) #poses #pose-list { display: none; }
+body.posing #poses #pose-list { display: flex; margin-bottom: 4px; }
+body.posing #poses #pose-list[hidden] { display: none; }

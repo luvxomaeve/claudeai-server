@@ -478,7 +478,7 @@ function pinchDistance() {
 canvas.addEventListener('pointerdown', (e) => {
   if (!character) return;
   // Открыт список поз — касание по сцене просто закрывает его.
-  if (!$('pose-list').hidden) { setPoseListOpen(false); return; }
+  if (!$('pose-list').hidden && !poseMode) { setPoseListOpen(false); return; }
   canvas.setPointerCapture(e.pointerId);
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   pointerActive = true;
@@ -903,8 +903,9 @@ function setPoseMode(on) {
   document.body.classList.toggle('posing', on);
   $('cam-controls').hidden = !(on || cameraMode);
   closePoseSaveForm();
+  // Во вкладке «Позы» список поз открыт сразу; дома — скрыт.
+  setPoseListOpen(on);
   if (on) {
-    setPoseListOpen(false);
     // Позируем во весь рост — видно и руки, и ноги.
     if (!fullBody) setFullBody(true);
     $('hint').style.opacity = 0;

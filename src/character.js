@@ -377,6 +377,8 @@ export class Character {
     // Реакции, гладят, танец, сидит — запись уступает место (плавно).
     const busy = this.motions.length > 0 || this.patAmount > 0.1 || this.dancing || this.loop || this.poseName !== 'stand';
     let want = L.stopping ? 0 : busy ? 0.15 : 1;
+    // Сильно наклонена/прогнута — запись (с её поворотами корпуса) уходит, иначе перекручивает.
+    want *= 1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.15, 0.5);
     want *= 1 - THREE.MathUtils.smoothstep(this.sitS, 0.02, 0.3);
     L.w += (want - L.w) * (1 - Math.exp(-dt * 2.5));
     if (L.stopping && L.w < 0.01) { this.upper = null; return; }
@@ -695,7 +697,8 @@ export class Character {
     pose.headX -= this.bodyOffset.spineX * 0.4;
 
     // Голова чуть поворачивается за пальцем/курсором.
-    pose.headY += this.headLook.x * 0.35;
+    const bendHL = 1 - 0.6 * THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
+    pose.headY += this.headLook.x * 0.35 * bendHL;
     // «Смотрит на тебя»: голова, шея и корпус поворачиваются к камере — как человек,
     // который оборачивается через плечо (до ~170°: шея ~95°, корпус ~80°).
     {
@@ -708,8 +711,10 @@ export class Character {
       this.gazePitchS = (this.gazePitchS ?? 0) + (pitch - (this.gazePitchS ?? 0)) * k;
       const w = this.gazeW * (1 - 0.6 * THREE.MathUtils.smoothstep(this.sitS, 0.9, 1.3));
       const total = THREE.MathUtils.clamp(this.gazeYawS, -3.0, 3.0) * w;
-      const head = THREE.MathUtils.clamp(total, -1.65, 1.65);
-      const body = THREE.MathUtils.clamp(total - head, -1.5, 1.5);
+      // В наклоне корпус не скручиваем — поворачивается только голова.
+      const bendK = THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
+      const head = THREE.MathUtils.clamp(total, -1.65, 1.65) * (1 - 0.5 * bendK);
+      const body = THREE.MathUtils.clamp(total - head, -1.5, 1.5) * (1 - bendK);
       pose.headY += head;
       pose.spineY += body;
       pose.headX += THREE.MathUtils.clamp(-this.gazePitchS, -0.6, 0.7) * w;
@@ -974,7 +979,9 @@ export class Character {
     if (!t || !b.hips || !b.neck || !b.leftUpperLeg || !b.rightUpperLeg) return;
     const P = (n) => n.getWorldPosition(new THREE.Vector3());
     const left = P(b.leftUpperLeg).sub(P(b.rightUpperLeg)).normalize();
-    const up = P(b.neck).sub(P(b.hips)).normalize();
+    // Стоя (даже в наклоне) «верх» — мировая вертикаль; лёжа — вдоль тела.
+    const bodyUp = P(b.neck).sub(P(b.hips)).normalize();
+    const up = this.sitS > 0.9 ? bodyUp : new THREE.Vector3(0, 1, 0);
     const fwd = new THREE.Vector3().crossVectors(left, up).normalize();
     const dir = t.clone().sub(P(b.head ?? b.neck)).normalize();
     let yaw = Math.atan2(dir.dot(left), dir.dot(fwd));
