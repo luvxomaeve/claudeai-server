@@ -5,7 +5,7 @@ import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationC
 import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { parseMixamo, mixamoClip } from './mixamo.js';
-import { Character, POSES } from './character.js';
+import { Character, POSES, LOOPS } from './character.js';
 import { REACTIONS, STROKES, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
@@ -88,7 +88,9 @@ function orbitTarget(out) {
   const d = camBase.dist * camZoom;
   // При приближении смещаем точку взгляда к лицу.
   const headY = (character ? character.headHeight : 1.4) + 0.05 * camBase.S;
-  const lookY = THREE.MathUtils.lerp(headY, camBase.cy, THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1));
+  let lookY = THREE.MathUtils.lerp(headY, camBase.cy, THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1));
+  // Когда она садится, камера опускается вместе с ней.
+  if (character) lookY -= character.sitS * character.sitDrop * 0.6;
   out.look.set(0, lookY, 0);
   out.pos.set(Math.sin(camYaw) * d, lookY + 0.05 * camBase.S, Math.cos(camYaw) * d);
   return out;
@@ -114,7 +116,13 @@ function zoomBy(factor) {
 }
 
 // Плавный переезд камеры между «крупно» и «во весь рост».
+let camSitSeen = 0;
 function updateCamera(dt) {
+  // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
+  if (character && camTween >= 1 && Math.abs(character.sitS - camSitSeen) > 0.002) {
+    camSitSeen = character.sitS;
+    applyOrbit();
+  }
   if (camTween >= 1) return;
   camTween = Math.min(1, camTween + dt / 0.6);
   const k = camTween < 0.5 ? 2 * camTween * camTween : 1 - Math.pow(-2 * camTween + 2, 2) / 2;
@@ -328,7 +336,7 @@ canvas.addEventListener('pointerdown', (e) => {
       pinchDist = pinchDistance();
       orbitDrag = null;
     } else if (touches.size === 1) {
-      orbitDrag = { lastX: e.clientX };
+      orbitDrag = { lastX: e.clientX, lastY: e.clientY, sx: e.clientX, sy: e.clientY, axis: null };
     }
     return;
   }
@@ -418,8 +426,14 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (orbitDrag) {
-    rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01);
+    // Сначала понимаем направление жеста: вбок — крутим камеру, вверх/вниз — сесть/встать.
+    if (!orbitDrag.axis && Math.hypot(e.clientX - orbitDrag.sx, e.clientY - orbitDrag.sy) > 10) {
+      orbitDrag.axis = Math.abs(e.clientX - orbitDrag.sx) > Math.abs(e.clientY - orbitDrag.sy) ? 'x' : 'y';
+    }
+    if (orbitDrag.axis === 'x') rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01);
+    else if (orbitDrag.axis === 'y') sitBy(e.clientY - orbitDrag.lastY);
     orbitDrag.lastX = e.clientX;
+    orbitDrag.lastY = e.clientY;
     return;
   }
   if (stroking) {
@@ -597,6 +611,7 @@ function addPoseButton(name, def) {
     if (!character) return;
     if (currentAnim) stopAnim();
     character.dancing = false;
+    character.loop = null;
     character.setPose(name);
     setActivePoseButton(name);
     setPoseListOpen(false);
@@ -633,7 +648,7 @@ function setPoseMode(on) {
   closePoseSaveForm();
   if (on) {
     setPoseListOpen(false);
-    showToast('✋ Тяни за руки, голову, грудь или таз');
+    showToast('✋ Тяни за точки на теле · свайп по фону вниз — сесть');
   }
 }
 $('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
@@ -662,9 +677,64 @@ $('pose-save-form').addEventListener('submit', (e) => {
 });
 $('pose-save-cancel').addEventListener('click', closePoseSaveForm);
 
+// Светящиеся точки-ручки в режиме позы: показывают, за что можно тянуть.
+const HANDLE_KEYS = ['handL', 'handR', 'head', 'chest', 'belly', 'hips', 'footL', 'footR'];
+const handleEls = {};
+for (const k of HANDLE_KEYS) {
+  const el = document.createElement('div');
+  el.className = 'handle';
+  $('handles').appendChild(el);
+  handleEls[k] = el;
+}
+const handleV = new THREE.Vector3();
+function handleWorld(key) {
+  const c = character;
+  const zone = (z, bone) => c.zones.find((q) => q.zone === z && (!bone || q.bone === bone))?.center;
+  switch (key) {
+    case 'handL': return c.handWorld('left');
+    case 'handR': return c.handWorld('right');
+    case 'head': return zone('face');
+    case 'chest': return zone('body', 'chest');
+    case 'belly': return zone('belly');
+    case 'hips': return zone('body', 'hips');
+    case 'footL': return c.footWorld('left');
+    case 'footR': return c.footWorld('right');
+  }
+  return null;
+}
+function updateHandles() {
+  const show = poseMode && !!character;
+  $('handles').hidden = !show;
+  if (!show) return;
+  for (const k of HANDLE_KEYS) {
+    const p = handleWorld(k);
+    if (!p) continue;
+    handleV.copy(p).project(camera);
+    const el = handleEls[k];
+    el.style.left = `${(handleV.x * 0.5 + 0.5) * window.innerWidth}px`;
+    el.style.top = `${(-handleV.y * 0.5 + 0.5) * window.innerHeight}px`;
+  }
+}
+
+// Свайп вниз по пустому месту — садится на пол, вверх — встаёт.
+let sitLineAt = 0;
+function sitBy(dy) {
+  if (!character) return;
+  const before = character.sit;
+  character.sit = THREE.MathUtils.clamp(character.sit + dy * 0.004, 0, 1);
+  const now = performance.now();
+  if (now - sitLineAt > 4000) {
+    if (before < 0.9 && character.sit >= 0.9) { sitLineAt = now; say(pick(['Посижу немножко~', 'Ух, устала…', 'Сядешь рядом?'])); }
+    if (before > 0.1 && character.sit <= 0.1) { sitLineAt = now; say(pick(['Ладно, встаю!', 'Опа!', 'Всё, отдохнула~'])); }
+  }
+}
+
 function poseDragStart(e) {
   const hit = zoneAt(e);
-  if (!hit) return;
+  if (!hit) {
+    poseDrag = { kind: 'sit', lastY: e.clientY };
+    return;
+  }
   if (hit.zone === 'hand' || hit.zone === 'arm') {
     const handPos = character.handWorld(hit.side);
     const normal = new THREE.Vector3();
@@ -673,9 +743,17 @@ function poseDragStart(e) {
     poseDragMove(e);
   } else if (hit.zone === 'headpat' || hit.zone === 'face') {
     poseDrag = { kind: 'head', lastX: e.clientX, lastY: e.clientY };
+  } else if (hit.zone === 'legs') {
+    const side = /left/i.test(hit.bone) ? 'left' : 'right';
+    const footPos = character.footWorld(side);
+    const normal = new THREE.Vector3();
+    camera.getWorldDirection(normal);
+    poseDrag = { kind: 'foot', side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, footPos) };
+  } else if (hit.zone === 'belly') {
+    poseDrag = { kind: 'twist', lastX: e.clientX, lastY: e.clientY };
   } else if (hit.zone === 'body' && hit.bone === 'chest') {
     poseDrag = { kind: 'spine', lastX: e.clientX, lastY: e.clientY };
-  } else if (hit.zone === 'body' || hit.zone === 'belly') {
+  } else if (hit.zone === 'body') {
     poseDrag = { kind: 'hips', lastX: e.clientX, lastY: e.clientY };
   }
 }
@@ -683,10 +761,18 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
-  if (poseDrag.kind === 'hand') {
+  if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot') {
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
-    if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) character.setHandTarget(poseDrag.side, dragPoint);
+    if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
+      if (poseDrag.kind === 'hand') character.setHandTarget(poseDrag.side, dragPoint);
+      else character.setFootTarget(poseDrag.side, dragPoint);
+    }
+    return;
+  }
+  if (poseDrag.kind === 'sit') {
+    sitBy(e.clientY - poseDrag.lastY);
+    poseDrag.lastY = e.clientY;
     return;
   }
   const dx = e.clientX - poseDrag.lastX;
@@ -700,10 +786,15 @@ function poseDragMove(e) {
     o.y = clamp(o.y + dx * 0.006 * facing, -0.9, 0.9);
     o.x = clamp(o.x + dy * 0.005, -0.5, 0.5);
   } else if (poseDrag.kind === 'spine') {
-    // Вниз — наклон вперёд, вбок — изгиб в сторону.
+    // Вниз — наклон вперёд (глубоко), вверх — прогиб назад, вбок — изгиб в сторону.
     const o = character.bodyOffset;
-    o.spineX = clamp(o.spineX + dy * 0.004, -0.35, 0.6);
-    o.spineZ = clamp(o.spineZ - dx * 0.003 * facing, -0.35, 0.35);
+    o.spineX = clamp(o.spineX + dy * 0.005, -0.5, 1.1);
+    o.spineZ = clamp(o.spineZ - dx * 0.004 * facing, -0.5, 0.5);
+  } else if (poseDrag.kind === 'twist') {
+    // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
+    const o = character.bodyOffset;
+    o.spineY = clamp(o.spineY + dx * 0.005 * facing, -0.8, 0.8);
+    o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
   } else {
     // Вбок — бёдра в сторону, вниз — присесть.
     const o = character.bodyOffset;
@@ -1057,9 +1148,33 @@ async function parseAnimation(buffer) {
   return animation;
 }
 
+function setLoop(id) {
+  if (!character) return;
+  if (currentAnim) stopAnim();
+  character.dancing = false;
+  character.loop = character.loop === id ? null : id;
+  if (character.loop) {
+    const lines = {
+      cute: 'Хи-хи, я тут~', flirty: 'Ну что, нравлюсь? ♥', shy: 'Н-не смотри так…',
+      happy: 'Ура-а! ♥', dance2: 'Ля-ля-ля~',
+    };
+    say(lines[id]);
+  }
+  renderAnims();
+}
+
 function renderAnims() {
   $('btn-dance').classList.toggle('active', !!character?.dancing && !currentAnim);
   $('btn-dance').textContent = character?.dancing && !currentAnim ? '💃 Танцует — остановить' : '💃 Танцевать';
+  const loops = $('loop-list');
+  loops.innerHTML = '';
+  for (const l of LOOPS) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (character?.loop === l.id ? ' active' : '');
+    b.textContent = l.label;
+    b.addEventListener('click', () => setLoop(l.id));
+    loops.appendChild(b);
+  }
   const list = $('anim-list');
   list.innerHTML = '';
   if (!anims.length) {
@@ -1095,6 +1210,7 @@ async function playAnim(a) {
   try {
     await prepareAnim(a);
     character.dancing = false;
+    character.loop = null;
     character.playClip(clipFor(a, character.vrm));
     currentAnim = a;
   } catch (err) {
@@ -1123,6 +1239,7 @@ $('btn-anims').addEventListener('click', () => togglePanel('anims', renderAnims)
 $('btn-dance').addEventListener('click', () => {
   if (!character) return;
   if (currentAnim) stopAnim();
+  character.loop = null;
   character.dancing = !character.dancing;
   if (character.dancing) say(pick(['Смотри, как я умею~', 'Музыку погромче!', 'Танцуем! ♥']), 'happy');
   renderAnims();
@@ -1170,6 +1287,7 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
 
   updateCamera(dt);
+  updateHandles();
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);

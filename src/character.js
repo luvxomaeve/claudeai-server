@@ -91,6 +91,15 @@ export const POSES = {
   },
 };
 
+// Встроенные анимации (кнопки в панели анимаций).
+export const LOOPS = [
+  { id: 'cute', label: '🌸 Милое ожидание' },
+  { id: 'flirty', label: '💋 Кокетливо' },
+  { id: 'shy', label: '🙈 Застенчиво' },
+  { id: 'happy', label: '✨ Радуется' },
+  { id: 'dance2', label: '🎵 Милый танец' },
+];
+
 // Движения, которые сами управляют руками.
 const ARM_MOTIONS = new Set(['flinch', 'raiseHand', 'stretch', 'touchHair', 'turnAway', 'clasp', 'handOnHip', 'nails']);
 
@@ -108,14 +117,16 @@ function envelope(t, dur) {
 
 // Плавно ведёт руку к целевой позе. target задаётся для левой руки,
 // для правой знаки зеркалятся (поворот плеча — тот же знак).
-function blendArm(pose, side, target, e) {
+// eLower — отдельный вес для предплечья: локоть сгибается раньше плеча,
+// чтобы рука не вытягивалась палкой в середине движения.
+function blendArm(pose, side, target, e, eLower = e) {
   const L = side === 'left';
-  const set = (key, value) => { pose[key] += (value - pose[key]) * e; };
-  set(L ? 'lUpperZ' : 'rUpperZ', L ? target.upZ : -target.upZ);
-  set(L ? 'lUpperX' : 'rUpperX', target.upX);
-  set(L ? 'lUpperTwist' : 'rUpperTwist', target.tw);
-  set(L ? 'lLowerY' : 'rLowerY', L ? target.loY : -target.loY);
-  set(L ? 'lLowerZ' : 'rLowerZ', L ? target.loZ : -target.loZ);
+  const set = (key, value, w) => { pose[key] += (value - pose[key]) * w; };
+  set(L ? 'lUpperZ' : 'rUpperZ', L ? target.upZ : -target.upZ, e);
+  set(L ? 'lUpperX' : 'rUpperX', target.upX, e);
+  set(L ? 'lUpperTwist' : 'rUpperTwist', target.tw, e);
+  set(L ? 'lLowerY' : 'rLowerY', L ? target.loY : -target.loY, eLower);
+  set(L ? 'lLowerZ' : 'rLowerZ', L ? target.loZ : -target.loZ, eLower);
 }
 
 export class Character {
@@ -176,7 +187,11 @@ export class Character {
     this.initIK();
     this.handTargets = { left: null, right: null }; // позы «пальцем»: цель кисти в системе груди
     this.headOffset = { x: 0, y: 0 };
-    this.bodyOffset = { spineX: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
+    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
+    this.footOffset = { left: null, right: null }; // ступни, сдвинутые пальцем
+    this.sit = 0; // 0 — стоит, 1 — сидит на полу (свайп вниз)
+    this.sitS = 0; // сглаженное значение
+    this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
 
@@ -345,6 +360,19 @@ export class Character {
     pose.headZ += Math.sin(t * 0.47 + 0.9) * 0.04;
 
     if (this.dancing) this.applyDance(pose, t);
+    else if (this.loop) this.applyLoop(pose, t);
+
+    // Сесть на пол (свайп вниз): бёдра опускаются к полу, ступни уходят вперёд,
+    // колени поднимаются — она садится, обняв колени. Плавно, с пружиной.
+    this.sitS += (this.sit - this.sitS) * (1 - Math.exp(-dt * 5));
+    if (this.sitS > 0.001) {
+      const s = this.sitS;
+      pose.hipsY -= s * this.sitDrop;
+      pose.spineX += 0.32 * s;
+      pose.headX -= 0.28 * s;
+      pose.hipsZ *= 1 - s;
+      pose.hipsX *= 1 - s;
+    }
 
     // Голова, корпус и таз, заданные пальцем в режиме позы.
     pose.headY += this.headOffset.y;
@@ -495,7 +523,7 @@ export class Character {
       if (this.motions.length === 0 && this.patAmount < 0.1) {
         const r = Math.random();
         const busyArms = this.poseName !== 'stand';
-        if (this.dancing) { /* в танце и так весело */ }
+        if (this.dancing || this.loop || this.sitS > 0.2) { /* она и так занята */ }
         else if (busyArms) this.playMotion(pick(['shift', 'lookAround', 'tiltHead', 'sigh', 'bounce']));
         else this.playMotion(pick([
           'shift', 'lookAround', 'tiltHead', 'sigh', 'bounce',
@@ -677,7 +705,14 @@ export class Character {
       target.y += lift * 0.06 * this.scale;
       target.z += lift * 0.08 * this.scale;
       const inward = L ? pose.lFootIn : pose.rFootIn;
-      target.x += Math.sign(hipsPos.x - rest.pos.x) * inward;
+      const outSign = -Math.sign(hipsPos.x - rest.pos.x) || (L ? 1 : -1);
+      target.x -= outSign * inward;
+      // Сидя на полу ступни уходят вперёд и чуть в стороны.
+      target.z += this.sitS * 0.3 * this.scale;
+      target.x += outSign * this.sitS * 0.04 * this.scale;
+      // Ступня, сдвинутая пальцем.
+      if (this.footOffset[side]) target.add(this.footOffset[side]);
+      target.y = Math.max(target.y, rest.pos.y);
       const knee = lower.getWorldPosition(new THREE.Vector3());
       const pole = knee.addScaledVector(fwd, 0.6);
       this.twoBoneIK(upper, lower, foot, target, pole);
@@ -699,6 +734,21 @@ export class Character {
     this.handTargets[side] = chest.worldToLocal(worldPoint.clone());
   }
 
+  footWorld(side) {
+    return this.bones[`${side}Foot`]?.getWorldPosition(new THREE.Vector3());
+  }
+
+  // Сдвиг ступни пальцем: храним смещение от исходного положения на полу.
+  setFootTarget(side, worldPoint) {
+    const rest = this.restFoot[side];
+    if (!rest) return;
+    const off = worldPoint.clone().sub(rest.pos);
+    off.y = Math.max(0, off.y);
+    const max = 0.5 * this.scale;
+    if (off.length() > max) off.setLength(max);
+    this.footOffset[side] = off;
+  }
+
   handWorld(side) {
     return this.bones[`${side}Hand`]?.getWorldPosition(new THREE.Vector3());
   }
@@ -706,7 +756,8 @@ export class Character {
   clearTouchPose() {
     this.handTargets = { left: null, right: null };
     this.headOffset = { x: 0, y: 0 };
-    this.bodyOffset = { spineX: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
+    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0 };
+    this.footOffset = { left: null, right: null };
   }
 
   exportTouchPose() {
@@ -715,6 +766,10 @@ export class Character {
       right: this.handTargets.right?.toArray() ?? null,
       head: { ...this.headOffset },
       body: { ...this.bodyOffset },
+      feet: {
+        left: this.footOffset.left?.toArray() ?? null,
+        right: this.footOffset.right?.toArray() ?? null,
+      },
     };
   }
 
@@ -725,6 +780,9 @@ export class Character {
     if (data.right) this.handTargets.right = new THREE.Vector3().fromArray(data.right);
     if (data.head) this.headOffset = { ...data.head };
     if (data.body) Object.assign(this.bodyOffset, data.body);
+    for (const side of ['left', 'right']) {
+      if (data.feet?.[side]) this.footOffset[side] = new THREE.Vector3().fromArray(data.feet[side]);
+    }
   }
 
   applyHandTargets() {
@@ -733,7 +791,10 @@ export class Character {
     chest.updateWorldMatrix(true, false);
     for (const side of ['left', 'right']) {
       const local = this.handTargets[side];
-      if (!local) continue;
+      if (!local) {
+        this.handsOnKnees(side);
+        continue;
+      }
       const upper = this.bones[`${side}UpperArm`];
       const lower = this.bones[`${side}LowerArm`];
       const hand = this.bones[`${side}Hand`];
@@ -744,6 +805,107 @@ export class Character {
       const outward = Math.sign(shoulder.x - chest.getWorldPosition(new THREE.Vector3()).x) || 1;
       const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(outward * 0.3, -0.5, -0.3));
       this.twoBoneIK(upper, lower, hand, target, pole);
+    }
+  }
+
+  // Сидя на полу кладёт руки на колени (плавно, по мере того как садится).
+  handsOnKnees(side) {
+    const w = THREE.MathUtils.smoothstep(this.sitS, 0.35, 0.85);
+    if (w <= 0) return;
+    const upper = this.bones[`${side}UpperArm`];
+    const lower = this.bones[`${side}LowerArm`];
+    const hand = this.bones[`${side}Hand`];
+    const knee = this.bones[`${side}LowerLeg`];
+    if (!upper || !lower || !hand || !knee) return;
+    const q1 = upper.quaternion.clone();
+    const q2 = lower.quaternion.clone();
+    const target = knee.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.05 * this.scale, 0.03 * this.scale));
+    const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.4, -0.4));
+    this.twoBoneIK(upper, lower, hand, target, pole);
+    upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);
+    lower.quaternion.slerpQuaternions(q2, lower.quaternion.clone(), w);
+    upper.updateWorldMatrix(false, true);
+  }
+
+  // ---------- Встроенные анимации ----------
+  applyLoop(pose, t) {
+    const sway = Math.sin(t * 1.3);
+    switch (this.loop) {
+      case 'cute':
+        // Милое ожидание: руки в замке, покачивается из стороны в сторону, голова набок.
+        blendArm(pose, 'left', { upZ: -0.85, upX: 0.15, tw: 0.75, loY: -2.1, loZ: 0 }, 1);
+        blendArm(pose, 'right', { upZ: -0.85, upX: 0.15, tw: 0.75, loY: -2.1, loZ: 0 }, 1);
+        pose.hipsZ += sway * 0.06;
+        pose.spineZ -= sway * 0.08;
+        pose.headZ += sway * 0.14 + 0.06;
+        pose.spineY += Math.sin(t * 0.65) * 0.1;
+        pose.lKneeX += Math.max(0, -sway) * 0.2;
+        pose.rKneeX += Math.max(0, sway) * 0.2;
+        break;
+      case 'flirty': {
+        // Кокетливо: рука на бедре, бедро ходит в сторону, второй рукой иногда трогает волосы.
+        blendArm(pose, 'left', { upZ: -0.75, upX: 0.2, tw: 0.95, loY: -1.5, loZ: 0 }, 1);
+        const hair = THREE.MathUtils.smoothstep(Math.sin(t * 0.5), 0.2, 0.7);
+        blendArm(pose, 'right', { upZ: -0.1, upX: -0.55, tw: 0, loY: -0.2, loZ: 2.4 }, hair * hair, Math.min(1, hair * 2.5));
+        const hip = Math.sin(t * 0.9);
+        pose.hipsZ += 0.06 + hip * 0.05;
+        pose.hipsX += (0.025 + hip * 0.015) * this.scale;
+        pose.spineZ -= 0.08 + hip * 0.06;
+        pose.headZ += 0.14 - hair * 0.1;
+        pose.headY -= 0.1;
+        pose.rKneeX += 0.3;
+        pose.rLegX -= 0.1;
+        break;
+      }
+      case 'shy': {
+        // Застенчиво: руки в замке внизу, переминается, взгляд в сторону и обратно.
+        blendArm(pose, 'left', { upZ: -1.0, upX: 0.05, tw: 0.75, loY: -1.6, loZ: 0 }, 1);
+        blendArm(pose, 'right', { upZ: -1.0, upX: 0.05, tw: 0.75, loY: -1.6, loZ: 0 }, 1);
+        const step = Math.sin(t * 2.2);
+        pose.lKneeX += Math.max(0, step) * 0.25;
+        pose.rKneeX += Math.max(0, -step) * 0.25;
+        pose.lFootIn += 0.03 * this.scale;
+        pose.rFootIn += 0.03 * this.scale;
+        pose.headX += 0.18;
+        pose.headY += Math.sin(t * 0.7) * 0.35;
+        pose.spineX += 0.05;
+        pose.lShoulderZ += 0.06;
+        pose.rShoulderZ -= 0.06;
+        break;
+      }
+      case 'happy': {
+        // Радуется: пружинит, кулачки у груди, головой покачивает.
+        const b = Math.abs(Math.sin(t * Math.PI * 1.6));
+        blendArm(pose, 'left', { upZ: -1.1, upX: -0.45, tw: 0, loY: -2.4 + b * 0.3, loZ: 0 }, 1);
+        blendArm(pose, 'right', { upZ: -1.1, upX: -0.45, tw: 0, loY: -2.4 + b * 0.3, loZ: 0 }, 1);
+        pose.lKneeX += 0.1 + b * 0.18;
+        pose.rKneeX += 0.1 + b * 0.18;
+        pose.hipsY -= (0.01 + b * 0.02) * this.scale;
+        pose.headZ += Math.sin(t * Math.PI * 0.8) * 0.15;
+        pose.spineZ += Math.sin(t * Math.PI * 0.8) * 0.05;
+        this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.8);
+        break;
+      }
+      case 'dance2': {
+        // Милый танец: шаги в стороны, руки по очереди машут над головой.
+        const beat = t * Math.PI * 2 * 0.9;
+        const w = Math.sin(beat * 0.5);
+        const bounce = Math.abs(Math.sin(beat));
+        pose.hipsX += w * 0.05 * this.scale;
+        pose.hipsZ += w * 0.1;
+        pose.spineZ -= w * 0.14;
+        pose.hipsY -= (0.01 + bounce * 0.025) * this.scale;
+        pose.lKneeX += 0.1 + bounce * 0.15 + Math.max(0, -w) * 0.25;
+        pose.rKneeX += 0.1 + bounce * 0.15 + Math.max(0, w) * 0.25;
+        const up = Math.max(0, w);
+        const down = Math.max(0, -w);
+        blendArm(pose, 'left', { upZ: 0.3, upX: -0.2, tw: 0, loY: -0.2, loZ: 0.8 + Math.sin(beat * 2) * 0.3 }, up * up, Math.min(1, up * 2.5));
+        blendArm(pose, 'right', { upZ: 0.3, upX: -0.2, tw: 0, loY: -0.2, loZ: 0.8 + Math.sin(beat * 2) * 0.3 }, down * down, Math.min(1, down * 2.5));
+        pose.headZ += w * 0.15;
+        pose.headX += Math.sin(beat * 2) * 0.05;
+        this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.6);
+        break;
+      }
     }
   }
 
@@ -791,6 +953,8 @@ export class Character {
     this.bodyBins = new Map();
     if (!hips || !shoulder) return;
     this.restHips = hips.getWorldPosition(new THREE.Vector3());
+    // Насколько опустить таз, чтобы сесть на пол (до ~15 см над полом).
+    this.sitDrop = Math.max(0, this.restHips.y - 0.15 * this.scale);
     const shoulderY = shoulder.getWorldPosition(new THREE.Vector3()).y;
     const shoulderX = Math.abs(shoulder.getWorldPosition(new THREE.Vector3()).x);
     const yMin = knee ? knee.getWorldPosition(new THREE.Vector3()).y : this.restHips.y - 0.4;

@@ -633,3 +633,23 @@ body.dark #loading { background: #0d0812; color: #e9dcf5; }
   background: #fff;
   color: var(--ink);
 }
+
+/* Точки-ручки в режиме позы. */
+#handles { position: fixed; inset: 0; pointer-events: none; }
+#handles[hidden] { display: none; }
+.handle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: rgba(255, 111, 168, 0.35);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(255, 111, 168, 0.8), 0 0 12px rgba(255, 111, 168, 0.9);
+  animation: handlePulse 1.6s ease-in-out infinite;
+}
+@keyframes handlePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+@media (prefers-reduced-motion: reduce) { .handle { animation: none; } }
