@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Waifu Touch</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+        "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.1.0/lib/three-vrm.module.js",
+        "@pixiv/three-vrm-animation": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm-animation@3.1.0/lib/three-vrm-animation.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="hud">
+    <div id="affection">
+      <span class="heart">♥</span>
+      <div class="bar"><div class="fill" id="affection-fill"></div></div>
+      <span id="affection-label">Незнакомец</span>
+    </div>
+    <div id="buttons">
+      <button id="btn-voice" title="Озвучка">🔊</button>
+      <button id="btn-zoom" title="Во весь рост / крупно">🔍</button>
+      <button id="btn-wardrobe" title="Гардероб">👗</button>
+      <button id="btn-anims" title="Анимации и танец">🎬</button>
+      <button id="btn-editor" title="Редактор поз">✏️</button>
+      <button id="btn-hitbox" title="Показать зоны касаний">🎯</button>
+    </div>
+  </div>
+
+  <div id="bubble" class="hidden"></div>
+
+  <div id="cam-controls">
+    <button id="cam-in" title="Приблизить">＋</button>
+    <button id="cam-out" title="Отдалить">−</button>
+    <button id="cam-left" title="Повернуть влево">⟲</button>
+    <button id="cam-right" title="Повернуть вправо">⟳</button>
+    <button id="cam-reset" title="Вернуть вид">⌂</button>
+  </div>
+  <div id="poses">
+    <div id="pose-list" hidden></div>
+    <button id="poses-toggle" aria-expanded="false">🧍 Поза: <span id="pose-current">Стоит</span> ▴</button>
+  </div>
+
+  <div id="wardrobe" class="panel hidden">
+    <div class="editor-head">
+      <b>Гардероб</b>
+      <button class="panel-close" title="Закрыть">✕</button>
+    </div>
+    <div class="panel-body">
+      <button id="goth-preset" class="panel-big">🖤 Готик-образ одной кнопкой</button>
+      <div class="editor-group">Наряды</div>
+      <div id="outfit-list"></div>
+      <label class="panel-add">+ Добавить наряд (.vrm)
+        <input id="outfit-input" type="file" accept=".vrm" hidden />
+      </label>
+      <p class="panel-note">Сделай в VRoid Studio ту же девушку в разных нарядах и добавь каждый файл сюда.</p>
+      <div class="editor-group">Цвет одежды</div>
+      <div id="color-list"></div>
+      <div class="editor-group">Волосы</div>
+      <div id="hair-list" class="swatches"></div>
+      <div class="editor-group">Чулки</div>
+      <div id="stocking-list" class="chips"></div>
+      <div class="editor-group">Атмосфера</div>
+      <button id="dark-toggle" class="panel-big">🌙 Готичная атмосфера: выкл</button>
+    </div>
+  </div>
+
+  <div id="anims" class="panel hidden">
+    <div class="editor-head">
+      <b>Анимации</b>
+      <button class="panel-close" title="Закрыть">✕</button>
+    </div>
+    <div class="panel-body">
+      <button id="btn-dance" class="panel-big">💃 Танцевать</button>
+      <div class="editor-group">Mocap-анимации</div>
+      <div id="anim-list"></div>
+      <label class="panel-add">+ Загрузить анимацию (.vrma)
+        <input id="anim-input" type="file" accept=".vrma" hidden />
+      </label>
+    </div>
+  </div>
+
+  <div id="editor" class="panel hidden">
+    <div class="editor-head">
+      <b>Своя поза</b>
+      <button class="panel-close" title="Закрыть">✕</button>
+    </div>
+    <div id="editor-sliders"></div>
+    <form id="editor-save-row" hidden>
+      <input id="pose-name" type="text" maxlength="20" placeholder="Название позы" autocomplete="off" />
+      <button type="submit" class="primary">OK</button>
+    </form>
+    <div class="editor-actions">
+      <button id="editor-clear">Удалить сохранённые</button>
+      <button id="editor-reset">Сброс</button>
+      <button id="editor-save" class="primary">Сохранить</button>
+    </div>
+  </div>
+  <div id="hint">Гладь по голове, бери за руку… просто попробуй 😉</div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div id="loading-text">Загрузка…</div>
+  </div>
+
+  <div id="flash"></div>
+  <div id="drop-overlay" class="hidden">Отпусти файл: .vrm — новый наряд, .vrma — анимация</div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
