@@ -65,13 +65,25 @@ loader.register((parser) => new VRMLoaderPlugin(parser));
 
 let hitboxGroup = null;
 
+// Модель, упакованная в JSON как base64 ({ "vrm": "..." }) — для хостингов,
+// которые не отдают бинарные .vrm/.glb файлы.
+async function loadPackedModel(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const { vrm } = await res.json();
+  const bytes = Uint8Array.from(atob(vrm), (c) => c.charCodeAt(0));
+  return loader.parseAsync(bytes.buffer, '');
+}
+
 async function loadModel(url) {
   $('loading').classList.remove('done');
   $('loading-text').textContent = 'Загрузка…';
   try {
-    const gltf = await loader.loadAsync(url, (e) => {
-      if (e.total) $('loading-text').textContent = `Загрузка… ${Math.round((e.loaded / e.total) * 100)}%`;
-    });
+    const gltf = url.endsWith('.json')
+      ? await loadPackedModel(url)
+      : await loader.loadAsync(url, (e) => {
+        if (e.total) $('loading-text').textContent = `Загрузка… ${Math.round((e.loaded / e.total) * 100)}%`;
+      });
     const vrm = gltf.userData.vrm;
     if (!vrm) throw new Error('Это не VRM-файл');
 
