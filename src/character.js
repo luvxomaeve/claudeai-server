@@ -193,6 +193,7 @@ export class Character {
     this.sitS = 0; // сглаженное значение
     this.sitDropNow = 0;
     this.sitBackNow = 0;
+    this.kneelPlantar = 1.1; // насколько вытянут носок на коленях (рад)
     this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
@@ -825,7 +826,7 @@ export class Character {
       let q = pitch.multiply(rest.quat.clone());
       if (p2 > 0 && QL) {
         // На коленях стопа жёстко продолжает голень и вытянута носком назад.
-        const plantar = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 1.45);
+        const plantar = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), this.kneelPlantar);
         const kneelQ = QL.clone().multiply(plantar).multiply(rest.quat.clone());
         q = q.slerp(kneelQ, p2);
       }
