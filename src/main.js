@@ -195,11 +195,68 @@ let hitboxGroup = null;
 
 // Модель, упакованная в JSON как base64 ({ "vrm": "..." }) — для хостингов,
 // которые не отдают бинарные .vrm/.glb файлы.
+// Скачанная модель запоминается в браузере (Cache Storage): со второго раза — мгновенно.
+const MODEL_CACHE = 'waifu-model-v1';
+async function cachedModel(url) {
+  try {
+    const cache = await caches.open(MODEL_CACHE);
+    const hit = await cache.match(url);
+    return hit ? await hit.arrayBuffer() : null;
+  } catch { return null; }
+}
+async function storeModel(url, buffer) {
+  try {
+    const cache = await caches.open(MODEL_CACHE);
+    await cache.put(url, new Response(buffer, { headers: { 'Content-Type': 'application/octet-stream' } }));
+  } catch { /* нет места или приватный режим — просто без кэша */ }
+}
+
 async function loadPackedModel(url) {
+  const cached = await cachedModel(url);
+  if (cached) {
+    $('loading-text').textContent = 'Загрузка… почти готово';
+    return cached;
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const { vrm } = await res.json();
-  return Uint8Array.from(atob(vrm), (c) => c.charCodeAt(0)).buffer;
+  // Читаем по кусочкам и показываем, сколько скачано, — чтобы было видно, что идёт.
+  const total = Number(res.headers.get('Content-Length')) || 0;
+  const reader = res.body?.getReader();
+  let text;
+  if (reader) {
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      $('loading-text').textContent = total
+        ? `Загрузка… ${Math.round((got / total) * 100)}%`
+        : `Загрузка… ${(got / 1048576).toFixed(1)} МБ`;
+    }
+    const all = new Uint8Array(got);
+    let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    text = new TextDecoder().decode(all);
+  } else {
+    text = await res.text();
+  }
+  $('loading-text').textContent = 'Загрузка… распаковка';
+  const b64 = JSON.parse(text).vrm;
+  // Быстрая распаковка base64 средствами браузера.
+  let buffer;
+  try {
+    buffer = await (await fetch(`data:application/octet-stream;base64,${b64}`)).arrayBuffer();
+  } catch {
+    // Если data:-ссылки запрещены — распаковываем вручную.
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    buffer = u8.buffer;
+  }
+  storeModel(url, buffer.slice(0));
+  return buffer;
 }
 
 // source: { url } — ссылка на .vrm (или упакованный .json), { buffer } — содержимое файла.
