@@ -813,3 +813,21 @@ body.posing #poses #btn-home { display: none; }
 #lie-toggle.off { color: var(--ink); opacity: 0.4; }
 #lie-toggle.off svg { stroke-dasharray: 2 2.5; }
 #sit-slider.no-lie .track i:last-of-type { display: none; }
+
+/* Отклик касания: мягкий розовый круг под пальцем. */
+.ripple {
+  position: fixed;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 111, 168, 0.8);
+  background: rgba(255, 111, 168, 0.15);
+  pointer-events: none;
+  z-index: 20;
+  animation: ripple 0.55s ease-out forwards;
+}
+@keyframes ripple {
+  from { transform: scale(0.4); opacity: 1; }
+  to { transform: scale(1.4); opacity: 0; }
+}

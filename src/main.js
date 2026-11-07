@@ -357,11 +357,24 @@ function toNdc(e) {
   pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
 }
 
-function zoneAt(e) {
+function zoneAt(e, deep = false) {
   if (!character) return null;
   toNdc(e);
   raycaster.setFromCamera(pointer, camera);
-  return character.hitTest(raycaster.ray);
+  const hit = character.hitTest(raycaster.ray);
+  if (hit || !deep) return hit;
+  // Не попали в зону — проверяем саму модель (край юбки, бёдра, плечи, волосы…).
+  return character.hitTestMesh(raycaster);
+}
+
+// Отклик под пальцем: касание засчитано.
+function touchRipple(x, y) {
+  const el = document.createElement('div');
+  el.className = 'ripple';
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 600);
 }
 
 // Активные касания: для щипка (зум) двумя пальцами и поворота свайпом по фону.
@@ -430,7 +443,8 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (touches.size > 2) return;
 
-  const hit = zoneAt(e);
+  const hit = zoneAt(e, true);
+  if (hit) touchRipple(e.clientX, e.clientY);
   if (!hit) {
     // Пустое место в обычном режиме: свайп крутит камеру (сесть/встать — у левого края).
     bgSwipe = { sy: e.clientY, sx: e.clientX, lastX: e.clientX, lastY: e.clientY, axis: null };
@@ -930,7 +944,7 @@ function nearestHandle(e) {
   return best;
 }
 function poseDragStart(e) {
-  const hit = nearestHandle(e) ?? zoneAt(e);
+  const hit = nearestHandle(e) ?? zoneAt(e, true);
   if (!hit) {
     // Пустое место: вбок — крутим камеру (сесть/встать — только ползунком).
     poseDrag = { kind: 'bg', sx: e.clientX, sy: e.clientY, lastX: e.clientX, lastY: e.clientY, axis: null };

@@ -398,6 +398,24 @@ export class Character {
     }
   }
 
+  // Точное попадание по самой модели (тело, одежда, волосы): ищем ближайшую зону
+  // к точке касания. Закрывает щели между сферами зон — касание не «проваливается».
+  hitTestMesh(raycaster) {
+    if (!this.meshes) {
+      this.meshes = [];
+      this.vrm.scene.traverse((o) => { if (o.isMesh && o.visible) this.meshes.push(o); });
+    }
+    for (const m of this.meshes) if (m.isSkinnedMesh) m.boundingSphere = null; // поза меняется — пересчёт
+    const hit = raycaster.intersectObjects(this.meshes, false)[0];
+    if (!hit) return null;
+    let best = null;
+    for (const z of this.zones) {
+      const d = (z.center.distanceTo(hit.point) - z.worldRadius) / this.scale;
+      if (!best || d < best.score) best = { ...z, point: hit.point.clone(), score: d };
+    }
+    return best;
+  }
+
   hitTest(ray) {
     let best = null;
     const sphere = new THREE.Sphere();
