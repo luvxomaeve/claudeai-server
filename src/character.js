@@ -194,6 +194,7 @@ export class Character {
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     this.sitSideNow = 0;
+    this.shinLean = 0; // наклон голени вперёд (рад), для баланса корпуса в приседе
     this.kneelPlantar = 1.1; // насколько вытянут носок на коленях (рад)
     this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
@@ -396,8 +397,12 @@ export class Character {
       // Присед на каблуках: таз уходит назад и наклоняется вперёд, поясница прогибается,
       // корпус подаётся вперёд, грудь раскрыта. На коленях — прямая спина с лёгким прогибом.
       const squat = p1 * (1 - p2);
-      pose.hipsRotX += 0.45 * squat + 0.18 * p2;
-      pose.spineX += -0.12 * squat - 0.1 * p2; // прогиб поясницы (корпус чуть назад относительно таза)
+      // Баланс как у человека: центр тяжести над стопами, поэтому в приседе
+      // корпус наклоняется вперёд примерно параллельно голени (угол голени
+      // берём с прошлого кадра). Наклон делят таз (больше) и поясница (с прогибом).
+      const lean = THREE.MathUtils.clamp(this.shinLean, 0, 1.0);
+      pose.hipsRotX += (0.85 * lean + 0.08) * squat + 0.18 * p2;
+      pose.spineX += (0.15 * lean - 0.14) * squat - 0.1 * p2; // прогиб поясницы
       pose.headX -= 0.25 * squat + 0.05 * p2;
       pose.hipsZ *= 1 - s;
       pose.hipsX *= 1 - s;
@@ -786,10 +791,15 @@ export class Character {
     if (!b.hips || !this.restFoot.left) return;
     b.hips.updateWorldMatrix(true, true);
     const hipsPos = b.hips.getWorldPosition(new THREE.Vector3());
-    const { p1, p2, p3 } = this.sitPhases();
+    const { p1, p2: p2avg, p3 } = this.sitPhases();
     const S = this.scale;
+    const ease = (x) => x * x * (3 - 2 * x);
+    let leanSum = 0;
+    let leanN = 0;
     for (const side of ['left', 'right']) {
       const L = side === 'left';
+      // На колени — по очереди, как человек: сначала левое колено, потом правое.
+      const p2 = p3 > 0 ? p2avg : ease(THREE.MathUtils.clamp((this.sitS - (L ? 0.5 : 0.58)) / 0.22, 0, 1));
       const upper = b[`${side}UpperLeg`];
       const lower = b[`${side}LowerLeg`];
       const foot = b[`${side}Foot`];
@@ -846,6 +856,13 @@ export class Character {
         knee.z + 0.6 + kneeUp,
       );
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
+      // Угол голени вперёд — для баланса корпуса в следующем кадре.
+      {
+        const kp = lower.getWorldPosition(new THREE.Vector3());
+        const ap = foot.getWorldPosition(new THREE.Vector3());
+        leanSum += Math.atan2(kp.z - ap.z, Math.max(1e-3, kp.y - ap.y));
+        leanN++;
+      }
 
       // Ориентация стопы.
       // Стоя — ровно на полу; приподнятая пятка, присед на носках и поднятая
@@ -862,6 +879,7 @@ export class Character {
       }
       this.setWorldQuat(foot, q);
     }
+    if (leanN) this.shinLean += (leanSum / leanN - this.shinLean) * 0.3;
   }
 
   // ---------- Анатомические ограничения суставов ----------
