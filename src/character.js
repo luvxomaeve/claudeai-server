@@ -731,12 +731,18 @@ export class Character {
       // Колено смотрит вперёд; сидя на полу — вперёд и вниз (колени на полу).
       const { p2: down } = this.sitPhases();
       // В приседе колени вместе и смотрят вперёд, а не разъезжаются в стороны.
+      // Если ногу отвели пальцем — колено смотрит туда же, куда ушла ступня.
       const inwardPole = (hipsPos.x - knee.x) * 1.5;
-      const pole = knee.addScaledVector(fwd, 0.6).add(new THREE.Vector3(inwardPole, -0.5 * down, 0));
+      const footOff = this.footOffset[side];
+      const lateralPole = footOff ? footOff.x * 2 : 0;
+      const kneeUp = footOff ? footOff.y * 1.2 : 0; // поднятая нога — колено вперёд-вверх
+      const pole = knee.addScaledVector(fwd, 0.6 + kneeUp).add(new THREE.Vector3(inwardPole + lateralPole, -0.5 * down + kneeUp * 0.5, 0));
       this.twoBoneIK(upper, lower, foot, target, pole);
       // Стопа ровно на полу (при поднятой пятке носок смотрит вниз).
       // Сидя на полу носки смотрят назад, подъём стопы лежит на полу.
-      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + down * Math.PI * 0.85);
+      // Поднятая пальцем нога тянет носок (до ~40°).
+      const point = footOff ? Math.min(footOff.y / (0.3 * this.scale), 1) * 0.7 : 0;
+      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + down * Math.PI * 0.85);
       this.setWorldQuat(foot, tilt.multiply(rest.quat.clone()));
     }
   }
@@ -761,10 +767,15 @@ export class Character {
   setFootTarget(side, worldPoint) {
     const rest = this.restFoot[side];
     if (!rest) return;
+    const S = this.scale;
     const off = worldPoint.clone().sub(rest.pos);
-    off.y = Math.max(0, off.y);
-    const max = 0.5 * this.scale;
-    if (off.length() > max) off.setLength(max);
+    // Естественные пределы: вбок наружу до 25 см, внутрь — не дальше второй ноги,
+    // вверх до 45 см, вперёд до 40 см, назад до 25 см.
+    const out = Math.sign(rest.pos.x - this.restHips.x) || 1;
+    const lateral = THREE.MathUtils.clamp(off.x * out, -Math.abs(rest.pos.x - this.restHips.x) + 0.02 * S, 0.25 * S);
+    off.x = lateral * out;
+    off.y = THREE.MathUtils.clamp(off.y, 0, 0.45 * S);
+    off.z = THREE.MathUtils.clamp(off.z, -0.25 * S, 0.4 * S);
     this.footOffset[side] = off;
   }
 
