@@ -167,12 +167,12 @@ export class Character {
       for (const [finger, k] of [['Index', 0.7], ['Middle', 0.85], ['Ring', 1], ['Little', 1.15]]) {
         for (const [seg, segK] of [['Proximal', 0.32], ['Intermediate', 0.45], ['Distal', 0.3]]) {
           const node = vrm.humanoid.getNormalizedBoneNode(`${side}${finger}${seg}`);
-          if (node) this.fingers.push({ node, side, curl: k * segK });
+          if (node) this.fingers.push({ node, side, curl: k * segK, phase: k * 2.3 + (side === 'left' ? 0 : 1.1) });
         }
       }
       for (const [seg, k] of [['ThumbMetacarpal', 0.25], ['ThumbProximal', 0.3], ['ThumbDistal', 0.25]]) {
         const node = vrm.humanoid.getNormalizedBoneNode(`${side}${seg}`);
-        if (node) this.fingers.push({ node, side, thumb: true, curl: k });
+        if (node) this.fingers.push({ node, side, thumb: true, curl: k, phase: side === 'left' ? 0.5 : 1.6 });
       }
     }
 
@@ -350,6 +350,17 @@ export class Character {
     // Рука со стороны опорной ноги чуть отходит от бедра.
     pose.lUpperZ += relaxR * 0.06;
     pose.rUpperZ -= relaxL * 0.06;
+
+    // Живые руки: лёгкий маятник вперёд-назад (у каждой руки свой ритм),
+    // локти то сгибаются, то расслабляются, чуть отходят от тела и возвращаются.
+    pose.lUpperX += Math.sin(t * 0.83 + 0.4) * 0.045 + Math.sin(t * 0.31) * 0.02;
+    pose.rUpperX += Math.sin(t * 0.77 + 2.3) * 0.045 + Math.sin(t * 0.29 + 1) * 0.02;
+    pose.lUpperZ += Math.sin(t * 0.47 + 1.1) * 0.03;
+    pose.rUpperZ -= Math.sin(t * 0.51 + 0.2) * 0.03;
+    pose.lLowerY -= 0.06 + Math.sin(t * 0.53 + 0.7) * 0.07;
+    pose.rLowerY += 0.06 + Math.sin(t * 0.59 + 2.9) * 0.07;
+    pose.lLowerZ += Math.sin(t * 0.67) * 0.03;
+    pose.rLowerZ -= Math.sin(t * 0.61 + 1.7) * 0.03;
 
     // Медленный поворот корпуса и «блуждающий» взгляд.
     const twist = Math.sin(t * 0.29 + 1.3);
@@ -557,16 +568,18 @@ export class Character {
     this.rot(b.leftShoulder, 0, 0, pose.lShoulderZ);
     this.rot(b.rightShoulder, 0, 0, pose.rShoulderZ);
     // Кисти мягко опущены к ладони.
-    this.rot(b.leftHand, 0, 0, -pose.handBend);
-    this.rot(b.rightHand, 0, 0, pose.handBend);
+    // Кисти мягко поворачиваются, каждая в своём ритме.
+    this.rot(b.leftHand, Math.sin(t * 0.9) * 0.08, Math.sin(t * 0.6 + 1) * 0.1, -(pose.handBend + Math.sin(t * 0.71) * 0.08));
+    this.rot(b.rightHand, Math.sin(t * 0.85 + 2) * 0.08, -Math.sin(t * 0.63 + 0.4) * 0.1, pose.handBend + Math.sin(t * 0.79 + 1.3) * 0.08);
     this.rot(b.leftUpperLeg, pose.lLegX, 0, pose.lLegZ);
     this.rot(b.rightUpperLeg, pose.rLegX, 0, pose.rLegZ);
     this.rot(b.leftLowerLeg, pose.lKneeX, 0, 0);
     this.rot(b.rightLowerLeg, pose.rKneeX, 0, 0);
     // Пальцы слегка согнуты и чуть «дышат».
-    const curl = 1 + Math.sin(t * 0.7) * 0.08;
+    // Пальцы шевелятся каждый в своём темпе, а не все разом.
     for (const f of this.fingers) {
       const s = f.side === 'left' ? -1 : 1;
+      const curl = 1 + Math.sin(t * 0.7 + f.phase) * 0.12 + Math.sin(t * 1.9 + f.phase * 2) * 0.04;
       if (f.thumb) this.rot(f.node, 0, -s * f.curl * curl, 0);
       else this.rot(f.node, 0, 0, s * f.curl * curl);
     }
