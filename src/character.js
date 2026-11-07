@@ -553,6 +553,16 @@ export class Character {
     pose.headY += this.headOffset.y;
     pose.headX += this.headOffset.x;
     for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key] * (key.startsWith('hips') ? this.offK : 1);
+    // Контрапост: бёдра ушли вбок — плечи и голова уравновешивают S-линией,
+    // таз чуть опускается, и свободное колено мягко сгибается само (IK).
+    {
+      const hz = this.bodyOffset.hipsZ * this.offK;
+      pose.spineZ -= hz * 0.9;
+      pose.headZ += hz * 0.45;
+      pose.lShoulderZ += hz * 0.25;
+      pose.rShoulderZ += hz * 0.25;
+      pose.hipsY -= Math.abs(hz) * 0.12 * this.scale;
+    }
     this.updateDragPhysics(dt);
     // Баланс: подняла ногу — вес на опорную ногу, таз и корпус уравновешивают.
     const liftOf = (side) => {
@@ -726,9 +736,17 @@ export class Character {
     Object.assign(pose, this.springPose(pose, dt));
 
     // Применяем позу к нормализованным костям.
-    const spineBone = b.chest ?? b.spine;
-    this.rot(b.spine, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
-    this.rot(spineBone, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
+    // Изгиб корпуса распределён по позвоночнику плавной дугой (поясница, грудь,
+    // верх груди) — пластичнее, без «перелома» в одной точке.
+    if (b.chest && b.upperChest) {
+      this.rot(b.spine, pose.spineX * 0.38, pose.spineY * 0.3, pose.spineZ * 0.38);
+      this.rot(b.chest, pose.spineX * 0.34, pose.spineY * 0.35, pose.spineZ * 0.34);
+      this.rot(b.upperChest, pose.spineX * 0.28, pose.spineY * 0.35, pose.spineZ * 0.28);
+    } else {
+      const spineBone = b.chest ?? b.spine;
+      this.rot(b.spine, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
+      this.rot(spineBone, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
+    }
     this.rot(b.neck, pose.headX * 0.4, pose.headY * 0.4, pose.headZ * 0.4);
     this.rot(b.head, pose.headX * 0.6, pose.headY * 0.6, pose.headZ * 0.6);
     this.applyUpperArm('left', pose, 0);

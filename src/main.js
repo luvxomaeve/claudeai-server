@@ -81,6 +81,7 @@ let animateCamera = false;
 // Орбита камеры вокруг девушки: поворот (yaw) и приближение (zoom).
 const camBase = { dist: 2, cy: 1, S: 1 };
 let camYaw = 0;
+let camPitch = 0.05; // наклон камеры: < 0 — снизу, > 0 — сверху
 let camZoom = 1; // < 1 — ближе, > 1 — дальше
 const ZOOM_MIN = 0.35;
 const ZOOM_MAX = 3;
@@ -93,7 +94,8 @@ function orbitTarget(out) {
   // Когда она садится, камера опускается вместе с ней.
   if (character) lookY -= (character.sitDropNow ?? 0) * 0.6;
   out.look.set(0, lookY, 0);
-  out.pos.set(Math.sin(camYaw) * d, lookY + 0.05 * camBase.S, Math.cos(camYaw) * d);
+  const cp = Math.cos(camPitch);
+  out.pos.set(Math.sin(camYaw) * d * cp, lookY + Math.sin(camPitch) * d, Math.cos(camYaw) * d * cp);
   return out;
 }
 
@@ -106,8 +108,9 @@ function applyOrbit() {
   camera.lookAt(cameraLookAt);
 }
 
-function rotateBy(delta) {
+function rotateBy(delta, dPitch = 0) {
   camYaw = (camYaw + delta) % (Math.PI * 2);
+  camPitch = THREE.MathUtils.clamp(camPitch + dPitch, -0.35, 1.35);
   applyOrbit();
 }
 
@@ -453,10 +456,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
   if (orbitDrag) {
     // Сначала понимаем направление жеста: вбок — крутим камеру (сесть/встать — только ползунком).
-    if (!orbitDrag.axis && Math.hypot(e.clientX - orbitDrag.sx, e.clientY - orbitDrag.sy) > 10) {
-      orbitDrag.axis = Math.abs(e.clientX - orbitDrag.sx) > Math.abs(e.clientY - orbitDrag.sy) ? 'x' : 'y';
-    }
-    if (orbitDrag.axis === 'x') rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01);
+    rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01, (e.clientY - orbitDrag.lastY) * 0.005);
     orbitDrag.lastX = e.clientX;
     orbitDrag.lastY = e.clientY;
     return;
@@ -547,6 +547,7 @@ holdButton('cam-in', () => zoomBy(0.96));
 holdButton('cam-out', () => zoomBy(1.04));
 $('cam-reset').addEventListener('click', () => {
   camYaw = 0;
+  camPitch = 0.05;
   camZoom = 1;
   animateCamera = true;
   frameCamera();
@@ -668,6 +669,7 @@ function addPoseButton(name, def) {
     character.dancing = false;
     character.loop = null;
     character.setPose(name);
+    if (character.sit > 0) sitBy(-character.sit / 0.004);
     setActivePoseButton(name);
     setPoseListOpen(false);
     say(POSE_LINES[name] ?? pick(['Так?', 'Ну как я тебе?', 'Вот так нормально?']));
@@ -675,6 +677,22 @@ function addPoseButton(name, def) {
   $('pose-list').appendChild(btn);
 }
 for (const [name, def] of Object.entries(POSES)) addPoseButton(name, def);
+// Посадка одним касанием: присела, на коленях, сидит, лежит.
+for (const [label, v] of [['Присела', 0.45], ['На коленях', 0.8], ['Сидит', 1.0], ['Лежит', 1.3]]) {
+  const btn = document.createElement('button');
+  btn.className = 'sit-chip';
+  btn.textContent = label;
+  btn.addEventListener('click', () => {
+    if (!character) return;
+    if (currentAnim) stopAnim();
+    if (currentMocap && character.mixer) stopMocap();
+    character.dancing = false;
+    character.loop = null;
+    sitBy((v - character.sit) / 0.004);
+    setPoseListOpen(false);
+  });
+  $('pose-list').appendChild(btn);
+}
 
 // ---------- Редактор поз ----------
 
@@ -709,7 +727,7 @@ function setPoseMode(on) {
     // Позируем во весь рост — видно и руки, и ноги.
     if (!fullBody) setFullBody(true);
     $('hint').style.opacity = 0;
-    hintOnce('pose', 'Тяни за точки · два пальца — зум');
+    hintOnce('pose', 'Тяни за точки · таз вниз — сесть · фон — камера');
   }
 }
 $('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
@@ -777,34 +795,7 @@ function updateHandles() {
   }
 }
 
-// Ползунок слева: тянешь вниз — приседает → на колени → боком → ложится, вверх — встаёт.
 const SIT_MAX = 1.3;
-const sitSlider = $('sit-slider');
-// Палец ведёт относительно (без скачка к месту касания): вся высота полоски = от «стоит» до «лежит».
-let sliderDrag = null;
-sitSlider.addEventListener('pointerdown', (e) => {
-  if (!character) return;
-  e.preventDefault();
-  e.stopPropagation();
-  sitSlider.setPointerCapture(e.pointerId);
-  sliderDrag = { y: e.clientY };
-  sitSlider.classList.add('active');
-});
-sitSlider.addEventListener('pointermove', (e) => {
-  if (!sliderDrag || !character) return;
-  const h = sitSlider.querySelector('.track').getBoundingClientRect().height || 200;
-  const dv = ((e.clientY - sliderDrag.y) / h) * SIT_MAX;
-  sliderDrag.y = e.clientY;
-  sitBy(dv / 0.004);
-});
-for (const ev of ['pointerup', 'pointercancel']) {
-  sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
-}
-function updateSitSlider() {
-  if (!character) return;
-  const k = THREE.MathUtils.clamp(character.sitS / SIT_MAX, 0, 1);
-  sitSlider.style.setProperty('--k', k.toFixed(3));
-}
 
 // Свайп вниз по пустому месту — садится на пол, вверх — встаёт.
 let sitLineAt = 0;
@@ -821,8 +812,26 @@ function sitBy(dy) {
   }
 }
 
+// Ближайшая точка-ручка под пальцем (с запасом ~60px): хватать легко.
+const HANDLE_HIT = {
+  handL: { zone: 'hand', side: 'left' }, handR: { zone: 'hand', side: 'right' },
+  head: { zone: 'face' }, chest: { zone: 'body', bone: 'chest' }, belly: { zone: 'belly' },
+  hips: { zone: 'body', bone: 'hips' }, footL: { zone: 'legs', bone: 'leftFoot' }, footR: { zone: 'legs', bone: 'rightFoot' },
+};
+function nearestHandle(e) {
+  let best = null;
+  let bestD = 60;
+  for (const k of HANDLE_KEYS) {
+    const p = handleWorld(k);
+    if (!p) continue;
+    handleV.copy(p).project(camera);
+    const d = Math.hypot((handleV.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-handleV.y * 0.5 + 0.5) * window.innerHeight - e.clientY);
+    if (d < bestD) { bestD = d; best = HANDLE_HIT[k]; }
+  }
+  return best;
+}
 function poseDragStart(e) {
-  const hit = zoneAt(e);
+  const hit = nearestHandle(e) ?? zoneAt(e);
   if (!hit) {
     // Пустое место: вбок — крутим камеру (сесть/встать — только ползунком).
     poseDrag = { kind: 'bg', sx: e.clientX, sy: e.clientY, lastX: e.clientX, lastY: e.clientY, axis: null };
@@ -864,10 +873,8 @@ function poseDragMove(e) {
     return;
   }
   if (poseDrag.kind === 'bg') {
-    if (!poseDrag.axis && Math.hypot(e.clientX - poseDrag.sx, e.clientY - poseDrag.sy) > 10) {
-      poseDrag.axis = Math.abs(e.clientX - poseDrag.sx) > Math.abs(e.clientY - poseDrag.sy) ? 'x' : 'y';
-    }
-    if (poseDrag.axis === 'x') rotateBy(-(e.clientX - poseDrag.lastX) * 0.01);
+    // Пустое место в режиме позы — камера вращается во все стороны.
+    rotateBy(-(e.clientX - poseDrag.lastX) * 0.01, (e.clientY - poseDrag.lastY) * 0.005);
     poseDrag.lastX = e.clientX;
     poseDrag.lastY = e.clientY;
     return;
@@ -895,12 +902,15 @@ function poseDragMove(e) {
     o.spineY = clamp(o.spineY + dx * 0.005 * facing, -0.8, 0.8);
     o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
   } else {
-    // Вбок — бёдра в сторону, вниз — присесть.
+    // Таз: тянешь вниз — опускается (присед → на колени → сидит → лежит), вверх — встаёт;
+    // вбок — бёдра в сторону (стоя), с противовесом плеч и головы.
     const o = character.bodyOffset;
     const S = character.scale;
-    o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -0.08 * S, 0.08 * S);
-    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
-    o.hipsY = clamp(o.hipsY - dy * 0.0008 * S, -0.3 * S, 0);
+    if (Math.abs(dy) > Math.abs(dx) * 0.6) sitBy(dy * 0.85);
+    if (character.sit < 0.15) {
+      o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -0.08 * S, 0.08 * S);
+      o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+    }
   }
 }
 
@@ -1475,7 +1485,6 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
 
   updateCamera(dt);
-  updateSitSlider();
   updateHandles();
   updateLiveIdle();
   if (character) {
