@@ -282,9 +282,24 @@ export class Character {
 
   stopClip() {
     if (!this.mixer) return;
+    // Запоминаем позу из записи, чтобы плавно перетечь из неё в обычную анимацию.
+    this.blendFrom = { t: 0, q: new Map(), hips: this.bones.hips?.position.clone() };
+    this.vrm.scene.traverse((o) => { if (o.isBone || o.name?.startsWith('Normalized_')) this.blendFrom.q.set(o, o.quaternion.clone()); });
     this.mixer.stopAllAction();
     this.mixer = null;
     this.action = null;
+  }
+
+  // Плавный переход (~0.5 с) из позы записи в процедурную позу.
+  applyBlendFrom(dt) {
+    const bf = this.blendFrom;
+    if (!bf) return;
+    bf.t += dt;
+    const k = Math.min(1, bf.t / 0.5);
+    const e = k * k * (3 - 2 * k);
+    for (const [node, q] of bf.q) node.quaternion.slerpQuaternions(q, node.quaternion.clone(), e);
+    if (bf.hips && this.bones.hips) this.bones.hips.position.lerpVectors(bf.hips, this.bones.hips.position.clone(), e);
+    if (k >= 1) this.blendFrom = null;
   }
 
   talk(seconds) {
@@ -423,8 +438,8 @@ export class Character {
       pose.hipsRotX += (0.85 * lean + 0.08) * squat + 0.18 * p2;
       pose.spineX += (0.15 * lean - 0.14) * squat - 0.1 * p2; // прогиб поясницы
       pose.headX -= 0.25 * squat + 0.05 * p2;
-      pose.hipsZ *= 1 - s;
-      pose.hipsX *= 1 - s;
+      pose.hipsZ *= Math.max(0, 1 - s);
+      pose.hipsX *= Math.max(0, 1 - s);
       if (p3 > 0) {
         // Сидит боком: ноги сложены в одну сторону, корпус развёрнут к тебе,
         // опора на одну руку, спина — мягкой S-линией, голова набок.
@@ -437,6 +452,17 @@ export class Character {
         pose.hipsRotX -= 0.1 * p3;
         pose.spineX -= 0.06 * p3;
         pose.headX += 0.06 * p3;
+      }
+      const { p4 } = this.sitPhases(s);
+      if (p4 > 0) {
+        // Ложится на правый бок, приподнявшись на локте: таз заваливается набок,
+        // грудь приподнята, голова ровно и смотрит на тебя, ноги вместе и согнуты.
+        pose.hipsZ += 1.3 * p4;
+        pose.hipsRotY -= 0.25 * p4;
+        pose.spineZ -= 0.5 * p4;
+        pose.spineY += 0.2 * p4;
+        pose.headZ -= 0.55 * p4;
+        pose.headX += 0.05 * p4;
       }
     }
 
@@ -663,6 +689,7 @@ export class Character {
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
     this.applyJointLimits();
+    this.applyBlendFrom(dt);
     // Пол для всего тела: колени, таз, руки, голова не проходят сквозь пол.
     if (this.floorPush()) {
       this.plantFeet(pose);
@@ -878,6 +905,16 @@ export class Character {
         );
         target.lerp(fold, p3);
       }
+      // Лёжа на боку: ноги вместе вдоль пола, колени чуть согнуты вперёд.
+      const { p4 } = this.sitPhases();
+      if (p4 > 0) {
+        const lie = new THREE.Vector3(
+          this.restHips.x + (L ? 0.62 : 0.56) * S,
+          rest.pos.y - 0.04 * S,
+          this.restHips.z + (L ? -0.02 : 0.06) * S,
+        );
+        target.lerp(lie, p4);
+      }
 
       // Ступня, сдвинутая пальцем.
       const footOff = this.dragPhys.foot[side]?.x ?? null; // с инерцией
@@ -1020,6 +1057,21 @@ export class Character {
     const f = this.flip;
     const X = new THREE.Vector3(1, 0, 0);
     const Y = new THREE.Vector3(0, 1, 0);
+    // Позвоночник, шея, голова: наклон вперёд/назад, поворот и наклон вбок в пределах нормы.
+    const clampEuler = (bone, xMin, xMax, yLim, zLim) => {
+      if (!bone) return;
+      const e = new THREE.Euler().setFromQuaternion(bone.quaternion, 'XYZ');
+      e.x = THREE.MathUtils.clamp(e.x * f, xMin * deg, xMax * deg) * f;
+      e.y = THREE.MathUtils.clamp(e.y, -yLim * deg, yLim * deg);
+      e.z = THREE.MathUtils.clamp(e.z * f, -zLim * deg, zLim * deg) * f;
+      bone.quaternion.setFromEuler(e);
+    };
+    const b = this.bones;
+    clampEuler(b.spine, -30, 50, 35, 30);
+    clampEuler(b.chest, -25, 40, 30, 25);
+    clampEuler(b.upperChest, -20, 30, 25, 20);
+    clampEuler(b.neck, -35, 40, 50, 30);
+    clampEuler(b.head, -35, 40, 50, 35);
     for (const side of ['left', 'right']) {
       const L = side === 'left';
       const out = L ? 1 : -1; // в сторону от тела (в осях VRM 1.0)
@@ -1073,6 +1125,29 @@ export class Character {
         const ang = 2 * Math.acos(Math.min(1, Math.abs(sw.w)));
         if (ang > 145 * deg) sw.slerp(new THREE.Quaternion(), 1 - (145 * deg) / ang);
         elbow.quaternion.copy(sw.multiply(new THREE.Quaternion().setFromAxisAngle(X, tw)));
+      }
+
+      // Плечо: скручивание ±100°, рука не заводится далеко за спину.
+      const upperArm = this.bones[`${side}UpperArm`];
+      if (upperArm) {
+        const axis = new THREE.Vector3(out, 0, 0);
+        const { swing, twistAngle } = Character.swingTwist(upperArm.quaternion, axis);
+        const tw = THREE.MathUtils.clamp(twistAngle, -100 * deg, 100 * deg);
+        const dir = axis.clone().applyQuaternion(swing);
+        // В осях VRM 1.0: back = насколько рука за плоскостью тела.
+        const back = -dir.z * f;
+        const maxBack = dir.y < -0.5 ? 0.75 : 0.55; // опущенную руку можно завести за спину чуть дальше
+        let newSwing = swing;
+        if (back > maxBack) {
+          const nd = dir.clone();
+          nd.z = -maxBack / f;
+          const rest = Math.sqrt(Math.max(0, 1 - maxBack * maxBack));
+          const xy = Math.hypot(dir.x, dir.y) || 1;
+          nd.x = (dir.x / xy) * rest;
+          nd.y = (dir.y / xy) * rest;
+          newSwing = new THREE.Quaternion().setFromUnitVectors(axis, nd.normalize());
+        }
+        upperArm.quaternion.copy(newSwing.multiply(new THREE.Quaternion().setFromAxisAngle(axis, tw)));
       }
 
       // Кисть: сгиб до 60°, скручивание ±30°.
@@ -1237,6 +1312,7 @@ export class Character {
       p1: ease(c(s / 0.5, 0, 1)),
       p2: ease(c((s - 0.5) / 0.3, 0, 1)),
       p3: ease(c((s - 0.8) / 0.2, 0, 1)),
+      p4: ease(c((s - 1.0) / 0.3, 0, 1)), // 1.0…1.3 — ложится на бок, на локоть
     };
   }
 
@@ -1246,10 +1322,11 @@ export class Character {
     const squatY = restY * 0.58;
     const floorY = 0.36 * this.scale; // на коленях, таз над пятками
     const sideY = 0.15 * this.scale; // сидит боком прямо на полу
-    const { p1, p2, p3 } = this.sitPhases(s);
+    const { p1, p2, p3, p4 } = this.sitPhases(s);
     let y = THREE.MathUtils.lerp(restY, squatY, p1);
     if (p2 > 0) y = THREE.MathUtils.lerp(squatY, floorY, p2);
     if (p3 > 0) y = THREE.MathUtils.lerp(floorY, sideY, p3);
+    if (p4 > 0) y = THREE.MathUtils.lerp(sideY, 0.13 * this.scale, p4); // лёжа на боку
     return Math.max(0, restY - y);
   }
 
@@ -1265,7 +1342,7 @@ export class Character {
     const q1 = upper.quaternion.clone();
     const q2 = lower.quaternion.clone();
     // Ладони на коленях; когда она на коленях — чуть ближе к себе, на бёдрах.
-    const { p2, p3 } = this.sitPhases();
+    const { p2, p3, p4 } = this.sitPhases();
     const kneePos = knee.getWorldPosition(new THREE.Vector3());
     const hipsPos = this.bones.hips.getWorldPosition(new THREE.Vector3());
     const target = kneePos.clone()
@@ -1280,6 +1357,16 @@ export class Character {
     } else if (p3 > 0) {
       const thigh = kneePos.clone().lerp(hipsPos, 0.45).add(new THREE.Vector3(0, 0.06 * this.scale, 0));
       target.lerp(thigh, p3);
+    }
+    // Лёжа на боку: правое предплечье на полу перед грудью (опора на локоть),
+    // левая рука лежит на полу перед животом.
+    if (p4 > 0) {
+      const chest = this.chestNode().getWorldPosition(new THREE.Vector3());
+      const lie = side === 'right'
+        ? new THREE.Vector3(chest.x + 0.02 * this.scale, 0.04 * this.scale, chest.z + 0.22 * this.scale)
+        : new THREE.Vector3(hipsPos.x - 0.12 * this.scale, 0.05 * this.scale, hipsPos.z + 0.24 * this.scale);
+      target.lerp(lie, p4);
+      pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.6, -0.3)), p4);
     }
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);

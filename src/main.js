@@ -748,11 +748,12 @@ function sitBy(dy) {
   if (!character) return;
   if (dy > 0 && character.mixer && currentMocap) stopMocap();
   const before = character.sit;
-  character.sit = THREE.MathUtils.clamp(character.sit + dy * 0.004, 0, 1);
+  character.sit = THREE.MathUtils.clamp(character.sit + dy * 0.004, 0, 1.3); // до 1.3 — лечь на бок
   const now = performance.now();
   if (now - sitLineAt > 4000) {
     if (before < 0.9 && character.sit >= 0.9) { sitLineAt = now; say(pick(['Посижу немножко~', 'Ух, устала…', 'Сядешь рядом?'])); }
     if (before > 0.1 && character.sit <= 0.1) { sitLineAt = now; say(pick(['Ладно, встаю!', 'Опа!', 'Всё, отдохнула~'])); }
+    if (before < 1.25 && character.sit >= 1.25) { sitLineAt = now; say(pick(['Полежу немножко~', 'Как уютно…', 'Ммм, хорошо~'])); }
   }
 }
 

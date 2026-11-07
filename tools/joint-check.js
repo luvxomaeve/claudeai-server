@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
   p.on('pageerror', e => console.log('pageerror:', e.message));
   await p.goto('http://localhost:8766/');
   await p.waitForSelector('#loading.done', { timeout: 90000 });
-  await p.evaluate(() => { window.__waifu.idleTimer = 999; });
+  await p.waitForTimeout(800); await p.evaluate(() => { window.__waifu.idleTimer = 999; window.__waifu.stopClip(); });
   const measure = () => p.evaluate(() => {
     const w = window.__waifu; const deg = (r) => Math.round(r * 57.3);
     const q = (n) => w.bones[n].quaternion;
@@ -21,7 +21,7 @@ const { chromium } = require('playwright');
     }
     return out.l + ' | ' + out.r;
   });
-  for (const s of [0, 0.25, 0.5, 0.65, 0.8, 0.9, 1]) {
+  for (const s of [0, 0.25, 0.5, 0.65, 0.8, 0.9, 1, 1.15, 1.3]) {
     await p.evaluate((s) => { const w = window.__waifu; w.sit = s; w.sitS = s; }, s);
     await p.waitForTimeout(2500);
     console.log('sit', s, await measure());
