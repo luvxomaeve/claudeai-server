@@ -27,12 +27,14 @@ const ZONE_DEFS = [
 const BASE_POSE = {
   spineX: 0, spineY: 0, spineZ: 0,
   headX: 0, headY: 0, headZ: 0,
-  lUpperZ: -1.22, rUpperZ: 1.22,
+  lUpperZ: -1.25, rUpperZ: 1.25,
   lUpperX: 0.08, rUpperX: 0.08,
   lUpperTwist: 0, rUpperTwist: 0,
-  lLowerY: -0.25, rLowerY: 0.25,
+  lLowerY: -0.4, rLowerY: 0.4,
   lLowerZ: 0, rLowerZ: 0,
   hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0,
+  lLegX: 0, rLegX: 0, lLegZ: 0, rLegZ: 0, lKneeX: 0, rKneeX: 0,
+  lShoulderZ: 0, rShoulderZ: 0, handBend: 0.25,
 };
 
 export { BASE_POSE };
@@ -108,8 +110,24 @@ export class Character {
 
     this.bones = {};
     const names = ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head',
-      'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand'];
+      'leftShoulder', 'rightShoulder',
+      'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand',
+      'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg'];
     for (const n of names) this.bones[n] = vrm.humanoid.getNormalizedBoneNode(n);
+    // Пальцы: [кость, сторона, сила сгиба]. Прямые пальцы — главный признак «манекена».
+    this.fingers = [];
+    for (const side of ['left', 'right']) {
+      for (const [finger, k] of [['Index', 0.7], ['Middle', 0.85], ['Ring', 1], ['Little', 1.15]]) {
+        for (const [seg, segK] of [['Proximal', 0.32], ['Intermediate', 0.45], ['Distal', 0.3]]) {
+          const node = vrm.humanoid.getNormalizedBoneNode(`${side}${finger}${seg}`);
+          if (node) this.fingers.push({ node, side, curl: k * segK });
+        }
+      }
+      for (const [seg, k] of [['ThumbMetacarpal', 0.25], ['ThumbProximal', 0.3], ['ThumbDistal', 0.25]]) {
+        const node = vrm.humanoid.getNormalizedBoneNode(`${side}${seg}`);
+        if (node) this.fingers.push({ node, side, thumb: true, curl: k });
+      }
+    }
 
     vrm.humanoid.update();
     vrm.scene.updateMatrixWorld(true);
@@ -242,24 +260,42 @@ export class Character {
     const poseDef = POSES[this.poseName];
     if (poseDef.wave === 'left') pose.lLowerZ += Math.sin(t * 9) * 0.25;
 
-    // Дыхание и лёгкое покачивание.
-    const breath = Math.sin(t * 1.6);
-    pose.spineX += breath * 0.015;
-    pose.lUpperZ += breath * 0.02;
-    pose.rUpperZ -= breath * 0.02;
-    // «Живое» покачивание: перенос веса с ноги на ногу, лёгкий поворот бёдер,
-    // корпус и голова компенсируют — так стоят живые люди, а не манекен.
-    const sway = Math.sin(t * 0.55);
-    const twist = Math.sin(t * 0.37 + 1.3);
-    pose.hipsZ += sway * 0.035;
-    pose.hipsX += sway * 0.012 * this.scale;
-    pose.spineZ -= sway * 0.05;
-    pose.headZ += Math.sin(t * 0.55 + 0.9) * 0.035;
-    pose.hipsRotY += twist * 0.06;
-    pose.spineY -= twist * 0.04;
-    pose.lUpperX += twist * 0.04;
-    pose.rUpperX -= twist * 0.04;
-    pose.headX += Math.sin(t * 0.23) * 0.03;
+    // Дыхание: грудь и плечи чуть поднимаются.
+    const breath = Math.sin(t * 1.5);
+    pose.spineX += breath * 0.02;
+    pose.lShoulderZ += breath * 0.035;
+    pose.rShoulderZ -= breath * 0.035;
+    pose.lUpperZ += breath * 0.025;
+    pose.rUpperZ -= breath * 0.025;
+
+    // Перенос веса: стоит то на одной, то на другой ноге (контрапост).
+    // tanh делает «плато» — она подолгу стоит на одной ноге, а не качается маятником.
+    const w = Math.tanh(2.2 * Math.sin(t * 0.42)) / Math.tanh(2.2);
+    const relaxL = Math.max(0, -w); // левая нога расслаблена
+    const relaxR = Math.max(0, w); // правая нога расслаблена
+    pose.hipsX += w * 0.035 * this.scale;
+    pose.hipsZ += w * 0.075;
+    pose.lLegZ -= w * 0.075; // ноги остаются вертикальными, бёдра наклоняются
+    pose.rLegZ -= w * 0.075;
+    pose.spineZ -= w * 0.12;
+    pose.headZ += w * 0.06;
+    pose.rKneeX += relaxR * 0.3;
+    pose.rLegX -= relaxR * 0.13;
+    pose.lKneeX += relaxL * 0.3;
+    pose.lLegX -= relaxL * 0.13;
+    // Рука со стороны опорной ноги чуть отходит от бедра.
+    pose.lUpperZ += relaxR * 0.06;
+    pose.rUpperZ -= relaxL * 0.06;
+
+    // Медленный поворот корпуса и «блуждающий» взгляд.
+    const twist = Math.sin(t * 0.29 + 1.3);
+    pose.hipsRotY += twist * 0.08;
+    pose.spineY -= twist * 0.05;
+    pose.lUpperX += twist * 0.05;
+    pose.rUpperX -= twist * 0.05;
+    pose.headY += Math.sin(t * 0.31) * 0.14 + Math.sin(t * 0.83) * 0.04;
+    pose.headX += Math.sin(t * 0.23) * 0.05;
+    pose.headZ += Math.sin(t * 0.47 + 0.9) * 0.04;
 
     if (this.dancing) this.applyDance(pose, t);
 
@@ -397,6 +433,22 @@ export class Character {
     b.rightUpperArm?.quaternion.multiply(this.twistQ.setFromAxisAngle(this.axisX, pose.rUpperTwist * this.flip));
     this.rot(b.leftLowerArm, 0, pose.lLowerY, pose.lLowerZ);
     this.rot(b.rightLowerArm, 0, pose.rLowerY, pose.rLowerZ);
+    this.rot(b.leftShoulder, 0, 0, pose.lShoulderZ);
+    this.rot(b.rightShoulder, 0, 0, pose.rShoulderZ);
+    // Кисти мягко опущены к ладони.
+    this.rot(b.leftHand, 0, 0, -pose.handBend);
+    this.rot(b.rightHand, 0, 0, pose.handBend);
+    this.rot(b.leftUpperLeg, pose.lLegX, 0, pose.lLegZ);
+    this.rot(b.rightUpperLeg, pose.rLegX, 0, pose.rLegZ);
+    this.rot(b.leftLowerLeg, pose.lKneeX, 0, 0);
+    this.rot(b.rightLowerLeg, pose.rKneeX, 0, 0);
+    // Пальцы слегка согнуты и чуть «дышат».
+    const curl = 1 + Math.sin(t * 0.7) * 0.08;
+    for (const f of this.fingers) {
+      const s = f.side === 'left' ? -1 : 1;
+      if (f.thumb) this.rot(f.node, 0, -s * f.curl * curl, 0);
+      else this.rot(f.node, 0, 0, s * f.curl * curl);
+    }
     if (b.hips) {
       b.hips.position.y += pose.hipsY;
       b.hips.position.x += pose.hipsX * this.flip;
