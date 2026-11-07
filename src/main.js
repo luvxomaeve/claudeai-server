@@ -90,7 +90,7 @@ function orbitTarget(out) {
   const headY = (character ? character.headHeight : 1.4) + 0.05 * camBase.S;
   let lookY = THREE.MathUtils.lerp(headY, camBase.cy, THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1));
   // Когда она садится, камера опускается вместе с ней.
-  if (character) lookY -= character.sitS * character.sitDrop * 0.6;
+  if (character) lookY -= (character.sitDropNow ?? 0) * 0.6;
   out.look.set(0, lookY, 0);
   out.pos.set(Math.sin(camYaw) * d, lookY + 0.05 * camBase.S, Math.cos(camYaw) * d);
   return out;

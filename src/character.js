@@ -191,6 +191,7 @@ export class Character {
     this.footOffset = { left: null, right: null }; // ступни, сдвинутые пальцем
     this.sit = 0; // 0 — стоит, 1 — сидит на полу (свайп вниз)
     this.sitS = 0; // сглаженное значение
+    this.sitDropNow = 0;
     this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
@@ -367,9 +368,12 @@ export class Character {
     this.sitS += (this.sit - this.sitS) * (1 - Math.exp(-dt * 5));
     if (this.sitS > 0.001) {
       const s = this.sitS;
-      pose.hipsY -= s * this.sitDrop;
-      pose.spineX += 0.32 * s;
-      pose.headX -= 0.28 * s;
+      const { p1, p2 } = this.sitPhases(s);
+      this.sitDropNow = this.sitDropFor(s);
+      pose.hipsY -= this.sitDropNow;
+      // В приседе корпус наклонён вперёд, сев на пол — выпрямляется.
+      pose.spineX += 0.32 * p1 - 0.26 * p2;
+      pose.headX -= 0.28 * p1 - 0.2 * p2;
       pose.hipsZ *= 1 - s;
       pose.hipsX *= 1 - s;
     }
@@ -668,7 +672,8 @@ export class Character {
     const l1 = a.distanceTo(b);
     const l2 = b.distanceTo(c);
     t.copy(target).sub(a);
-    const dist = THREE.MathUtils.clamp(t.length(), 1e-4, (l1 + l2) * 0.999);
+    // Не даём цели оказаться ближе минимального вылета — иначе ногу/руку выкручивает.
+    const dist = THREE.MathUtils.clamp(t.length(), Math.abs(l1 - l2) + 0.02 * (l1 + l2), (l1 + l2) * 0.999);
     t.normalize();
     const cosA = THREE.MathUtils.clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1);
     const sinA = Math.sqrt(1 - cosA * cosA);
@@ -708,16 +713,30 @@ export class Character {
       const outSign = -Math.sign(hipsPos.x - rest.pos.x) || (L ? 1 : -1);
       target.x -= outSign * inward;
       // Сидя на полу ступни уходят вперёд и чуть в стороны.
-      target.z += this.sitS * 0.3 * this.scale;
-      target.x += outSign * this.sitS * 0.04 * this.scale;
+      const { p1, p2 } = this.sitPhases();
+      target.z += p1 * 0.3 * this.scale;
+      if (p2 > 0) {
+        // Сидит на полу: ступни по бокам от бёдер, чуть позади.
+        const duck = new THREE.Vector3(
+          hipsPos.x + outSign * 0.17 * this.scale,
+          rest.pos.y,
+          this.restHips.z - 0.04 * this.scale,
+        );
+        target.lerp(duck, p2);
+      }
       // Ступня, сдвинутая пальцем.
       if (this.footOffset[side]) target.add(this.footOffset[side]);
       target.y = Math.max(target.y, rest.pos.y);
       const knee = lower.getWorldPosition(new THREE.Vector3());
-      const pole = knee.addScaledVector(fwd, 0.6);
+      // Колено смотрит вперёд; сидя на полу — вперёд и вниз (колени на полу).
+      const { p2: down } = this.sitPhases();
+      // В приседе колени вместе и смотрят вперёд, а не разъезжаются в стороны.
+      const inwardPole = (hipsPos.x - knee.x) * 1.5;
+      const pole = knee.addScaledVector(fwd, 0.6).add(new THREE.Vector3(inwardPole, -0.5 * down, 0));
       this.twoBoneIK(upper, lower, foot, target, pole);
       // Стопа ровно на полу (при поднятой пятке носок смотрит вниз).
-      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7);
+      // Сидя на полу носки смотрят назад, подъём стопы лежит на полу.
+      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + down * Math.PI * 0.85);
       this.setWorldQuat(foot, tilt.multiply(rest.quat.clone()));
     }
   }
@@ -808,6 +827,22 @@ export class Character {
     }
   }
 
+  // Посадка в две фазы: 0…0.6 — глубокий присед (ступни вперёд),
+  // 0.6…1 — садится на пол по-анимешному (колени на полу, ступни по бокам).
+  sitPhases(s = this.sitS) {
+    const ease = (x) => x * x * (3 - 2 * x);
+    return { p1: ease(Math.min(s / 0.6, 1)), p2: ease(THREE.MathUtils.clamp((s - 0.6) / 0.4, 0, 1)) };
+  }
+
+  sitDropFor(s) {
+    const restY = this.restHips.y;
+    const squatY = restY * 0.5;
+    const floorY = 0.13 * this.scale;
+    const { p1, p2 } = this.sitPhases(s);
+    const y = p2 > 0 ? THREE.MathUtils.lerp(squatY, floorY, p2) : THREE.MathUtils.lerp(restY, squatY, p1);
+    return Math.max(0, restY - y);
+  }
+
   // Сидя на полу кладёт руки на колени (плавно, по мере того как садится).
   handsOnKnees(side) {
     const w = THREE.MathUtils.smoothstep(this.sitS, 0.35, 0.85);
@@ -819,7 +854,17 @@ export class Character {
     if (!upper || !lower || !hand || !knee) return;
     const q1 = upper.quaternion.clone();
     const q2 = lower.quaternion.clone();
-    const target = knee.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.05 * this.scale, 0.03 * this.scale));
+    // В приседе — на колени; сидя на полу — на пол между коленями.
+    const { p2 } = this.sitPhases();
+    const kneePos = knee.getWorldPosition(new THREE.Vector3());
+    const onKnee = kneePos.clone().add(new THREE.Vector3(0, 0.05 * this.scale, 0.03 * this.scale));
+    const hipsPos = this.bones.hips.getWorldPosition(new THREE.Vector3());
+    const onFloor = new THREE.Vector3(
+      THREE.MathUtils.lerp(kneePos.x, hipsPos.x, 0.55),
+      0.03 * this.scale,
+      kneePos.z + 0.02 * this.scale,
+    );
+    const target = onKnee.lerp(onFloor, p2);
     const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.4, -0.4));
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);
