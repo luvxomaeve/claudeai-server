@@ -374,7 +374,6 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (touches.size > 2) return;
 
-  flick = { sx: e.clientX, sy: e.clientY, t: performance.now() };
   const hit = zoneAt(e);
   if (!hit) {
     // Пустое место в обычном режиме: свайп вверх/вниз — встать/сесть.
@@ -508,26 +507,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 
-// Быстрый взмах пальцем вверх/вниз прямо по ней (в обычном режиме) —
-// на шаг ниже: присед → на колени → сидит боком → лежит; вверх — встаёт.
-let flick = null;
-const SIT_STEPS = [0, 0.5, 0.8, 1.0, 1.3];
-function sitStep(dir) {
-  const cur = character.sit;
-  const next = dir > 0 ? SIT_STEPS.find((v) => v > cur + 0.05) ?? 1.3 : 0;
-  sitBy((next - cur) / 0.004);
-}
 function endPointer(e) {
-  if (flick && touches.size === 1 && !poseMode && !cameraMode && !bgSwipe && character) {
-    const dx = e.clientX - flick.sx;
-    const dy = e.clientY - flick.sy;
-    if (Math.abs(dy) > 70 && Math.abs(dy) > 1.8 * Math.abs(dx) && performance.now() - flick.t < 450) {
-      sitStep(dy);
-      stroking = null;
-      petting = null;
-    }
-  }
-  flick = null;
   touches.delete(e.pointerId);
   poseDrag = null;
   bgSwipe = null;
@@ -799,6 +779,33 @@ function updateHandles() {
   }
 }
 
+// Ползунок слева: тянешь вниз — приседает → на колени → боком → ложится, вверх — встаёт.
+const SIT_MAX = 1.3;
+const sitSlider = $('sit-slider');
+let sliderDrag = false;
+function sliderSet(e) {
+  const r = sitSlider.querySelector('.track').getBoundingClientRect();
+  const v = THREE.MathUtils.clamp((e.clientY - r.top) / r.height, 0, 1) * SIT_MAX;
+  sitBy((v - character.sit) / 0.004);
+}
+sitSlider.addEventListener('pointerdown', (e) => {
+  if (!character) return;
+  e.preventDefault();
+  sitSlider.setPointerCapture(e.pointerId);
+  sliderDrag = true;
+  sitSlider.classList.add('active');
+  sliderSet(e);
+});
+sitSlider.addEventListener('pointermove', (e) => { if (sliderDrag && character) sliderSet(e); });
+for (const ev of ['pointerup', 'pointercancel']) {
+  sitSlider.addEventListener(ev, () => { sliderDrag = false; sitSlider.classList.remove('active'); });
+}
+function updateSitSlider() {
+  if (!character) return;
+  const k = THREE.MathUtils.clamp(character.sitS / SIT_MAX, 0, 1);
+  sitSlider.style.setProperty('--k', k.toFixed(3));
+}
+
 // Свайп вниз по пустому месту — садится на пол, вверх — встаёт.
 let sitLineAt = 0;
 function sitBy(dy) {
@@ -874,27 +881,27 @@ function poseDragMove(e) {
   const clamp = THREE.MathUtils.clamp;
   if (poseDrag.kind === 'head') {
     const o = character.headOffset;
-    o.y = clamp(o.y + dx * 0.0035 * facing, -0.6, 0.6);
-    o.x = clamp(o.x + dy * 0.003, -0.35, 0.35);
+    o.y = clamp(o.y + dx * 0.006 * facing, -0.9, 0.9);
+    o.x = clamp(o.x + dy * 0.005, -0.5, 0.5);
   } else if (poseDrag.kind === 'spine') {
     // Вниз — наклон вперёд как у человека: в основном в тазобедренных (таз уходит
     // назад для баланса, ноги на полу) и немного в спине; вверх — прогиб назад.
     const o = character.bodyOffset;
-    o.hipsRotX = clamp(o.hipsRotX + dy * 0.002, -0.12, 0.75);
-    o.spineX = clamp(o.spineX + dy * 0.0012, -0.3, 0.4);
-    o.spineZ = clamp(o.spineZ - dx * 0.0022 * facing, -0.28, 0.28);
+    o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
+    o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
+    o.spineZ = clamp(o.spineZ - dx * 0.004 * facing, -0.5, 0.5);
   } else if (poseDrag.kind === 'twist') {
     // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
     const o = character.bodyOffset;
-    o.spineY = clamp(o.spineY + dx * 0.003 * facing, -0.5, 0.5);
-    o.spineX = clamp(o.spineX + dy * 0.0022, -0.3, 0.7);
+    o.spineY = clamp(o.spineY + dx * 0.005 * facing, -0.8, 0.8);
+    o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
   } else {
     // Вбок — бёдра в сторону, вниз — присесть.
     const o = character.bodyOffset;
     const S = character.scale;
-    o.hipsX = clamp(o.hipsX + dx * 0.00035 * facing * S, -0.05 * S, 0.05 * S);
-    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.08, 0.08);
-    o.hipsY = clamp(o.hipsY - dy * 0.0005 * S, -0.2 * S, 0);
+    o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -0.08 * S, 0.08 * S);
+    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+    o.hipsY = clamp(o.hipsY - dy * 0.0008 * S, -0.3 * S, 0);
   }
 }
 
@@ -1469,6 +1476,7 @@ function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
 
   updateCamera(dt);
+  updateSitSlider();
   updateHandles();
   updateLiveIdle();
   if (character) {

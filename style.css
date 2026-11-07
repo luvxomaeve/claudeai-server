@@ -693,3 +693,62 @@ body.posing #poses #poses-toggle, body.posing #poses #pose-list { display: none;
   font-weight: 800;
 }
 #pose-list button.armed { background: #e2557f; color: #fff; }
+
+/* Ползунок посадки слева: тонкая линия, точки — стоит / присед / на коленях / боком / лёжа. */
+#sit-slider {
+  position: fixed;
+  left: max(6px, env(safe-area-inset-left, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 210px;
+  padding: 14px 0;
+  display: flex;
+  justify-content: center;
+  z-index: 5;
+  touch-action: none;
+  cursor: ns-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#sit-slider .track {
+  position: relative;
+  width: 4px;
+  height: 100%;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 1px 6px rgba(90, 40, 100, 0.15);
+}
+#sit-slider .track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(var(--k, 0) * 100%);
+  border-radius: 4px;
+  background: var(--pink);
+}
+#sit-slider i {
+  position: absolute;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+}
+#sit-slider .thumb {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--k, 0) * 100%);
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--pink);
+  box-shadow: 0 3px 10px rgba(90, 40, 100, 0.25);
+  transition: transform 0.15s ease;
+}
+#sit-slider.active .thumb { transform: scale(1.25); }

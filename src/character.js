@@ -1353,8 +1353,8 @@ export class Character {
       this.twoBoneIK(upper, lower, hand, target, pole);
     }
     const k = 0.15;
-    this.reachLean.x += (THREE.MathUtils.clamp(leanX * 0.6, -0.2, 0.2) - this.reachLean.x) * k;
-    this.reachLean.z += (THREE.MathUtils.clamp(leanZ * 0.6, -0.15, 0.28) - this.reachLean.z) * k;
+    this.reachLean.x += (THREE.MathUtils.clamp(leanX, -0.4, 0.4) - this.reachLean.x) * k;
+    this.reachLean.z += (THREE.MathUtils.clamp(leanZ, -0.3, 0.5) - this.reachLean.z) * k;
   }
 
   // Цели, выставленные пальцем, догоняются пружиной (ω≈11, лёгкий перехлёст):
