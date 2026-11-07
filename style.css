@@ -1044,3 +1044,10 @@ body.posing #sit-slider2 { display: flex; }
 #lie-toggle2.off { color: var(--ink); opacity: 0.4; }
 body.posing #cam-controls { right: calc(max(12px, env(safe-area-inset-right, 0px)) + 56px); }
 body:has(.panel:not(.hidden)) #sit-slider2 { opacity: 0; pointer-events: none; }
+
+/* Автоскрытие кнопок. */
+#hud, #poses, #cam-controls, #lie-toggle, #lie-toggle2, #handles, #sit-slider .track, #sit-slider2 .track { transition: opacity 0.6s ease; }
+body.ui-hidden #hud, body.ui-hidden #poses, body.ui-hidden #cam-controls,
+body.ui-hidden #lie-toggle, body.ui-hidden #lie-toggle2, body.ui-hidden #handles, body.ui-hidden #hint { opacity: 0; pointer-events: none; }
+body.ui-hidden #hud * , body.ui-hidden #poses *, body.ui-hidden #cam-controls * { pointer-events: none; }
+body.ui-hidden #sit-slider:not(.active) .track, body.ui-hidden #sit-slider2:not(.active) .track { opacity: 0; }

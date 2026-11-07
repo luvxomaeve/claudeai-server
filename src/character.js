@@ -667,6 +667,19 @@ export class Character {
     pose.headY += this.headOffset.y;
     pose.headX += this.headOffset.x;
     for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key] * (key.startsWith('hips') ? this.offK : 1);
+    // Сидит/лежит: наклон и прогиб с полосы делает спина (таз уже на полу):
+    // на коленях — наклон к коленям / прогиб назад, на спине — приподняться,
+    // на животе — опереться и приподнять грудь (умеренно).
+    {
+      const seat = 1 - this.offK;
+      if (seat > 0) {
+        const bend = this.bodyOffset.hipsRotX;
+        const ph = this.sitPhases();
+        const k = bend >= 0 ? 0.75 : 0.6 * (1 - 0.5 * ph.b4);
+        pose.spineX += bend * k * seat;
+        pose.headX -= bend * 0.15 * seat;
+      }
+    }
     // Руки висят по гравитации: корпус наклонили вперёд/прогнули назад — плечи
     // поворачиваются обратно, кисти смотрят вниз, а не торчат вперёд или в стороны.
     {
@@ -1761,10 +1774,11 @@ export class Character {
       const behind = new THREE.Vector3(hipsPos.x + out * 0.17 * S, 0.03 * S, hipsPos.z - 0.2 * S);
       target.lerp(behind, c3 * (1 - c4));
       const lying = side === 'left'
-        ? hipsPos.clone().add(new THREE.Vector3(0.02 * S, 0.12 * S, -0.12 * S))
-        : new THREE.Vector3(hipsPos.x - 0.22 * S, 0.03 * S, hipsPos.z - 0.12 * S);
+        ? new THREE.Vector3(hipsPos.x + 0.04 * S, hipsPos.y + 0.09 * S, hipsPos.z - 0.16 * S)
+        : new THREE.Vector3(hipsPos.x - 0.24 * S, 0.03 * S, hipsPos.z - 0.05 * S);
       target.lerp(lying, c4);
-      pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(out * 0.6, 0.2, -0.2)), c3);
+      // Локти в стороны и к полу (не вверх).
+      pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(out * 0.6, -0.3 * c4, -0.2)), c3);
     }
     // На животе: сначала ладони тянутся вперёд по полу, потом руки сложены под головой.
     const { b3, b4 } = this.sitPhases();

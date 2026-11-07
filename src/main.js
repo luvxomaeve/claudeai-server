@@ -1455,6 +1455,21 @@ $('btn-zoom').addEventListener('click', () => {
 });
 $('btn-zoom').classList.add('off');
 
+// ---------- Кнопки прячутся сами ----------
+// Через 4 с без касаний кнопки плавно исчезают — остаётся только она.
+// Любое касание возвращает их. Полосы слева/справа работают и невидимыми.
+let uiIdleTimer = 0;
+function wakeUi() {
+  document.body.classList.remove('ui-hidden');
+  clearTimeout(uiIdleTimer);
+  uiIdleTimer = setTimeout(() => {
+    if (document.querySelector('.panel:not(.hidden)') || !$('pose-list').hidden || poseDrag) { wakeUi(); return; }
+    document.body.classList.add('ui-hidden');
+  }, 4000);
+}
+for (const ev of ['pointerdown', 'pointermove', 'keydown']) window.addEventListener(ev, wakeUi, { capture: true, passive: true });
+wakeUi();
+
 // ---------- Панели ----------
 
 function togglePanel(id, onOpen) {
