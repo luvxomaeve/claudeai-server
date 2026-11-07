@@ -752,3 +752,8 @@ body.posing #poses #poses-toggle, body.posing #poses #pose-list { display: none;
   transition: transform 0.15s ease;
 }
 #sit-slider.active .thumb { transform: scale(1.25); }
+
+/* Полоска невидимая: просто зона свайпа у левого края. Тонкий индикатор
+   появляется только пока ведёшь пальцем. */
+#sit-slider .track { opacity: 0; transition: opacity 0.4s ease; }
+#sit-slider.active .track { opacity: 1; transition-duration: 0.15s; }
