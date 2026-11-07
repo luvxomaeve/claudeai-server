@@ -56,30 +56,6 @@ python3 -m http.server 8000
 - **Mocap:** загрузи готовую анимацию `.vrma` (например, бесплатные паки от pixiv на Booth) —
   она заменит позы. Одежда и волосы с физикой (spring bones) колышутся от любых движений.
 
-## Своя модель из VRoid Hub (в том числе из VRoid Mobile) 🔑
-
-Модели из VRoid Mobile нельзя скачать файлом, но их можно использовать в «подключённых приложениях».
-Игра подключается к VRoid Hub как такое приложение: 👗 → «Войти через VRoid Hub» → выбрать модель.
-
-Настройка (один раз, всё делается с телефона):
-
-1. **GitHub Pages:** Settings → Pages → Source: Deploy from a branch → Branch: `main`, папка `/ (root)` → Save.
-   Игра будет по адресу `https://luvxomaeve.github.io/claudeai-server/`.
-2. **Приложение в VRoid Hub:** зарегистрируйся как разработчик на https://hub.vroid.com/developer/registration,
-   потом создай приложение на https://hub.vroid.com/oauth/applications:
-   - Redirect URI: `https://luvxomaeve.github.io/claudeai-server/`
-   - Scope: `default`
-   Запомни **Application ID** и **Secret**.
-3. **Cloudflare Worker** (бесплатно, https://dash.cloudflare.com): Workers & Pages → Create → Worker →
-   Deploy → Edit code → вставь код из `worker/vroid-hub-proxy.js` → Deploy.
-   Потом Settings → Variables and Secrets:
-   - `CLIENT_ID` = Application ID
-   - `CLIENT_SECRET` = Secret (тип **Secret**)
-   - `ALLOWED_ORIGIN` = `https://luvxomaeve.github.io`
-4. Впиши Application ID и адрес воркера в `src/config.js` (Secret туда **не** вписывать).
-
-Модель из VRoid Hub загружается при каждом запуске и не сохраняется на устройстве.
-
 ## Своя модель
 
 1. Сделай персонажа в [VRoid Studio](https://vroid.com/studio) (бесплатно) и экспортируй в `.vrm`.

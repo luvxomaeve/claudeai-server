@@ -478,36 +478,3 @@ body.dark #loading { background: #0d0812; color: #e9dcf5; }
   user-select: none;
 }
 #cam-controls button:active { background: var(--pink); color: #fff; }
-
-#hub-list {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-.hub-model {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  border: 2px solid transparent;
-  border-radius: 12px;
-  padding: 6px;
-  background: #fff;
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  min-width: 0;
-}
-.hub-model img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 8px;
-  background: var(--pink-soft);
-}
-.hub-model span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hub-model.active { border-color: var(--pink); }
-.hub-logout { width: auto; padding: 6px 12px; font-size: 12px; margin-top: 4px; }
-#hub-status:empty { display: none; }

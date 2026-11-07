@@ -4,7 +4,6 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
-import * as hub from './vroidhub.js';
 import { Character, POSES, BASE_POSE } from './character.js';
 import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
 
@@ -142,14 +141,6 @@ async function loadPackedModel(url) {
 
 // source: { url } — ссылка на .vrm (или упакованный .json), { buffer } — содержимое файла.
 async function parseModel(source) {
-  if (source.hubId) {
-    const buffer = await hub.fetchModel(source.hubId, (loaded, total) => {
-      const text = total ? `Загружаю из VRoid Hub… ${Math.round((loaded / total) * 100)}%` : `Загружаю из VRoid Hub… ${(loaded / 1048576).toFixed(1)} МБ`;
-      $('loading-text').textContent = text;
-      $('hub-status').textContent = text;
-    });
-    return loader.parseAsync(buffer, '');
-  }
   if (source.buffer) return loader.parseAsync(source.buffer.slice(0), '');
   if (source.url.endsWith('.json')) return loader.parseAsync(await loadPackedModel(source.url), '');
   return loader.loadAsync(source.url, (e) => {
@@ -215,19 +206,8 @@ async function loadModel(source) {
     firstLoad = false;
   } catch (err) {
     console.error(err);
-    if (source.hubId) {
-      $('hub-status').textContent = `VRoid Hub не отдал модель: ${err.message}`;
-      if (firstLoad) {
-        // Не вышло загрузить сохранённую модель из VRoid Hub — стартуем с базовой.
-        currentOutfit = 'default';
-        return loadModel(DEFAULT_OUTFIT.source);
-      }
-      say('Не получилось загрузить её из VRoid Hub…', 'sad');
-    } else if (firstLoad) {
-      $('loading-text').textContent = `Не удалось загрузить модель: ${err.message}`;
-    } else {
-      say('Ой… этот наряд не открывается. Точно .vrm?', 'sad');
-    }
+    if (firstLoad) $('loading-text').textContent = `Не удалось загрузить модель: ${err.message}`;
+    else say('Ой… этот наряд не открывается. Точно .vrm?', 'sad');
   } finally {
     setTimeout(() => $('flash').classList.remove('on'), 150);
   }
@@ -790,65 +770,10 @@ function renderSwatches(boxId, items, current, onPick) {
   }
 }
 
-// ---------- VRoid Hub ----------
-
-let hubModels = null; // null — ещё не загружали
-
-async function refreshHubModels() {
-  $('hub-status').textContent = 'Загружаю твои модели…';
-  try {
-    hubModels = await hub.listModels();
-    $('hub-status').textContent = hubModels.length ? '' : 'В твоём VRoid Hub пока нет моделей.';
-  } catch (err) {
-    console.error(err);
-    hubModels = [];
-    $('hub-status').textContent = `Не получилось: ${err.message}`;
-  }
-  renderHub();
-}
-
-function renderHub() {
-  const box = $('hub-list');
-  box.innerHTML = '';
-  $('hub-login').hidden = !hub.configured() || hub.isLoggedIn();
-  $('hub-logout').hidden = !hub.isLoggedIn();
-  $('hub-setup').hidden = hub.configured();
-  if (!hub.isLoggedIn()) return;
-  if (hubModels === null) { refreshHubModels(); return; }
-  for (const m of hubModels) {
-    const b = document.createElement('button');
-    b.className = 'hub-model' + (currentOutfit === `hub:${m.id}` ? ' active' : '');
-    b.innerHTML = `<img alt="" src="${m.image}"><span></span>`;
-    b.querySelector('span').textContent = m.name;
-    b.addEventListener('click', () => wearHubModel(m));
-    box.appendChild(b);
-  }
-}
-
-async function wearHubModel(m) {
-  const id = `hub:${m.id}`;
-  if (!outfits.some((o) => o.id === id)) outfits.push({ id, name: m.name, source: { hubId: m.id }, hub: true });
-  $('hub-status').textContent = 'Загружаю…';
-  await wearOutfit(id);
-  $('hub-status').textContent = '';
-  renderHub();
-}
-
-$('hub-login').addEventListener('click', () => hub.login());
-$('hub-logout').addEventListener('click', () => {
-  hub.logout();
-  hubModels = null;
-  outfits = outfits.filter((o) => !o.hub);
-  if (currentOutfit.startsWith('hub:')) wearOutfit('default');
-  renderHub();
-});
-
 function renderWardrobe() {
-  renderHub();
   const list = $('outfit-list');
   list.innerHTML = '';
   for (const o of outfits) {
-    if (o.hub) continue;
     const row = document.createElement('div');
     row.className = 'outfit' + (o.id === currentOutfit ? ' active' : '');
     const wear = document.createElement('button');
@@ -1072,22 +997,8 @@ window.addEventListener('drop', (e) => {
 async function restoreLibrary() {
   for (const r of await listFiles('outfit')) outfits.push({ id: r.id, name: r.name, source: { buffer: r.data } });
   anims = await listFiles('anim');
-
-  // Вернулись со страницы входа VRoid Hub?
-  let justLoggedIn = false;
-  try {
-    justLoggedIn = !!(await hub.handleRedirect());
-  } catch (err) {
-    console.error(err);
-    setTimeout(() => say(`VRoid Hub: ${err.message}`, 'sad'), 1500);
-  }
-
   let saved = 'default';
   try { saved = localStorage.getItem('waifu-outfit') || 'default'; } catch { /* ignore */ }
-  if (saved.startsWith('hub:') && hub.isLoggedIn()) {
-    outfits.push({ id: saved, name: 'VRoid Hub', source: { hubId: saved.slice(4) }, hub: true });
-  }
-  if (justLoggedIn) setTimeout(() => togglePanel('wardrobe', renderWardrobe), 800);
   const start = outfits.find((o) => o.id === saved) ?? DEFAULT_OUTFIT;
   currentOutfit = start.id;
   await loadModel(start.source);
