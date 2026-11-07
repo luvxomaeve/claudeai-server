@@ -965,8 +965,16 @@ function nearestAnchor(e, side) {
 
 let activeHandle = null; // какая точка сейчас в руке — она подсвечивается, остальные притухают
 const HANDLE_LABELS = { handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра', footL: 'Левая нога', footR: 'Правая нога' };
+// 👁 в режиме позы: спрятать точки — смотреть на позу чисто, полоса слева всё так же наклоняет.
+let handlesHidden = false;
+$('pose-eye').addEventListener('click', () => {
+  handlesHidden = !handlesHidden;
+  $('pose-eye').classList.toggle('on', handlesHidden);
+  $('pose-eye').title = handlesHidden ? 'Показать точки' : 'Спрятать точки';
+  showToast(handlesHidden ? 'Точки спрятаны · полоса слева — наклон' : 'Точки снова видны');
+});
 function updateHandles() {
-  const show = poseMode && !!character;
+  const show = poseMode && !!character && (!handlesHidden || !!poseDrag);
   $('handles').hidden = !show;
   if (!show) return;
   $('handles').classList.toggle('dragging', !!activeHandle);
@@ -1087,7 +1095,7 @@ for (const ev of ['pointerup', 'pointercancel']) {
 }
 // Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
 const BEND_MIN = -0.45; // прогиб назад — побольше
-const BEND_MAX = 1.1;
+const BEND_MAX = 1.35; // наклон вперёд поглубже
 const BEND_RANGE = BEND_MAX - BEND_MIN;
 function updateSitSlider() {
   if (!character) return;

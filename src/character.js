@@ -644,6 +644,15 @@ export class Character {
     pose.headY += this.headOffset.y;
     pose.headX += this.headOffset.x;
     for (const key in this.bodyOffset) pose[key] += this.bodyOffset[key] * (key.startsWith('hips') ? this.offK : 1);
+    // Руки висят по гравитации: корпус наклонили вперёд/прогнули назад — плечи
+    // поворачиваются обратно, кисти смотрят вниз, а не торчат вперёд или в стороны.
+    {
+      const pitch = (this.bodyOffset.hipsRotX + this.bodyOffset.spineX) * this.offK;
+      const hang = THREE.MathUtils.clamp(pitch, -0.9, 1.6) * 0.75;
+      pose.lUpperX -= hang;
+      pose.rUpperX -= hang;
+      this.armHang = hang;
+    }
     // Контрапост: бёдра ушли вбок — плечи и голова уравновешивают S-линией,
     // таз чуть опускается, и свободное колено мягко сгибается само (IK).
     {
@@ -1855,7 +1864,7 @@ export class Character {
       const front = bin ? hand.z - shift.z > (bin.zMin + bin.zMax) / 2 : true;
       // В позе «за спиной» руки всегда отводим назад, иначе — по положению кисти.
       const armBusy = this.dancing || this.motions.some((m) => ARM_MOTIONS.has(m.name));
-      const hint = armBusy ? undefined : this.armPreset[side] === 'behind' ? 1 : this.armPreset[side] ? undefined : POSES[this.poseName]?.armDir;
+      const hint = armBusy ? undefined : this.armPreset[side] === 'behind' ? 1 : this.armPreset[side] ? undefined : (this.armHang ?? 0) < -0.15 ? 1 : POSES[this.poseName]?.armDir;
       const dir = hint ?? (front ? -1 : 1); // минус по X — рука вперёд
       let need = 0;
       for (let i = 0; i <= 10; i++) {

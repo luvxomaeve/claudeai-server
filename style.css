@@ -883,3 +883,5 @@ body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }
 /* Режим позы: полоса = наклон вперёд/назад — без отметок посадки и кнопки «лечь». */
 #sit-slider.bend .track i, #sit-slider.pose-mode #lie-toggle { display: none; }
 #sit-slider.bend .track::before { background: linear-gradient(var(--pink), #b56cff); }
+#poses #pose-bar button#pose-eye.on { background: rgba(255, 111, 168, 0.22); color: var(--pink); }
+#poses #pose-bar button#pose-eye.on svg { stroke-dasharray: 3 2.5; }
