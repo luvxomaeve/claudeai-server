@@ -831,3 +831,11 @@ body.posing #poses #btn-home { display: none; }
   from { transform: scale(0.4); opacity: 1; }
   to { transform: scale(1.4); opacity: 0; }
 }
+
+/* Меньше кнопок: камера крутится свайпом по фону и щипком везде, зоны касаний — отладка. */
+#btn-camera, #btn-hitbox { display: none !important; }
+
+/* Открыта панель — полоса посадки и подсказка не просвечивают поверх неё. */
+.panel { z-index: 10; }
+body:has(.panel:not(.hidden)) #sit-slider,
+body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }

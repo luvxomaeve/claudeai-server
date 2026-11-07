@@ -228,6 +228,11 @@ export class Character {
   }
 
   playMotion(name, side = Math.random() < 0.5 ? 'left' : 'right') {
+    // Сидит или лежит — движения ногами/подскоки заменяем на подходящие (без подпрыгивания над полом).
+    if (this.sitS > 0.3) {
+      const seated = { hop: 'squirm', bounce: 'tiltHead', shift: 'tiltHead', sway: 'tiltHead', shyLegs: 'squirm', stretch: 'sigh', lookAround: 'lookAround' };
+      if (name in seated) name = seated[name];
+    }
     const durations = {
       tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6,
       lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4,
@@ -569,6 +574,14 @@ export class Character {
         pose.hipsRotX -= 0.1 * p3;
         pose.spineX -= 0.06 * p3;
         pose.headX += 0.06 * p3;
+      }
+      // Сидит — не замирает: мягко покачивается, наклоняет голову.
+      const seatedLife = p2 * (1 - 0.5 * this.sitPhases(s).p4);
+      if (seatedLife > 0) {
+        pose.spineZ += Math.sin(t * 0.47) * 0.05 * seatedLife;
+        pose.spineX += Math.sin(t * 0.31 + 1.2) * 0.03 * seatedLife;
+        pose.headZ += Math.sin(t * 0.37 + 0.6) * 0.09 * seatedLife;
+        pose.headY += Math.sin(t * 0.23 + 2.1) * 0.12 * seatedLife;
       }
       const { p4 } = this.sitPhases(s);
       if (p4 > 0) {
@@ -1051,6 +1064,11 @@ export class Character {
           rest.pos.y - 0.04 * S,
           this.restHips.z + (L ? 0.16 : -0.02) * S,
         );
+        // Лёжа верхняя нога неспешно покачивается — живая, а не застывшая.
+        if (L) {
+          lie.z += Math.sin(this.time * 0.6) * 0.05 * S;
+          lie.y += Math.max(0, Math.sin(this.time * 0.6 + 0.8)) * 0.025 * S;
+        }
         target.lerp(lie, p4);
       }
 
