@@ -1041,12 +1041,7 @@ function renderPoseSliderBtn() {
 }
 $('lie-toggle').addEventListener('click', (e) => {
   e.stopPropagation();
-  if (poseMode) {
-    poseSlider = poseSlider === 'bend' ? 'sit' : 'bend';
-    renderPoseSliderBtn();
-    showToast(poseSlider === 'bend' ? 'Полоса: наклон вперёд / назад' : 'Полоса: присесть, сесть, лечь — поза остаётся');
-    return;
-  }
+  if (poseMode) return;
   lieMode = { side: 'belly', belly: 'off', off: 'side' }[lieMode];
   try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
   renderLieToggle();
@@ -1074,13 +1069,14 @@ sitSlider.addEventListener('pointermove', (e) => {
   character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
-  if (poseMode && poseSlider === 'bend' && character.sit < 0.05) {
+  if (poseMode && character.sit < 0.05) {
     // В режиме позы полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
     const o = character.bodyOffset;
     const bend = THREE.MathUtils.clamp(o.hipsRotX + (dv / sitMax()) * BEND_RANGE, BEND_MIN, BEND_MAX);
     o.hipsRotX = bend;
-    o.spineX = bend >= 0 ? bend * 0.45 : bend * 0.9;
+    // Назад гнётся в основном спина (S-линия), голова следует за ней.
+    o.spineX = bend >= 0 ? bend * 0.45 : bend * 1.1;
     showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
     return;
   }
@@ -1090,13 +1086,13 @@ for (const ev of ['pointerup', 'pointercancel']) {
   sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
 }
 // Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
-const BEND_MIN = -0.2;
+const BEND_MIN = -0.45; // прогиб назад — побольше
 const BEND_MAX = 1.1;
 const BEND_RANGE = BEND_MAX - BEND_MIN;
 function updateSitSlider() {
   if (!character) return;
   // В режиме позы стоя — наклон; если она сидит/лежит — полоса поднимает/опускает её.
-  const bendMode = poseMode && poseSlider === 'bend' && character.sit < 0.05;
+  const bendMode = poseMode && character.sit < 0.05;
   sitSlider.classList.toggle('pose-mode', poseMode);
   sitSlider.classList.toggle('bend', bendMode);
   const k = bendMode

@@ -881,5 +881,5 @@ body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }
 #pose-label.on { opacity: 1; }
 
 /* Режим позы: полоса = наклон вперёд/назад — без отметок посадки и кнопки «лечь». */
-#sit-slider.bend .track i { display: none; }
+#sit-slider.bend .track i, #sit-slider.pose-mode #lie-toggle { display: none; }
 #sit-slider.bend .track::before { background: linear-gradient(var(--pink), #b56cff); }
