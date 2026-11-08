@@ -513,7 +513,26 @@ let voiceOn = true;
 let bubbleTimer = 0;
 let lastSpokeAt = 0;
 
+// Что сейчас на ногах: колготки (свои), чулки или гольфы — реплики подстраиваются.
+function legwear() {
+  try {
+    const id = wear.legs || 'base';
+    if (id === 'base') return window.WAIFU_BASE_LEGS ?? 'tights';
+    return PIECE_SOURCES.find((x) => x.id === id)?.legsKind ?? 'stockings';
+  } catch { return 'tights'; } // ещё не загрузилось
+}
+const LEGS_LINES = {
+  stockings: ['Тебе нравятся мои чулочки? ♥', 'Чулочки — моя слабость~', 'Хи, красивые чулки, правда?', 'Смотришь на мои чулки? 😳', 'Резинка не сползла?..'],
+  socks: ['Тебе нравятся мои гольфы? ♥', 'Хи, гольфики~', 'Мило же, да?'],
+};
+function legsText(text) {
+  const k = legwear();
+  if (k === 'tights' || !/колготк/i.test(text)) return text;
+  const w = k === 'socks' ? ['гольфы', 'гольфах', 'гольфами'] : ['чулочки', 'чулочках', 'чулочками'];
+  return text.replace(/колготках/gi, w[1]).replace(/колготками/gi, w[2]).replace(/колготки/gi, w[0]);
+}
 function say(text, expression) {
+  text = legsText(text);
   const bubble = $('bubble');
   bubble.textContent = text;
   bubble.classList.remove('hidden');
@@ -667,6 +686,13 @@ canvas.addEventListener('pointerdown', (e) => {
 
 // Тычок: срабатывает, когда палец отпустили, не поведя им.
 function tapReaction(hit, e) {
+  if (hit?.zone === 'legs' && legwear() !== 'tights' && Math.random() < 0.5) {
+    character.react({ expression: 'happy', motion: 'shyLegs' });
+    changeAffection(0.4);
+    floatHeart(e.clientX, e.clientY);
+    say(pick(LEGS_LINES[legwear()]));
+    return;
+  }
   // Слишком частые тычки — обижается.
   const now = performance.now();
   recentTaps = recentTaps.filter((t) => now - t < 2500);
@@ -2049,7 +2075,9 @@ async function pickPiece(cat, id) {
   }
   applyWear();
   character?.react({ expression: 'happy', motion: 'sway' });
-  if (Math.random() < 0.6) say(pick(['Мне идёт? ♥', 'Хи, примерим~', 'Так лучше?', 'Нравится?']));
+  if (cat === 'legs' && legwear() !== 'tights') say(pick(LEGS_LINES[legwear()]));
+  else if (cat === 'legs') say(pick(['Колготки — классика~', 'Так уютнее ♥', 'Нравятся мои колготки?']));
+  else if (Math.random() < 0.6) say(pick(['Мне идёт? ♥', 'Хи, примерим~', 'Так лучше?', 'Нравится?']));
 }
 // Гардероб-шкаф: вкладки по частям (верх, низ, обувь, аксессуары, ноги) и карточки вещей с названиями.
 const PIECE_ICONS = { tops: '👚', bottoms: '🩳', shoes: '👠', acc: '🎀', legs: '🧦' };
