@@ -1214,3 +1214,32 @@ body:not(.posing) #poses #pose-list:not([hidden]) {
 body:not(.posing) #poses #pose-list button { padding: 6px 10px; font-size: 13px; box-shadow: none; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 body:not(.posing) #poses #pose-list button:not([data-pose^="saved:"]):not([data-pose="stand"]) { display: none; }
 body.posing #poses #pose-list button[data-pose^="saved:"] { display: none; }
+
+/* Окошко поз (одинаково в обеих вкладках): избранные ★ и «Стоит», ниже «Все позы ▾». */
+#poses #pose-list:not([hidden]) {
+  position: fixed !important;
+  right: max(16px, env(safe-area-inset-right, 0px)) !important;
+  bottom: 70px !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  max-width: 150px !important;
+  max-height: 46vh !important;
+  overflow-y: auto !important;
+  padding: 6px !important;
+  gap: 5px !important;
+  margin: 0 !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+  z-index: 7;
+}
+#poses #pose-list button { display: block !important; padding: 6px 10px !important; font-size: 13px !important; box-shadow: none !important; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#poses #pose-list button[data-pose^="saved:"] { order: -2; }
+#poses #pose-list button[data-pose="stand"] { order: -1; }
+#poses #pose-list:not(.show-std) button[data-pose]:not([data-pose^="saved:"]):not([data-pose="stand"]) { display: none !important; }
+#poses #pose-list #pose-more { order: 0; background: transparent !important; color: var(--pink) !important; text-align: center; }
+#poses #pose-list.show-std #pose-more { order: 99; }
+/* Кнопка поз — круглая со звёздочкой, без подписи: не налезает на соседние. */
+#poses #poses-toggle { width: 44px; height: 44px; padding: 0 !important; justify-content: center; border-radius: 50%; }
+#poses #poses-toggle > span { display: none !important; }
+#poses #poses-toggle svg { width: 20px; height: 20px; }
+body.posing #poses #pose-list:not([hidden]) { right: calc(max(16px, env(safe-area-inset-right, 0px)) + 50px) !important; }

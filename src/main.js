@@ -1072,12 +1072,19 @@ function setPoseListOpen(open) {
   }
 }
 $('poses-toggle').addEventListener('click', () => {
-  if (!poseMode && !Object.keys(savedPoses).length) {
-    showToast('Сохранённых поз пока нет — сохрани ☆ во вкладке ✏️');
-    return;
-  }
+  $('pose-list').classList.remove('show-std');
   setPoseListOpen($('pose-list').hidden);
 });
+// Окошко поз: сверху твои избранные ★, ниже «Все позы ▾» — раскрывает стандартные.
+const poseMore = document.createElement('button');
+poseMore.id = 'pose-more';
+poseMore.textContent = 'Все позы ▾';
+poseMore.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = $('pose-list').classList.toggle('show-std');
+  poseMore.textContent = open ? 'Свернуть ▴' : 'Все позы ▾';
+});
+$('pose-list').appendChild(poseMore);
 
 function addPoseButton(name, def) {
   const btn = document.createElement('button');
@@ -1175,8 +1182,7 @@ function setPoseMode(on) {
   $('pose-bar').hidden = !on;
   document.body.classList.toggle('posing', on);
   closePoseSaveForm();
-  // Во вкладке «Позы» окошко поз открыто сразу (избранные ★ сверху), дома — закрыто.
-  setPoseListOpen(on);
+  setPoseListOpen(false);
   if (on) {
     // Позируем во весь рост — видно и руки, и ноги.
     if (!fullBody && !faceCam) setFullBody(true);
