@@ -713,7 +713,7 @@ export class Character {
       }
       // Сидит — не замирает: мягко покачивается, наклоняет голову.
       // Бёдра живые и в приседе (на пятках), и на коленях, и сидя/лёжа.
-      const hipLife = p1 * (1 - 0.35 * Math.max(this.sitPhases(s).p4, this.sitPhases(s).b4, this.sitPhases(s).c4));
+      const hipLife = p1 * (1 - 0.6 * (this.sleep ?? 0)); // во сне — тише
       if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
@@ -723,9 +723,12 @@ export class Character {
         // из стороны в сторону с поворотом — мягкая «восьмёрка», а не мелкое дрожание.
         const floorK = p2;
         const fig = Math.sin(t * 0.6 * 2 + 0.7); // второй такт восьмёрки
-        pose.hipsZ += hw * (0.13 + 0.09 * floorK) * (1 - lieAll * 0.25) * hipLife;
+        pose.hipsZ += hw * (0.13 + 0.09 * floorK + 0.08 * lieAll) * hipLife;
         pose.hipsX += hw * (0.035 * squatK + 0.045 * floorK * (1 - lieAll)) * this.scale;
-        pose.hipsRotY += (Math.sin(t * 0.6 + 1.3) * 0.08 * floorK + Math.sin(t * 0.42 + 1.1) * 0.1) * (1 - lieAll * 0.3) * hipLife;
+        pose.hipsRotY += (Math.sin(t * 0.6 + 1.3) * (0.08 * floorK + 0.08 * lieAll) + Math.sin(t * 0.42 + 1.1) * 0.1) * hipLife;
+        // Лёжа ёрзает: плечи и голова тоже плавно перекатываются.
+        pose.spineZ += Math.sin(t * 0.6 + 2.0) * 0.08 * lieAll * hipLife;
+        pose.headY += Math.sin(t * 0.5 + 0.4) * 0.15 * lieAll * hipLife;
         pose.hipsY += fig * 0.012 * floorK * (1 - lieAll) * this.scale * hipLife;
         // Корпус уравновешивает — плечи плывут в противофазе, шея держит голову ровно.
         pose.spineY -= Math.sin(t * 0.6 + 1.3) * 0.05 * floorK * hipLife;
@@ -848,7 +851,13 @@ export class Character {
         pose.spineX += bend * k * lie;
         // Общий предел изгиба спины лёжа/сидя на полу.
         pose.spineX = THREE.MathUtils.clamp(pose.spineX, -1.0 - 0.2 * ph.b4, 1.3);
-        pose.hipsRotX += bend * 0.3 * lie * (1 - Math.max(ph.p4, ph.b4, ph.c4));
+        // На полу полоса двигает и таз: наклон — таз подаётся вперёд, прогиб — назад,
+        // и бёдра перекатываются вбок — она ёрзает по полу всем телом.
+        const lieAll2 = Math.max(ph.p4, ph.b4, ph.c4);
+        pose.hipsRotX += bend * (0.3 * (1 - lieAll2) + 0.35 * lieAll2) * lie;
+        pose.hipsZ += bend * 0.25 * lie;
+        pose.hipsRotY -= bend * 0.2 * lie;
+        pose.headZ -= bend * 0.15 * lie;
         pose.headX -= bend * 0.2 * lie * (bend >= 0 ? fwdLie : 1);
       }
     }
@@ -1446,8 +1455,9 @@ export class Character {
       bone.quaternion.copy(parentQ.invert().multiply(nw));
       bone.updateWorldMatrix(false, true);
     };
-    if (neck) rotateToward(neck, 0.4, 0.5);
-    rotateToward(head, 0.85, 0.75);
+    if (neck) rotateToward(neck, 0.5, 0.6);
+    rotateToward(head, 1.0, 0.9);
+    rotateToward(head, 1.0, 0.25); // второй проход — точнее в центр
     // Голова ровно по экрану: «верх» лица совпадает с верхом кадра (без завала набок).
     if (this.gazeUp) {
       const qh = head.getWorldQuaternion(new THREE.Quaternion()).multiply(this.headRestInv);
@@ -1458,7 +1468,7 @@ export class Character {
         upWant.normalize();
         upNow.addScaledVector(face, -upNow.dot(face)).normalize();
         let roll = Math.atan2(new THREE.Vector3().crossVectors(upNow, upWant).dot(face), upNow.dot(upWant));
-        roll = THREE.MathUtils.clamp(roll, -0.6, 0.6) * w * 0.85;
+        roll = THREE.MathUtils.clamp(roll, -0.8, 0.8) * w;
         const rq = new THREE.Quaternion().setFromAxisAngle(face, roll);
         const parentQ = head.parent.getWorldQuaternion(new THREE.Quaternion());
         const nw = rq.multiply(head.getWorldQuaternion(new THREE.Quaternion()));
