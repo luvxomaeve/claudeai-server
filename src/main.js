@@ -6,6 +6,7 @@ import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { parseMixamo, mixamoClip } from './mixamo.js';
 import { MOCAP, loadMocap, mocapClip, mocapUpperClip } from './mocap.js';
+import { PieceWardrobe, PIECE_CATS } from './outfits.js';
 import { Character, POSES, LOOPS } from './character.js';
 import { REACTIONS, STROKES, IDLE_LINES, pick } from './dialogue.js';
 
@@ -411,8 +412,11 @@ async function loadModel(source) {
     if (currentAnim) character.playClip(clipFor(currentAnim, vrm));
     else if (currentMocap) playMocap(currentMocap);
     stockings = new Stockings(vrm);
+    pieceWardrobe.attachBase(vrm);
     loadLookFor(currentOutfit);
     applyLook();
+    applyWear();
+    preloadWornSources();
     if (!$('wardrobe').classList.contains('hidden')) renderWardrobe();
     buildHitboxes();
     frameCamera();
@@ -1958,6 +1962,95 @@ function tintMaterials(test, colorHex, shadeK) {
   });
 }
 
+// ---------- Одежда по частям ----------
+// Источники — та же девушка в других нарядах (.vrm из VRoid). В артефакте список задаёт страница
+// (window.WAIFU_OUTFITS), модели лежат только там. cats — какие вещи есть; dress — верх это платье.
+const PIECE_SOURCES = window.WAIFU_OUTFITS ?? [];
+const pieceWardrobe = new PieceWardrobe(scene);
+const WEAR_KEY = 'waifu-wear';
+let wear = {};
+try { wear = JSON.parse(localStorage.getItem(WEAR_KEY) || '{}'); } catch { wear = {}; }
+const pieceLoading = new Map();
+function loadPieceSource(id) {
+  if (pieceWardrobe.hasSource(id)) return Promise.resolve();
+  if (pieceLoading.has(id)) return pieceLoading.get(id);
+  const def = PIECE_SOURCES.find((x) => x.id === id);
+  if (!def) return Promise.reject(new Error('нет такого наряда'));
+  const pr = parseModel({ url: def.url }).then((gltf) => {
+    const vrm = gltf.userData.vrm;
+    if (!vrm) throw new Error('Это не VRM');
+    pieceWardrobe.addSource(id, vrm);
+  }).finally(() => pieceLoading.delete(id));
+  pieceLoading.set(id, pr);
+  return pr;
+}
+function applyWear() {
+  if (!character) return;
+  // Без загруженного источника — показываем своё, пока грузится.
+  const w = {};
+  for (const c of PIECE_CATS) {
+    const v = wear[c.id] ?? 'base';
+    w[c.id] = v === 'base' || v === 'none' || pieceWardrobe.hasSource(v) ? v : 'base';
+  }
+  pieceWardrobe.apply(w, (map) => {
+    stockings?.setBase(map);
+    stockings?.apply(look.stockings);
+  });
+}
+function preloadWornSources() {
+  const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
+  for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
+}
+const isDress = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.dress;
+async function pickPiece(cat, id) {
+  if (cat === 'tops') {
+    // Платье — низ не нужен; обычный верх — вернуть низ, если его не было.
+    if (isDress(id)) wear.bottoms = 'none';
+    else if (wear.bottoms === 'none' || wear.bottoms === undefined && isDress(wear.tops)) wear.bottoms = 'base';
+  }
+  if (cat === 'bottoms' && id !== 'none' && isDress(wear.tops)) wear.tops = 'base';
+  wear[cat] = id;
+  try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
+  renderPieces();
+  if (id !== 'base' && id !== 'none' && !pieceWardrobe.hasSource(id)) {
+    showToast('Загружаю наряд…');
+    $('flash').classList.add('on');
+    try { await loadPieceSource(id); } catch (e) { console.error(e); say('Не получилось загрузить вещь…', 'sad'); }
+    $('flash').classList.remove('on');
+  }
+  applyWear();
+  character?.react({ expression: 'happy', motion: 'sway' });
+  if (Math.random() < 0.6) say(pick(['Мне идёт? ♥', 'Хи, примерим~', 'Так лучше?', 'Нравится?']));
+}
+function renderPieces() {
+  const box = $('piece-list');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!PIECE_SOURCES.length) { box.innerHTML = '<p class="panel-note">Наряды по частям появятся, когда добавишь модели.</p>'; return; }
+  for (const c of PIECE_CATS) {
+    const opts = [{ id: 'base', name: c.skin ? 'Свои' : 'Своё' }];
+    for (const src of PIECE_SOURCES) if (src.cats.includes(c.id)) opts.push({ id: src.id, name: src.name });
+    if (c.id === 'shoes') opts.push({ id: 'none', name: 'Босиком' });
+    if (c.id === 'acc') opts.push({ id: 'none', name: 'Без' });
+    if (c.id === 'bottoms' && isDress(wear.tops)) opts.push({ id: 'none', name: 'Без (платье)' });
+    const row = document.createElement('div');
+    row.className = 'piece-row';
+    row.innerHTML = `<span class="piece-cat">${c.name}</span>`;
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    const cur = wear[c.id] ?? 'base';
+    for (const o of opts) {
+      const b = document.createElement('button');
+      b.className = 'chip' + (o.id === cur ? ' active' : '');
+      b.textContent = o.name;
+      b.addEventListener('click', () => pickPiece(c.id, o.id));
+      chips.appendChild(b);
+    }
+    row.appendChild(chips);
+    box.appendChild(row);
+  }
+}
+
 function applyLook() {
   if (!character) return;
   applyClothColor();
@@ -2021,6 +2114,7 @@ function renderSwatches(boxId, items, current, onPick) {
 }
 
 function renderWardrobe() {
+  renderPieces();
   const list = $('outfit-list');
   list.innerHTML = '';
   for (const o of outfits) {
@@ -2563,6 +2657,7 @@ function tick() {
     character.patAmount += (patTarget - character.patAmount) * (1 - Math.exp(-dt * 5));
 
     character.update(dt);
+    pieceWardrobe.sync(dt);
 
     if (hitboxGroup?.visible) {
       for (const m of hitboxGroup.children) {

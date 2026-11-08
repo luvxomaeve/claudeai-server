@@ -149,6 +149,15 @@ export class Stockings {
     return tex;
   }
 
+  // Новая основа кожи (чулки/колготки из другого наряда) — рисуем поверх неё.
+  setBase(tex) {
+    if (!this.available || !tex || tex === this.original) return;
+    this.original = tex;
+    this.originalShade = tex;
+    for (const t of Object.values(this.textures)) t.dispose();
+    this.textures = {};
+  }
+
   // styleName: 'off' | 'black' | 'sheer' | 'white' | 'wine'
   apply(styleName) {
     if (!this.available) return false;
