@@ -1723,8 +1723,8 @@ for (const ev of ['pointerup', 'pointercancel']) {
 }
 
 // Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
-const BEND_MIN = -0.45; // прогиб назад — побольше
-const BEND_MAX = 1.35; // наклон вперёд поглубже
+const BEND_MIN = -0.6; // прогиб назад — побольше
+const BEND_MAX = 1.6; // наклон вперёд поглубже
 const BEND_RANGE = BEND_MAX - BEND_MIN;
 function updateSitSlider() {
   if (!character) return;

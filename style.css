@@ -1312,3 +1312,6 @@ body.ui-hidden #suggest { opacity: 1; pointer-events: auto; }
 .cam-view-chip { width: 30px; height: 30px; font-size: 13px; }
 #cam-controls button.cam-view-chip { width: 30px; height: 30px; margin: 0 1px; background: rgba(255, 111, 168, 0.18); color: var(--pink); font-size: 13px; font-weight: 800; box-shadow: none; border: none; }
 #cam-controls button.cam-view-chip:active { background: var(--pink); color: #fff; }
+
+/* Взгляд — в строке камеры. */
+#cam-controls #btn-gaze.active { background: var(--pink); color: #fff; }

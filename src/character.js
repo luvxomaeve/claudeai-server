@@ -687,15 +687,23 @@ export class Character {
         pose.headX += 0.06 * p3;
       }
       // Сидит — не замирает: мягко покачивается, наклоняет голову.
-      const seatedLife = p2 * (1 - 0.5 * this.sitPhases(s).p4);
-      if (seatedLife > 0) {
-        // Сидя/на коленях бёдра тоже живые: мягко покачиваются из стороны в сторону.
+      // Бёдра живые и в приседе (на пятках), и на коленях, и сидя/лёжа.
+      const hipLife = p1 * (1 - 0.35 * Math.max(this.sitPhases(s).p4, this.sitPhases(s).b4, this.sitPhases(s).c4));
+      if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
-        const hw = Math.sin(t * 0.6);
-        pose.hipsZ += hw * 0.085 * (1 - lieAll * 0.6) * seatedLife;
-        pose.hipsRotY += Math.sin(t * 0.42 + 1.1) * 0.07 * (1 - lieAll * 0.5) * seatedLife;
-        pose.spineZ -= hw * 0.04 * (1 - lieAll) * seatedLife;
+        const hw = Math.tanh(1.8 * Math.sin(t * 0.6)) / Math.tanh(1.8);
+        const squatK = p1 * (1 - p2);
+        pose.hipsZ += hw * 0.13 * (1 - lieAll * 0.35) * hipLife;
+        pose.hipsX += hw * 0.035 * squatK * this.scale;
+        pose.hipsRotY += Math.sin(t * 0.42 + 1.1) * 0.1 * (1 - lieAll * 0.4) * hipLife;
+        // Таз мягко покачивается вперёд-назад — «волна» бёдрами.
+        pose.hipsRotX += Math.sin(t * 0.5 + 0.4) * 0.06 * (1 - lieAll * 0.5) * hipLife;
+        pose.spineX -= Math.sin(t * 0.5 + 0.4) * 0.04 * (1 - lieAll * 0.5) * hipLife;
+        pose.spineZ -= hw * 0.06 * (1 - lieAll) * hipLife;
+      }
+      const seatedLife = p2 * (1 - 0.5 * this.sitPhases(s).p4);
+      if (seatedLife > 0) {
         pose.spineZ += Math.sin(t * 0.47) * 0.05 * seatedLife;
         pose.spineX += Math.sin(t * 0.31 + 1.2) * 0.03 * seatedLife;
         pose.headZ += Math.sin(t * 0.37 + 0.6) * 0.09 * seatedLife;
@@ -743,14 +751,30 @@ export class Character {
       const w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.offK : 1;
       pose[key] += this.bodyOffset[key] * w;
     }
+    // Мягкий предел наклона таза (в приседе/на коленях наклон складывается с посадкой):
+    // излишек уходит в спину — полоса отзывается, но она не переворачивается.
+    {
+      const lim = 1.25;
+      const gate = this.bendW * (1 - this.sitPhases().b3); // не трогаем «лечь на живот»
+      if (pose.hipsRotX > lim && gate > 0) {
+        const ex = pose.hipsRotX - lim;
+        const soft = 0.35 * Math.tanh(ex / 0.35);
+        const cut = (ex - soft * 0.5) * gate;
+        pose.hipsRotX -= cut;
+        pose.spineX += cut * 0.55;
+      }
+    }
     {
       const lie = 1 - this.bendW;
       if (lie > 0) {
         const bend = this.bodyOffset.hipsRotX;
         const ph = this.sitPhases();
-        const k = bend >= 0 ? 0.75 : 0.6 * (1 - 0.5 * ph.b4);
+        // Сидя на полу / лёжа наклон делает спина — с хорошей амплитудой;
+        // немного помогает и таз (кроме «на боку», где он лежит).
+        const k = bend >= 0 ? 1.15 : 1.0 * (1 - 0.4 * ph.b4);
         pose.spineX += bend * k * lie;
-        pose.headX -= bend * 0.15 * lie;
+        pose.hipsRotX += bend * 0.3 * lie * (1 - Math.max(ph.p4, ph.b4, ph.c4));
+        pose.headX -= bend * 0.2 * lie;
       }
     }
     // Руки висят по гравитации: корпус наклонили вперёд/прогнули назад — плечи
@@ -1188,8 +1212,9 @@ export class Character {
     const c = this.restTargets(this.restSpot, this.time);
     for (const side of ['left', 'right']) {
       if (this.handTargets[side] || this.armPreset[side]) continue;
-      // Жест руками/реакция — рука свободна, покой уступает.
-      if (this.motions.some((m) => TOUCH_MOTIONS[m.name] || ARM_MOTIONS.has(m.name))) continue;
+      // Жест руками/реакция — покой плавно уступает (без рывка в начале жеста).
+      const yieldK = this.gestureYield(side);
+      if (yieldK > 0.99) continue;
       const p0 = a[side];
       const p1 = c[side];
       if (!p0 || !p1) continue;
@@ -1210,11 +1235,23 @@ export class Character {
       const behind = (side === 'left' ? [a, c] : [a, c]) && (this.restSpot === 'behind');
       const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.5, -0.2, behind ? 0.1 : -0.45));
       this.twoBoneIK(upper, lower, hand, target, pole);
-      const w = this.restW * (1 - (this.patAmount ?? 0) * 0.7);
+      const w = this.restW * (1 - (this.patAmount ?? 0) * 0.7) * (1 - yieldK);
       upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
       lower.quaternion.copy(q2.clone().slerp(lower.quaternion, w));
       upper.updateWorldMatrix(false, true);
     }
+  }
+
+  // Насколько рука сейчас занята жестом/реакцией (0…1, плавно по огибающей жеста).
+  gestureYield(side) {
+    let k = 0;
+    for (const m of this.motions) {
+      const touch = TOUCH_MOTIONS[m.name];
+      if (!touch && !ARM_MOTIONS.has(m.name)) continue;
+      if (touch && !touch.both && m.side && m.side !== side) continue;
+      k = Math.max(k, m.dur ? envelope(m.t, m.dur) : 1);
+    }
+    return k;
   }
 
   // Точка на теле: смещение в осях кости (в покое), x — к боку руки side.
@@ -1236,11 +1273,12 @@ export class Character {
   applyPoseHands(dt) {
     const def = POSES[this.poseName];
     const prev = this.posePrevName ? POSES[this.posePrevName] : null;
-    const k = easeInOut(Math.min(this.poseT / 0.8, 1));
+    const k = easeInOut(Math.min(this.poseT / 1.0, 1));
     const seatK = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.3, 0.6);
     for (const side of ['left', 'right']) {
       if (this.handTargets[side] || this.armPreset[side]) continue;
-      if (this.motions.some((m) => TOUCH_MOTIONS[m.name] || ARM_MOTIONS.has(m.name))) continue;
+      const yieldK = this.gestureYield(side);
+      if (yieldK > 0.99) continue;
       const spec = def?.hands?.[side];
       const pspec = prev?.hands?.[side];
       let w = 0;
@@ -1256,7 +1294,7 @@ export class Character {
         target = this.bodyPoint(pspec[0], pspec[1], side);
         w = 1 - k;
       }
-      w *= seatK;
+      w *= seatK * (1 - yieldK);
       if (!target || w < 0.01) continue;
       // Лёгкое «дыхание» кисти — живая, не приклеенная.
       target.y += Math.sin(this.time * 1.3 + (side === 'left' ? 0 : 1.7)) * 0.006 * this.scale;
@@ -2234,7 +2272,7 @@ export class Character {
       else if (key.startsWith('head')) w = 6.5;
       else if (/Shoulder/.test(key)) w = 10;
       else if (/Leg|Knee/.test(key)) w = 7;
-      else if (/Upper|Lower/.test(key)) w = fast ? 16 : 9;
+      else if (/Upper|Lower/.test(key)) w = fast ? 12 : 9;
       if (this.dancing) w *= 2.2;
       let x = this.sp[key] ?? target[key];
       let v = this.spv[key] ?? 0;
