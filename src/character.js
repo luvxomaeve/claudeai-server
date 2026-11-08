@@ -703,6 +703,18 @@ export class Character {
         pose.spineX -= Math.sin(t * 0.5 + 0.4) * 0.04 * (1 - lieAll * 0.5) * hipLife;
         pose.spineZ -= hw * 0.06 * (1 - lieAll) * hipLife;
       }
+      // Упирается руками в пол (на четвереньках) — плавно покачивается вперёд-назад,
+      // спина мягко прогибается и округляется, бёдра ходят из стороны в сторону.
+      {
+        const sup = Math.min(this.supW?.left ?? 0, this.supW?.right ?? 0) * (1 - (this.sleep ?? 0));
+        if (sup > 0.01) {
+          const rock = Math.sin(t * 0.7);
+          pose.hipsRotX += rock * 0.05 * sup;
+          pose.spineX -= Math.sin(t * 0.7 + 0.9) * 0.1 * sup;
+          pose.hipsZ += Math.sin(t * 0.45) * 0.06 * sup;
+          pose.headX += Math.sin(t * 0.7 + 0.9) * 0.06 * sup;
+        }
+      }
       // На полу — свои живые движения: сидя боком то опирается сильнее, то выпрямляется;
       // на животе покачивает головой в такт ножкам; на спине потягивается корпусом.
       {
@@ -766,9 +778,18 @@ export class Character {
     // ослабляем, чтобы спину не складывало пополам и голова не уходила под тело.
     const phL = this.sitPhases();
     const fwdLie = 1 - Math.max(0.92 * phL.b4, 0.55 * phL.c4, 0.45 * phL.p4);
+    // Наклон вперёд останавливается, когда голова/грудь касаются пола:
+    // её не подбрасывает вверх (колени остаются на полу), а наклон мягко упирается.
+    {
+      const gap = this.upperGap ?? 1;
+      const want = gap < 0.005 * this.scale ? -1 : gap > 0.04 * this.scale ? 1 : 0;
+      this.bendScale = THREE.MathUtils.clamp((this.bendScale ?? 1) + want * dt * (want < 0 ? 1.2 : 0.35), 0.25, 1);
+    }
+    const fwdCap = this.sitS > 0.3 && this.sitS < 1.0 ? this.bendScale : 1;
     for (const key in this.bodyOffset) {
-      let w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.offK : 1;
+      let w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.hipsOffK() : 1;
       if (key === 'spineX' && this.bodyOffset.spineX > 0) w *= fwdLie;
+      if ((key === 'spineX' || key === 'hipsRotX') && this.bodyOffset[key] > 0) w *= fwdCap;
       pose[key] += this.bodyOffset[key] * w;
     }
     // Мягкий предел наклона таза (в приседе/на коленях наклон складывается с посадкой):
@@ -1392,6 +1413,19 @@ export class Character {
     rotateToward(head, 0.85, 0.75);
   }
 
+  // Сдвиг таза пальцем действует в том положении, где его поставили
+  // (стоя — стоя, на полу — на полу), а при смене положения плавно уходит.
+  hipsOffK() {
+    if (this.hipsSetSit == null || this.hipsSetSit < 0.3) return this.offK;
+    return 1 - THREE.MathUtils.smoothstep(Math.abs(this.sitS - this.hipsSetSit), 0.05, 0.25);
+  }
+
+  footOffK(side) {
+    const at = this.footSetSit?.[side];
+    if (at == null || at < 0.3) return this.offK;
+    return 1 - THREE.MathUtils.smoothstep(Math.abs(this.sitS - at), 0.05, 0.25);
+  }
+
   // Насколько рука сейчас занята жестом/реакцией (0…1, плавно по огибающей жеста).
   gestureYield(side) {
     let k = 0;
@@ -1796,8 +1830,10 @@ export class Character {
 
       // Ступня, сдвинутая пальцем.
       const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
-      const footOff = footRaw ? footRaw.clone().multiplyScalar(this.offK) : null;
+      (this.footBase ??= {})[side] = target.clone(); // где стопа стоит без сдвига
+      const footOff = footRaw ? footRaw.clone().multiplyScalar(this.footOffK(side)) : null;
       if (footOff) target.add(footOff);
+      if (this.sitS > 0.3) target.y = Math.max(target.y, 0.03 * S); // не сквозь пол
       target.y = Math.max(target.y, rest.pos.y - 0.05 * S * p2);
 
       // Колено всегда смотрит в сторону своей ступни (вперёд), поэтому колени
@@ -1858,12 +1894,15 @@ export class Character {
     if (withFeet) parts.push(['leftFoot', 0.05], ['rightFoot', 0.05]);
     const v = new THREE.Vector3();
     let pen = 0;
+    let gapUpper = Infinity; // зазор до пола у головы и груди (для предела наклона)
     for (const [name, r] of parts) {
       const node = b[name] ?? this.vrm.humanoid.getNormalizedBoneNode(name);
       if (!node) continue;
       node.getWorldPosition(v);
       pen = Math.max(pen, r * S - v.y);
+      if (name === 'head' || name === 'chest') gapUpper = Math.min(gapUpper, v.y - r * S);
     }
+    if (!withFeet) this.upperGap = gapUpper;
     if (pen <= 0.001) return false;
     b.hips.position.y += pen;
     b.hips.updateWorldMatrix(false, true);
@@ -2077,6 +2116,17 @@ export class Character {
     const rest = this.restFoot[side];
     if (!rest) return;
     const S = this.scale;
+    // На полу смещение — от того, где стопа лежит сейчас (а не стоя), и пределы шире.
+    if (this.sitS > 0.3 && this.footBase?.[side]) {
+      (this.footSetSit ??= {})[side] = this.sitS;
+      const off = worldPoint.clone().sub(this.footBase[side]);
+      off.x = THREE.MathUtils.clamp(off.x, -0.45 * S, 0.45 * S);
+      off.y = THREE.MathUtils.clamp(off.y, -0.1 * S, 0.6 * S);
+      off.z = THREE.MathUtils.clamp(off.z, -0.5 * S, 0.5 * S);
+      this.footOffset[side] = off;
+      return;
+    }
+    (this.footSetSit ??= {})[side] = this.sitS;
     const off = worldPoint.clone().sub(rest.pos);
     // Естественные пределы: вбок наружу до 25 см, внутрь — не дальше второй ноги,
     // вверх до 45 см, вперёд до 40 см, назад до 25 см.
@@ -2098,6 +2148,8 @@ export class Character {
     this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
     this.footOffset = { left: null, right: null };
     this.armPreset = { left: null, right: null };
+    this.footSetSit = {};
+    this.hipsSetSit = null;
   }
 
   exportTouchPose() {
@@ -2113,6 +2165,8 @@ export class Character {
         left: this.footOffset.left?.toArray() ?? null,
         right: this.footOffset.right?.toArray() ?? null,
       },
+      footSit: { ...(this.footSetSit ?? {}) },
+      hipsSit: this.hipsSetSit ?? null,
     };
   }
 
@@ -2137,6 +2191,8 @@ export class Character {
     for (const side of ['left', 'right']) {
       if (data.feet?.[side]) this.footOffset[side] = new THREE.Vector3().fromArray(data.feet[side]);
     }
+    this.footSetSit = { ...(data.footSit ?? {}) };
+    this.hipsSetSit = data.hipsSit ?? null;
   }
 
   applyHandTargets() {

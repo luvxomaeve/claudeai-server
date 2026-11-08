@@ -1824,7 +1824,8 @@ function poseDragStart(e) {
     const footPos = character.footWorld(side);
     const normal = new THREE.Vector3();
     camera.getWorldDirection(normal);
-    poseDrag = { kind: 'knee', side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, kneePos), shin: footPos.clone().sub(kneePos) };
+    poseDrag = { kind: 'knee', side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, kneePos), shin: footPos.clone().sub(kneePos),
+      kneeStart: kneePos.clone(), footStart: footPos.clone() };
   } else if (hit.zone === 'headpat' || hit.zone === 'face') {
     poseDrag = { kind: 'head', lastX: e.clientX, lastY: e.clientY };
   } else if (hit.zone === 'legs') {
@@ -1849,7 +1850,10 @@ function poseDragMove(e) {
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
-      if (poseDrag.kind === 'knee') {
+      if (poseDrag.kind === 'knee' && character.sitS > 0.3) {
+        // На полу колено ведёт всю ногу: стопа сдвигается вместе с коленом.
+        character.setFootTarget(poseDrag.side, poseDrag.footStart.clone().add(dragPoint.clone().sub(poseDrag.kneeStart)));
+      } else if (poseDrag.kind === 'knee') {
         // Голень свисает почти вертикально под коленом (чуть назад).
         const len = poseDrag.shin.length();
         character.setFootTarget(poseDrag.side, dragPoint.clone().add(new THREE.Vector3(0, -len * 0.97, -0.05 * character.scale)));
@@ -1899,8 +1903,17 @@ function poseDragMove(e) {
     const o = character.bodyOffset;
     const S = character.scale;
     // Только вбок (бёдра в сторону) — вертикаль не трогаем, чтобы она не приседала случайно.
-    o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -0.08 * S, 0.08 * S);
+    // На полу таз двигается свободнее: вбок шире, и вверх-вниз (приподнять/опустить бёдра).
+    const floor = character.sitS > 0.3;
+    if (character.hipsSetSit == null || Math.abs(character.hipsSetSit - character.sitS) > 0.05) {
+      // Новое положение — прошлые сдвиги таза (от другого положения) не тащим.
+      o.hipsX = 0; o.hipsZ = 0; o.hipsY = 0;
+    }
+    character.hipsSetSit = character.sitS;
+    const lim = floor ? 0.16 : 0.08;
+    o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -lim * S, lim * S);
     o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+    if (floor) o.hipsY = clamp(o.hipsY - (e.clientY - poseDrag.lastY) * 0.0006 * S, -0.04 * S, 0.22 * S);
   }
 }
 
