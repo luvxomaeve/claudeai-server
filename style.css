@@ -1181,3 +1181,12 @@ body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0p
 #cam-stick2::after { bottom: 2px; border-top-color: rgba(181, 108, 255, 0.7); }
 /* Строка камеры шире — сдвигаем левее, чтобы влезла. */
 #cam-controls, body.posing #cam-controls, body:not(.posing) #cam-controls { left: max(12px, env(safe-area-inset-left, 0px)) !important; }
+
+/* Строка камеры короче: ＋/− убраны (есть щипок). */
+#cam-controls #cam-in, #cam-controls #cam-out { display: none !important; }
+/* Окошко поз: избранные сверху. */
+body.posing #poses #pose-list:not([hidden]) { display: flex; flex-direction: column; }
+#poses #pose-list button[data-pose^="saved:"] { order: -1; }
+/* Окошко поз компактнее — не закрывает её. */
+body.posing #poses #pose-list:not([hidden]) { max-width: 124px; max-height: 38vh; padding: 5px; gap: 4px; background: rgba(255, 255, 255, 0.55); }
+body.posing #poses #pose-list button { padding: 5px 9px; font-size: 12px; box-shadow: none; }

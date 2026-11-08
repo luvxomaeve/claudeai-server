@@ -194,8 +194,8 @@ function orbitTarget(out) {
 }
 
 // Мгновенно применить yaw/zoom (при жестах и кнопках).
-// Свободная камера (как дрон): фиолетовый шарик — лететь вперёд/назад и вбок,
-// розовый — вверх/вниз и поворот; палец по фону — оглядеться; щипок — вперёд/назад.
+// Свободная камера (как дрон): шарик — лететь вперёд/назад и вбок;
+// палец по фону — оглядеться; два пальца — щипок вперёд/назад, вверх/вниз — высота.
 let freeCam = null; // { yaw, pitch } — куда смотрит камера
 function freeDir(out = new THREE.Vector3()) {
   const cp = Math.cos(freeCam.pitch);
@@ -714,7 +714,10 @@ canvas.addEventListener('pointermove', (e) => {
     // Два пальца вверх/вниз — сдвинуть кадр: смотреть ниже или выше.
     const [a, b] = [...touches.values()];
     const midY = (a.y + b.y) / 2;
-    if (pinchMidY != null) {
+    if (pinchMidY != null && freeCam) {
+      camera.position.y += (midY - pinchMidY) * 0.003 * camBase.S;
+      applyFree();
+    } else if (pinchMidY != null) {
       camLift = THREE.MathUtils.clamp(camLift + (midY - pinchMidY) * 0.0025 * camBase.S * Math.max(0.3, camZoom), -1.3, 0.6);
       applyOrbit();
     }
@@ -896,7 +899,7 @@ function makeStick(el) {
   }
   return st;
 }
-const stick = makeStick($('cam-stick'));
+const stick = { x: 0, y: 0, on: false }; // розовый шарик убран (высота — двумя пальцами)
 const stick2 = makeStick($('cam-stick2'));
 const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v * Math.abs(v));
 function updateStick(dt) {
@@ -1164,7 +1167,8 @@ function setPoseMode(on) {
   $('pose-bar').hidden = !on;
   document.body.classList.toggle('posing', on);
   closePoseSaveForm();
-  setPoseListOpen(false);
+  // Во вкладке «Позы» окошко поз открыто сразу (избранные ★ сверху), дома — закрыто.
+  setPoseListOpen(on);
   if (on) {
     // Позируем во весь рост — видно и руки, и ноги.
     if (!fullBody && !faceCam) setFullBody(true);
@@ -1707,7 +1711,7 @@ function wakeUi() {
   clearTimeout(uiIdleTimer);
   // Во вкладке «Позы» кнопок больше — прячем быстрее.
   uiIdleTimer = setTimeout(() => {
-    if (document.querySelector('.panel:not(.hidden)') || !$('pose-list').hidden || poseDrag || $('pose-save-form').hidden === false) { wakeUi(); return; }
+    if (document.querySelector('.panel:not(.hidden)') || (!$('pose-list').hidden && !poseMode) || poseDrag || $('pose-save-form').hidden === false) { wakeUi(); return; }
     document.body.classList.add('ui-hidden');
   }, poseMode ? 2500 : 4000);
 }
