@@ -703,6 +703,20 @@ export class Character {
         pose.spineX -= Math.sin(t * 0.5 + 0.4) * 0.04 * (1 - lieAll * 0.5) * hipLife;
         pose.spineZ -= hw * 0.06 * (1 - lieAll) * hipLife;
       }
+      // На полу — свои живые движения: сидя боком то опирается сильнее, то выпрямляется;
+      // на животе покачивает головой в такт ножкам; на спине потягивается корпусом.
+      {
+        const ph3 = this.sitPhases(s);
+        const lean = Math.sin(t * 0.33 + 0.5);
+        pose.spineZ += lean * 0.07 * ph3.p3 * (1 - ph3.p4);
+        pose.hipsZ += lean * 0.04 * ph3.p3 * (1 - ph3.p4);
+        pose.headZ -= lean * 0.06 * ph3.p3 * (1 - ph3.p4);
+        const awake = 1 - (this.sleep ?? 0);
+        pose.headZ += Math.sin(t * 0.52) * 0.1 * ph3.b4 * awake;
+        pose.spineY += Math.sin(t * 0.52) * 0.05 * ph3.b4 * awake;
+        pose.spineX -= Math.max(0, Math.sin(t * 0.17)) * 0.08 * ph3.c4;
+        pose.hipsRotY += Math.sin(t * 0.22) * 0.06 * ph3.c4;
+      }
       const seatedLife = p2 * (1 - 0.5 * this.sitPhases(s).p4);
       if (seatedLife > 0) {
         pose.spineZ += Math.sin(t * 0.47) * 0.05 * seatedLife;
@@ -1694,8 +1708,13 @@ export class Character {
       const { c3, c4 } = this.sitPhases();
       if (c3 > 0) {
         const legLen = this.restHips.y - rest.pos.y;
+        // Колени неспешно меняются: то одно поднято, то другое — живая поза, не статуя.
+        const sw = Math.sin(this.time * 0.22) * 0.5 + 0.5; // 0…1, очень медленно
+        const kL = 0.68 + 0.22 * sw, kR = 0.92 - 0.22 * sw;
         const fwd = new THREE.Vector3(rest.pos.x * 1.15, rest.pos.y, this.restHips.z + legLen * (L ? 0.7 : 0.85));
-        if (c4 > 0) fwd.lerp(new THREE.Vector3(rest.pos.x * 1.1, rest.pos.y, this.restHips.z + legLen * (L ? 0.68 : 0.95)), c4);
+        if (c4 > 0) fwd.lerp(new THREE.Vector3(rest.pos.x * 1.1, rest.pos.y, this.restHips.z + legLen * (L ? kL : kR)), c4);
+        // Сидя на полу ступни чуть «гуляют» — переставляет ноги.
+        fwd.x += Math.sin(this.time * 0.31 + (L ? 0 : 2)) * 0.025 * S * (1 - c4);
         target.lerp(fwd, c3);
       }
       // На животе: ноги вытянуты назад, носки к полу.
@@ -1703,11 +1722,27 @@ export class Character {
       if (b4 > 0) {
         const legLen = this.restHips.y - rest.pos.y;
         // Ноги почти прямые (иначе колено уходит под пол и тело «всплывает»).
+        // Лёжа на животе болтает ножками: голени по очереди плавно поднимаются
+        // (колени остаются на полу), иногда замирает и отдыхает.
+        const rest2 = THREE.MathUtils.smoothstep(Math.sin(this.time * 0.11 + 1), -0.3, 0.3);
+        const kick = Math.max(0, Math.sin(this.time * 1.05 + (L ? 0 : Math.PI))) * rest2 * (1 - (this.sleep ?? 0)); // во сне — тихо
+        (this.kickNow ??= {})[side] = kick * b4;
         const prone = new THREE.Vector3(
           rest.pos.x * 1.1 + (L ? 0.02 : -0.02) * S,
           0.11 * S,
           this.restHips.z - legLen * 1.02,
         );
+        if (kick > 0.001) {
+          // Голень поворачивается вокруг колена, лежащего на полу: стопа идёт по дуге.
+          const lr = this.limbRest.get(upper.uuid);
+          const hipJ = upper.getWorldPosition(new THREE.Vector3());
+          const l1 = lr?.l1 ?? legLen * 0.5;
+          const l2 = lr?.l2 ?? legLen * 0.5;
+          const kneeP = new THREE.Vector3(prone.x, 0.06 * S, hipJ.z - Math.sqrt(Math.max(1e-4, l1 * l1 - (hipJ.y - 0.06 * S) ** 2)));
+          const a = kick * 1.5;
+          const arc = kneeP.clone().add(new THREE.Vector3(0, Math.sin(a) * l2 * 0.97, -Math.cos(a) * l2 * 0.97));
+          prone.lerp(arc, Math.min(1, kick * 4));
+        }
         target.lerp(prone, b4);
       }
 
@@ -1729,7 +1764,8 @@ export class Character {
         knee.y - 0.5 * p2 * (1 - p3) + 0.2 * p3 + kneeUp * 0.5,
         knee.z + 0.6 + kneeUp,
       );
-      if (b4 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y - 0.15, knee.z - 0.6), b4); // на животе колени к полу, ноги прямые
+      // Болтает ножкой — колено не уходит под пол (иначе тело «всплывает»).
+      if (b4 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y - 0.15 + 0.5 * (this.kickNow?.[side] ?? 0), knee.z - 0.6), b4); // на животе колени к полу, ноги прямые
       if (c3 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y + 0.6, knee.z + 0.3), c3); // сидя/на спине колени вверх
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
       // Угол голени вперёд — для баланса корпуса в следующем кадре.
