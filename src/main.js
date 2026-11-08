@@ -116,8 +116,8 @@ function frameCamera() {
   camFrom.pos.copy(camera.position);
   camFrom.look.copy(cameraLookAt);
   orbitTarget(camTo);
-  camTween = character && animateCamera ? 0 : 1;
-  if (camTween === 1) {
+  camTween = character && animateCamera && !freeCam ? 0 : 1;
+  if (camTween === 1 && !freeCam) {
     camera.position.copy(camTo.pos);
     cameraLookAt.copy(camTo.look);
     camera.lookAt(cameraLookAt);
@@ -194,7 +194,35 @@ function orbitTarget(out) {
 }
 
 // Мгновенно применить yaw/zoom (при жестах и кнопках).
+// Свободная камера (как дрон): фиолетовый шарик — лететь вперёд/назад и вбок,
+// розовый — вверх/вниз и поворот; палец по фону — оглядеться; щипок — вперёд/назад.
+let freeCam = null; // { yaw, pitch } — куда смотрит камера
+function freeDir(out = new THREE.Vector3()) {
+  const cp = Math.cos(freeCam.pitch);
+  return out.set(Math.sin(freeCam.yaw) * cp, Math.sin(freeCam.pitch), Math.cos(freeCam.yaw) * cp);
+}
+function enterFreeCam() {
+  if (freeCam) return;
+  if (typeof faceCam !== 'undefined' && faceCam) setFaceCam(false);
+  const d = cameraLookAt.clone().sub(camera.position).normalize();
+  freeCam = { yaw: Math.atan2(d.x, d.z), pitch: Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) };
+  camTween = 1;
+  showToast('🛸 Свободная камера · ⌂ — вернуть');
+}
+function exitFreeCam() { freeCam = null; }
+function applyFree() {
+  camera.position.y = Math.max(0.05 * camBase.S, camera.position.y);
+  cameraLookAt.copy(camera.position).add(freeDir());
+  camera.lookAt(cameraLookAt);
+}
+// Скорость: у неё вблизи — медленно и точно, издалека — быстрее.
+function freeSpeed() {
+  const h = character?.bones.head?.getWorldPosition(new THREE.Vector3()) ?? new THREE.Vector3(0, 1.4, 0);
+  return THREE.MathUtils.clamp(camera.position.distanceTo(h) * 0.9, 0.12, 1.6);
+}
+
 function applyOrbit() {
+  if (freeCam) { applyFree(); return; }
   orbitTarget(camTo);
   camTween = 1;
   camera.position.copy(camTo.pos);
@@ -206,6 +234,13 @@ function applyOrbit() {
 window.__setYaw = (y, pitch) => { camYaw = y; if (pitch != null) camPitch = pitch; applyOrbit(); };
 
 function rotateBy(delta, dPitch = 0) {
+  if (freeCam) {
+    // Свободная камера: палец по фону — оглядеться.
+    freeCam.yaw += delta * 0.6;
+    freeCam.pitch = THREE.MathUtils.clamp(freeCam.pitch - dPitch * 0.8, -1.4, 1.4);
+    applyFree();
+    return;
+  }
   if (faceCam) setFaceCam(false); // крутишь сам — слежение за лицом выключается
   camYaw = (camYaw + delta) % (Math.PI * 2);
   camPitch = THREE.MathUtils.clamp(camPitch + dPitch, -0.6, 1.35);
@@ -213,6 +248,11 @@ function rotateBy(delta, dPitch = 0) {
 }
 
 function zoomBy(factor) {
+  if (freeCam) {
+    camera.position.addScaledVector(freeDir(), (1 - factor) * freeSpeed() * 1.5);
+    applyFree();
+    return;
+  }
   camZoom = THREE.MathUtils.clamp(camZoom * factor, ZOOM_MIN, ZOOM_MAX);
   applyOrbit();
 }
@@ -222,8 +262,9 @@ let camSitSeen = 0;
 function updateCamera(dt) {
   // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
   updateLieMid(dt);
-  updateFaceCam(dt);
   updateStick(dt);
+  if (freeCam) return; // свободная камера — орбита не вмешивается
+  updateFaceCam(dt);
   const lying = character && character.sitS > 0.8;
   const zoomedIn = camZoom < 0.9;
   if (character && camTween >= 1 && (lying || zoomedIn || Math.abs(character.sitS - camSitSeen) > 0.002)) {
@@ -782,6 +823,7 @@ holdButton('cam-out', () => zoomBy(1.04));
 // наклонялась, ни садилась и ни ложилась. Крутишь пальцем — слежение выключается.
 let faceCam = false;
 function setFaceCam(on) {
+  if (on) exitFreeCam();
   faceCam = on;
   $('cam-face').classList.toggle('active', on);
   if (on) {
@@ -811,6 +853,7 @@ const VIEWS = [
 ];
 let viewIdx = 0;
 function setView(v) {
+  exitFreeCam();
   setFaceCam(false);
   // Ракурс — относительно того, куда она повёрнута телом.
   const f = character ? character.faceDir() : new THREE.Vector3(0, 0, 1);
@@ -860,17 +903,22 @@ function updateStick(dt) {
   const a = stick.on && (dz(stick.x) || dz(stick.y));
   const b = stick2.on && (dz(stick2.x) || dz(stick2.y));
   if (!a && !b) return;
-  if (faceCam) setFaceCam(false);
-  if (a) {
-    camYaw -= dz(stick.x) * 1.6 * dt;
-    camLift = THREE.MathUtils.clamp(camLift - dz(stick.y) * 1.2 * camBase.S * Math.max(0.35, camZoom) * dt, -1.3, 0.6);
-  }
+  enterFreeCam();
+  const v = freeSpeed() * dt;
+  const fwd = freeDir();
+  const flat = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
+  const right = new THREE.Vector3(-flat.z, 0, flat.x);
   if (b) {
-    // Вверх — ближе (экспоненциально: у лица медленнее, издалека быстрее).
-    camZoom = THREE.MathUtils.clamp(camZoom * Math.exp(dz(stick2.y) * 1.4 * dt), ZOOM_MIN, ZOOM_MAX);
-    camPitch = THREE.MathUtils.clamp(camPitch - dz(stick2.x) * 1.2 * dt, -1.2, 1.35);
+    // 🎯 Фиолетовый: вверх — лететь вперёд (куда смотришь), вниз — назад, вбок — в сторону.
+    camera.position.addScaledVector(fwd, -dz(stick2.y) * v);
+    camera.position.addScaledVector(right, dz(stick2.x) * v);
   }
-  applyOrbit();
+  if (a) {
+    // 🕹 Розовый: вверх/вниз — подняться/опуститься, вбок — повернуться.
+    camera.position.y -= dz(stick.y) * v;
+    freeCam.yaw -= dz(stick.x) * 1.3 * dt;
+  }
+  applyFree();
 }
 // 🎥 внизу: одна кнопка раскрывает маленькую строку камеры (к лицу, ракурс, ±, вид по умолчанию).
 $('btn-cam').addEventListener('click', (e) => {
@@ -890,6 +938,7 @@ $('cam-view').addEventListener('click', () => {
 });
 
 function resetView() {
+  exitFreeCam();
   setFaceCam(false);
   camLift = 0;
   viewIdx = 0;
