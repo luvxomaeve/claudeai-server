@@ -2240,7 +2240,15 @@ export class Character {
     // Рот шевелится, пока она «говорит».
     this.talkTime -= dt;
     const mouth = this.talkTime > 0 ? (0.5 + 0.5 * Math.sin(this.time * 22)) * 0.6 : 0;
-    em.setValue('aa', mouth);
+    // Пока ведёшь полосу — губы медленно приоткрываются (мягкое «о»), отпустил — плавно смыкаются.
+    this.effortT = Math.max(0, (this.effortT ?? 0) - dt);
+    const want = this.effortT > 0 ? 1 : 0;
+    const rate = want > (this.effort ?? 0) ? 1.6 : 0.9; // открывается ~0.6 с, закрывается ~1.1 с
+    this.effort = THREE.MathUtils.clamp((this.effort ?? 0) + Math.sign(want - (this.effort ?? 0)) * rate * dt, 0, 1);
+    const ef = this.effort * this.effort * (3 - 2 * this.effort);
+    const breathe = 0.04 * Math.sin(this.time * 1.7) * ef;
+    em.setValue('aa', Math.max(mouth, ef * 0.32 + breathe));
+    em.setValue('oh', ef * 0.22);
   }
 
   headScreenAnchor(out) {

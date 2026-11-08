@@ -233,7 +233,9 @@ function applyOrbit() {
 // Для отладки и записи кадров.
 window.__setYaw = (y, pitch) => { camYaw = y; if (pitch != null) camPitch = pitch; applyOrbit(); };
 
+let lastCamMove = 0; // когда последний раз крутили камеру — точки не ловят палец
 function rotateBy(delta, dPitch = 0) {
+  lastCamMove = performance.now();
   if (freeCam) {
     // Свободная камера: палец по фону — оглядеться.
     freeCam.yaw += delta * 0.6;
@@ -1307,6 +1309,8 @@ $('btn-home').classList.add('active');
 function updateHandles() {
   const show = poseMode && !!character && (!handlesHidden || !!poseDrag);
   $('handles').hidden = !show;
+  // Пока крутишь камеру — точки бледнеют и не мешают.
+  $('handles').classList.toggle('calm', poseDrag?.kind === 'bg' || performance.now() - lastCamMove < 450);
   if (!show) return;
   $('handles').classList.toggle('dragging', !!activeHandle);
   const place = (el, p) => {
@@ -1405,6 +1409,7 @@ sitSlider.addEventListener('pointerdown', (e) => {
 });
 sitSlider.addEventListener('pointermove', (e) => {
   if (!sliderDrag || !character) return;
+  character.effortT = 0.35; // губы приоткрываются, пока ведёшь
   const h = sitSlider.querySelector('.track').getBoundingClientRect().height || 200;
   const dv = ((e.clientY - sliderDrag.y) / h) * sitMax();
   const now = performance.now();
@@ -1442,6 +1447,7 @@ sitSlider2.addEventListener('pointerdown', (e) => {
 });
 sitSlider2.addEventListener('pointermove', (e) => {
   if (!slider2Drag || !character) return;
+  character.effortT = 0.35;
   const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || 200;
   const dv = ((e.clientY - slider2Drag.y) / h) * sitMax();
   const now = performance.now();
@@ -1501,7 +1507,9 @@ const HANDLE_HIT = {
 };
 function nearestHandle(e) {
   let best = null;
-  let bestD = 60;
+  // Только что крутили камеру — точки не хватаем (чтобы не зацепить случайно); радиус поменьше.
+  if (performance.now() - lastCamMove < 450) return null;
+  let bestD = 40;
   for (const k of HANDLE_KEYS) {
     const p = handleWorld(k);
     if (!p) continue;
@@ -1532,7 +1540,7 @@ function showLabel(text) {
   labelTimer = setTimeout(() => el.classList.remove('on'), 1200);
 }
 function poseDragStart(e) {
-  const hit = nearestHandle(e) ?? zoneAt(e, true);
+  const hit = performance.now() - lastCamMove < 450 ? null : (nearestHandle(e) ?? zoneAt(e, true));
   activeHandle = handleKeyFor(hit);
   snapAnchor = null;
   if (activeHandle) showLabel(HANDLE_LABELS[activeHandle]);

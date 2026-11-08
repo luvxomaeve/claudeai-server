@@ -1190,3 +1190,5 @@ body.posing #poses #pose-list:not([hidden]) { display: flex; flex-direction: col
 /* Окошко поз компактнее — не закрывает её. */
 body.posing #poses #pose-list:not([hidden]) { max-width: 124px; max-height: 38vh; padding: 5px; gap: 4px; background: rgba(255, 255, 255, 0.55); }
 body.posing #poses #pose-list button { padding: 5px 9px; font-size: 12px; box-shadow: none; }
+
+#handles.calm .handle, #handles.calm .anchor { opacity: 0.12; animation: none; transition: opacity 0.2s ease; }
