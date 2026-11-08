@@ -223,6 +223,7 @@ function updateCamera(dt) {
   // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
   updateLieMid(dt);
   updateFaceCam(dt);
+  updateStick(dt);
   const lying = character && character.sitS > 0.8;
   const zoomedIn = camZoom < 0.9;
   if (character && camTween >= 1 && (lying || zoomedIn || Math.abs(character.sitS - camSitSeen) > 0.002)) {
@@ -822,6 +823,42 @@ function setView(v) {
   showToast(`🎥 ${v.name}`);
 }
 $('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
+// 🕹 Шарик-джойстик: держишь и ведёшь — камера плавно облетает её (вбок)
+// и опускается/поднимается (вверх-вниз). Отпустил — стоит на месте.
+const stick = { x: 0, y: 0, on: false };
+const stickEl = $('cam-stick');
+function stickMove(e) {
+  const r = stickEl.getBoundingClientRect();
+  const R = r.width / 2;
+  let dx = e.clientX - (r.left + R);
+  let dy = e.clientY - (r.top + R);
+  const len = Math.hypot(dx, dy);
+  if (len > R) { dx *= R / len; dy *= R / len; }
+  stick.x = dx / R;
+  stick.y = dy / R;
+  stickEl.querySelector('b').style.transform = `translate(${dx}px, ${dy}px)`;
+}
+stickEl.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  stickEl.setPointerCapture(e.pointerId);
+  stick.on = true;
+  stickMove(e);
+});
+stickEl.addEventListener('pointermove', (e) => { if (stick.on) stickMove(e); });
+for (const ev of ['pointerup', 'pointercancel']) {
+  stickEl.addEventListener(ev, () => {
+    stick.on = false; stick.x = 0; stick.y = 0;
+    stickEl.querySelector('b').style.transform = '';
+  });
+}
+function updateStick(dt) {
+  if (!stick.on || (Math.abs(stick.x) < 0.08 && Math.abs(stick.y) < 0.08)) return;
+  if (faceCam) setFaceCam(false);
+  camYaw -= stick.x * Math.abs(stick.x) * 1.6 * dt;
+  camLift = THREE.MathUtils.clamp(camLift - stick.y * Math.abs(stick.y) * 1.2 * camBase.S * Math.max(0.35, camZoom) * dt, -1.3, 0.6);
+  applyOrbit();
+}
 // 🎥 внизу: одна кнопка раскрывает маленькую строку камеры (к лицу, ракурс, ±, вид по умолчанию).
 $('btn-cam').addEventListener('click', (e) => {
   e.stopPropagation();

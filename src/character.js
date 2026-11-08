@@ -792,7 +792,11 @@ export class Character {
       pose.spineY += body;
       // Наклонена — поднимает голову к тебе сильнее (угол считается относительно корпуса).
       const lieK = THREE.MathUtils.smoothstep(this.sitS, 1.0, 1.3);
-      pose.headX += THREE.MathUtils.clamp(-this.gazePitchS, -0.6 - 0.5 * Math.max(bendK, lieK), 0.7) * w;
+      // Смотрит в глаза: голова поднимается/опускается к камере сильнее (особенно вблизи),
+      // а грудь чуть помогает, если камера очень низко или высоко.
+      const pitchT = THREE.MathUtils.clamp(-this.gazePitchS, -0.9 - 0.45 * Math.max(bendK, lieK), 0.9);
+      pose.headX += pitchT * w;
+      pose.spineX += THREE.MathUtils.clamp(pitchT * 0.25, -0.15, 0.12) * w * (1 - bendK) * (1 - lieK);
     }
     pose.headX += -this.headLook.y * 0.2;
 
