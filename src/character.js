@@ -567,8 +567,8 @@ export class Character {
     const w = Math.tanh(2.2 * Math.sin(t * 0.42)) / Math.tanh(2.2);
     const relaxL = Math.max(0, -w); // левая нога расслаблена
     const relaxR = Math.max(0, w); // правая нога расслаблена
-    pose.hipsX += w * 0.045 * this.scale;
-    pose.hipsZ += w * 0.11;
+    pose.hipsX += w * 0.055 * this.scale;
+    pose.hipsZ += w * 0.14;
     pose.hipsY -= Math.abs(w) * 0.016 * this.scale;
     // Плавная «восьмёрка» бёдрами в покое: таз чуть поворачивается и покачивается,
     // плечи и голова уравновешивают — живая, женственная стойка.
@@ -576,10 +576,10 @@ export class Character {
       const st = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.1, 0.4);
       const f = Math.sin(t * 0.55);
       const g = Math.sin(t * 1.1 + 0.6);
-      pose.hipsRotY += f * 0.07 * st;
-      pose.hipsZ += g * 0.035 * st;
-      pose.spineY -= f * 0.05 * st;
-      pose.spineZ -= g * 0.03 * st;
+      pose.hipsRotY += f * 0.1 * st;
+      pose.hipsZ += g * 0.05 * st;
+      pose.spineY -= f * 0.07 * st;
+      pose.spineZ -= g * 0.045 * st;
     }
     pose.lLegZ -= w * 0.075; // ноги остаются вертикальными, бёдра наклоняются
     pose.rLegZ -= w * 0.075;
@@ -693,8 +693,8 @@ export class Character {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
         const hw = Math.sin(t * 0.6);
-        pose.hipsZ += hw * 0.06 * (1 - lieAll * 0.6) * seatedLife;
-        pose.hipsRotY += Math.sin(t * 0.42 + 1.1) * 0.05 * (1 - lieAll * 0.5) * seatedLife;
+        pose.hipsZ += hw * 0.085 * (1 - lieAll * 0.6) * seatedLife;
+        pose.hipsRotY += Math.sin(t * 0.42 + 1.1) * 0.07 * (1 - lieAll * 0.5) * seatedLife;
         pose.spineZ -= hw * 0.04 * (1 - lieAll) * seatedLife;
         pose.spineZ += Math.sin(t * 0.47) * 0.05 * seatedLife;
         pose.spineX += Math.sin(t * 0.31 + 1.2) * 0.03 * seatedLife;

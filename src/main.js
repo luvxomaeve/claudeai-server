@@ -1038,7 +1038,7 @@ function makeStick(el) {
   return st;
 }
 const stick = { x: 0, y: 0, on: false }; // розовый шарик убран (высота — двумя пальцами)
-const stick2 = makeStick($('cam-stick2'));
+const stick2 = { x: 0, y: 0, on: false }; // шарик убран — камера пальцами
 const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v * Math.abs(v));
 function updateStick(dt) {
   const a = stick.on && (dz(stick.x) || dz(stick.y));
@@ -1073,7 +1073,7 @@ document.addEventListener('pointerdown', (e) => {
     $('btn-cam').classList.remove('active');
   }
 });
-$('cam-view').addEventListener('click', () => {
+$('cam-view')?.addEventListener('click', () => {
   viewIdx = (viewIdx + 1) % VIEWS.length;
   setView(VIEWS[viewIdx]);
 });
@@ -1157,10 +1157,10 @@ function renderViews() {
 }
 $('cam-pin').addEventListener('click', () => {
   savedViews.push(camState());
-  if (savedViews.length > 4) savedViews.shift();
+  if (savedViews.length > 3) savedViews.shift();
   try { localStorage.setItem(VIEWS_KEY, JSON.stringify(savedViews)); } catch { /* ignore */ }
   renderViews();
-  showToast(`📍 Ракурс ${savedViews.length} запомнен · удержание — удалить`);
+  showToast(`📍 Ракурс ${savedViews.length} запомнен · тап — вернуться, удержать — удалить`);
 });
 renderViews();
 
