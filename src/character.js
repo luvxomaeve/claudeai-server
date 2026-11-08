@@ -92,7 +92,7 @@ export const POSES = {
   },
   hug: {
     label: 'Обнимает себя',
-    hands: { left: ['otherUpperArm', [0.0, -0.07, 0.06]], right: ['otherUpperArm', [0.0, -0.07, 0.06]] },
+    hands: { left: ['upperChest', [-0.07, 0.0, 0.19]], right: ['upperChest', [-0.06, -0.06, 0.2]] },
     spineX: 0.06, headX: 0.12, headZ: 0.1, lShoulderZ: 0.1, rShoulderZ: -0.1, lKneeX: 0.2, lFootIn: 0.03, rFootIn: 0.03,
   },
   hello: {

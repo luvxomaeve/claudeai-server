@@ -2774,8 +2774,21 @@ function autoValuesAt(keys, t) {
   while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
   const [t0, a] = keys[i];
   const [t1, b] = keys[Math.min(i + 1, keys.length - 1)];
-  const k = t1 > t0 ? THREE.MathUtils.smoothstep(t, t0, t1) : 1;
-  for (const v of AUTO_VALS) out[v] = (a[v] ?? 0) + ((b[v] ?? 0) - (a[v] ?? 0)) * k;
+  if (!(t1 > t0)) { for (const v of AUTO_VALS) out[v] = b[v] ?? 0; return out; }
+  // Сплайн через ключи (Catmull-Rom): движение течёт, не замирая в каждой точке;
+  // в начале и в конце — мягкий старт и остановка.
+  const u = THREE.MathUtils.clamp((t - t0) / (t1 - t0), 0, 1);
+  const h00 = 2 * u ** 3 - 3 * u * u + 1, h10 = u ** 3 - 2 * u * u + u, h01 = -2 * u ** 3 + 3 * u * u, h11 = u ** 3 - u * u;
+  const prev = keys[i - 1];
+  const next = keys[i + 2];
+  for (const v of AUTO_VALS) {
+    const p0 = a[v] ?? 0, p1 = b[v] ?? 0;
+    const m0 = prev ? ((p1 - (prev[1][v] ?? 0)) / (t1 - prev[0])) * (t1 - t0) : 0;
+    const m1 = next ? (((next[1][v] ?? 0) - p0) / (next[0] - t0)) * (t1 - t0) : 0;
+    out[v] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
+    // Посадка — без «перелёта» (иначе на коленях она чуть начинала садиться на пол).
+    if (v === 'sit') out[v] = THREE.MathUtils.clamp(out[v], Math.min(p0, p1), Math.max(p0, p1));
+  }
   return out;
 }
 function applyAuto(v) {
