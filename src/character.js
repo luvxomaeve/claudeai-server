@@ -27,10 +27,10 @@ const ZONE_DEFS = [
 const BASE_POSE = {
   spineX: 0, spineY: 0, spineZ: 0,
   headX: 0, headY: 0, headZ: 0,
-  lUpperZ: -1.15, rUpperZ: 1.15,
-  lUpperX: -0.06, rUpperX: -0.06,
+  lUpperZ: -1.2, rUpperZ: 1.2,
+  lUpperX: -0.04, rUpperX: -0.04,
   lUpperTwist: 0, rUpperTwist: 0,
-  lLowerY: -0.45, rLowerY: 0.45,
+  lLowerY: -0.55, rLowerY: 0.55,
   lLowerZ: 0, rLowerZ: 0,
   hipsY: 0, hipsZ: 0, hipsX: 0, hipsRotY: 0, hipsRotX: 0, lFootIn: 0, rFootIn: 0,
   lLegX: 0, rLegX: 0, lLegZ: 0, rLegZ: 0, lKneeX: 0, rKneeX: 0,
@@ -828,6 +828,18 @@ export class Character {
     // Пока гладят — голова клонится и прижимается к руке.
     pose.headZ += this.patAmount * 0.18 * Math.sin(t * 2.2);
     pose.headX += this.patAmount * 0.12;
+    // Пока гладят — смущённо сводит ладошки перед собой, плечики чуть вверх.
+    {
+      const pa = this.patAmount * (this.armPreset.left || this.armPreset.right || this.handTargets.left || this.handTargets.right ? 0 : 1)
+        * (1 - THREE.MathUtils.smoothstep(this.sitS, 0.3, 0.6));
+      if (pa > 0.01) {
+        const sway = Math.sin(t * 1.8) * 0.06;
+        blendArm(pose, 'left', { upZ: -0.9 + sway, upX: 0.12, tw: 0.75, loY: -2.0, loZ: 0 }, pa * 0.8);
+        blendArm(pose, 'right', { upZ: -0.9 - sway, upX: 0.12, tw: 0.75, loY: -2.0, loZ: 0 }, pa * 0.8);
+        pose.lShoulderZ += 0.08 * pa;
+        pose.rShoulderZ -= 0.08 * pa;
+      }
+    }
 
     // Движения-реакции. Руки не «прибавляются» к текущей позе (из-за этого их
     // выворачивало), а плавно переходят в позу реакции и обратно.
@@ -2245,7 +2257,11 @@ export class Character {
     const k = 1 - Math.exp(-dt * 8);
     for (const e of EXPRESSIONS) {
       this.exprCurrent[e] += (this.exprTarget[e] - this.exprCurrent[e]) * k;
-      em.setValue(e, this.exprCurrent[e]);
+      // Эмоции мягче: «радость» у VRoid широко открывает рот — ограничиваем.
+      // С ростом симпатии улыбка становится чуть шире и теплее.
+      const lk = this.loveK ?? 0;
+      const cap = e === 'happy' ? 0.42 + 0.2 * lk : e === 'surprised' ? 0.6 : e === 'angry' ? 0.75 : 1;
+      em.setValue(e, this.exprCurrent[e] * cap);
     }
 
     // Моргание (кроме моментов, когда глаза и так закрыты от улыбки).
@@ -2268,7 +2284,10 @@ export class Character {
 
     // Рот шевелится, пока она «говорит».
     this.talkTime -= dt;
-    const mouth = this.talkTime > 0 ? (0.5 + 0.5 * Math.sin(this.time * 22)) * 0.6 : 0;
+    // Говорит — губы двигаются мягко и негромко (не «во весь рот»).
+    const talkTarget = this.talkTime > 0 ? (0.5 + 0.5 * Math.sin(this.time * 13)) * (0.5 + 0.5 * Math.sin(this.time * 5.3)) * 0.32 : 0;
+    this.mouthS = (this.mouthS ?? 0) + (talkTarget - (this.mouthS ?? 0)) * (1 - Math.exp(-dt * 18));
+    const mouth = this.mouthS;
     // Пока ведёшь полосу — губы медленно приоткрываются (мягкое «о»), отпустил — плавно смыкаются.
     this.effortT = Math.max(0, (this.effortT ?? 0) - dt);
     const want = this.effortT > 0 ? 1 : 0;
