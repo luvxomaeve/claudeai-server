@@ -7,7 +7,7 @@ import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { parseMixamo, mixamoClip } from './mixamo.js';
 import { MOCAP, loadMocap, mocapClip, mocapUpperClip } from './mocap.js';
 import { Character, POSES, LOOPS } from './character.js';
-import { REACTIONS, STROKES, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
+import { REACTIONS, STROKES, IDLE_LINES, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
 // положи файл рядом, например models/waifu.vrm, и укажи путь здесь,
@@ -391,27 +391,70 @@ async function loadModel(source) {
 
 // ---------- Симпатия ----------
 
-const STORAGE_KEY = 'waifu-affection';
-let affection = 10;
+// Очки симпатии 0…1000 и уровни. Реплики по-прежнему берутся по трём тирам
+// (незнакомец / друг / близкий), а уровней больше — прокачка дольше и интереснее.
+const STORAGE_KEY = 'waifu-love';
+const LEVELS = [
+  { min: 0, label: 'Незнакомец' },
+  { min: 60, label: 'Знакомый' },
+  { min: 150, label: 'Друг' },
+  { min: 300, label: 'Подруга' },
+  { min: 500, label: 'Близкий человек' },
+  { min: 750, label: 'Любимый' },
+  { min: 1000, label: 'Родная душа' },
+];
+const LOVE_MAX = 1000;
+let love = 50;
 try {
   const saved = Number(localStorage.getItem(STORAGE_KEY));
-  if (Number.isFinite(saved) && saved > 0) affection = saved;
+  if (Number.isFinite(saved) && localStorage.getItem(STORAGE_KEY) !== null) love = saved;
+  else {
+    const old = Number(localStorage.getItem('waifu-affection')); // старая шкала 0…100
+    if (Number.isFinite(old) && old > 0) love = old * 6;
+  }
 } catch { /* приватный режим — живём без сохранения */ }
+const levelOf = (v) => { let l = 0; LEVELS.forEach((x, i) => { if (v >= x.min) l = i; }); return l; };
+// Тир для реплик: 0 — до «Друга», 1 — до «Близкого», 2 — дальше.
+const tier = () => (love >= 500 ? 2 : love >= 150 ? 1 : 0);
 
-const tier = () => tierFor(affection);
-
-function changeAffection(delta) {
-  const before = tier();
-  affection = THREE.MathUtils.clamp(affection + delta, 0, 100);
-  try { localStorage.setItem(STORAGE_KEY, String(affection)); } catch { /* ignore */ }
+const LEVEL_UP_LINES = ['', 'Мы ведь уже знакомы~', 'Слушай, а с тобой весело!', 'Ты мне нравишься, правда-правда~',
+  'Кажется… ты мне правда нравишься ♥', 'Я тебя люблю… вот. Сказала ♥', 'Ты — самый родной ♥♥♥'];
+function setLove(v, silent = false) {
+  const before = levelOf(love);
+  love = THREE.MathUtils.clamp(v, 0, LOVE_MAX);
+  try { localStorage.setItem(STORAGE_KEY, String(love)); } catch { /* ignore */ }
   renderAffection();
-  if (tier() > before) say(tier() === 2 ? 'Кажется… ты мне правда нравишься ♥' : 'Слушай, а с тобой весело!', 'happy');
+  const after = levelOf(love);
+  if (!silent && after > before) {
+    say(LEVEL_UP_LINES[after], 'happy');
+    $('affection').classList.remove('levelup');
+    void $('affection').offsetWidth;
+    $('affection').classList.add('levelup');
+  }
+}
+// Шкала стала в 10 раз длиннее, а прирост — только вдвое: прокачка идёт примерно в 5 раз дольше.
+function changeAffection(delta) {
+  setLove(love + delta * 2);
 }
 
 function renderAffection() {
-  $('affection-fill').style.width = `${affection}%`;
-  $('affection-label').textContent = TIERS[tier()].label;
+  const l = levelOf(love);
+  const cur = LEVELS[l].min;
+  const next = LEVELS[l + 1]?.min ?? LOVE_MAX;
+  const k = l === LEVELS.length - 1 ? 1 : (love - cur) / (next - cur);
+  $('affection-fill').style.width = `${(k * 100).toFixed(1)}%`;
+  $('affection-label').textContent = LEVELS[l].label;
+  $('affection-lvl').textContent = String(l + 1);
+  $('affection').title = `${Math.round(love)} / ${LOVE_MAX}`;
 }
+// Тап по шкале — маленькое меню: макс / сброс.
+$('affection').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('love-menu').hidden = !$('love-menu').hidden;
+});
+$('love-max').addEventListener('click', (e) => { e.stopPropagation(); setLove(LOVE_MAX); $('love-menu').hidden = true; showToast('♥ Максимум'); });
+$('love-reset').addEventListener('click', (e) => { e.stopPropagation(); setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#affection, #love-menu')) $('love-menu').hidden = true; });
 renderAffection();
 
 // ---------- Реплики и озвучка ----------

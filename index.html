@@ -21,9 +21,15 @@
 
   <div id="hud">
     <div id="affection">
-      <span class="heart">♥</span>
-      <div class="bar"><div class="fill" id="affection-fill"></div></div>
-      <span id="affection-label">Незнакомец</span>
+      <span class="heart">♥<b id="affection-lvl">1</b></span>
+      <div class="love-text">
+        <span id="affection-label">Незнакомец</span>
+        <div class="bar"><div class="fill" id="affection-fill"></div></div>
+      </div>
+      <div id="love-menu" hidden>
+        <button id="love-max">♥ Макс</button>
+        <button id="love-reset">Сброс</button>
+      </div>
     </div>
     <div id="buttons">
       <button id="btn-voice" class="icon-btn" title="Озвучка"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></button>

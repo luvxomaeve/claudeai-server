@@ -1058,3 +1058,71 @@ body.ui-hidden #sit-slider2:not(.active) .track { opacity: 0; }
 #cam-controls #cam-face.active { background: var(--pink); color: #fff; }
 /* На главной зум-колонка у правого края (там нет правой полосы). */
 body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0px)); }
+
+/* Симпатия — компактная таблетка в одной строке с кнопками: сердечко с уровнем,
+   название и тонкая полоска прогресса до следующего уровня. Тап — меню макс/сброс. */
+#hud { flex-direction: row !important; align-items: center !important; justify-content: space-between; }
+#affection {
+  position: relative;
+  pointer-events: auto;
+  cursor: pointer;
+  gap: 8px;
+  padding: 5px 12px 5px 5px;
+  align-self: center !important;
+  max-width: calc(100vw - 32px - 3 * 46px);
+}
+#affection .heart {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--pink);
+  filter: drop-shadow(0 2px 4px rgba(255, 111, 168, 0.45));
+}
+#affection .heart b {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding-bottom: 2px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+}
+#affection .love-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+#affection-label { font-size: 12.5px; line-height: 1.1; }
+#affection .bar { width: 96px; max-width: 30vw; height: 5px; }
+#affection .fill { background: linear-gradient(90deg, #ffb3d1, var(--pink), #c77dff); }
+#affection.levelup .heart { animation: lvlPop 0.9s ease; }
+@keyframes lvlPop { 0% { transform: scale(1); } 35% { transform: scale(1.5); } 100% { transform: scale(1); } }
+#love-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(90, 40, 100, 0.2);
+  z-index: 8;
+}
+#love-menu[hidden] { display: none; }
+#love-menu button {
+  border: none;
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#love-max { background: var(--pink) !important; color: #fff !important; }
+#hud { z-index: 9; }
