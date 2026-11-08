@@ -197,6 +197,8 @@ export class Character {
     // Масштаб зон относительно «стандартной» модели с головой на 1.4 м.
     this.scale = this.headHeight / 1.4;
     this.measureBody();
+    // Поворот головы в покое — чтобы потом знать, куда смотрит лицо (камера «к лицу»).
+    this.headRestInv = this.bones.head.getWorldQuaternion(new THREE.Quaternion()).invert();
     this.initIK();
     this.handTargets = { left: null, right: null }; // позы «пальцем»: цель кисти в системе груди
     this.headOffset = { x: 0, y: 0 };
@@ -1014,6 +1016,12 @@ export class Character {
     this.vrm.scene.updateMatrixWorld(true);
     this.updateZones();
     this.measureGaze();
+  }
+
+  // Куда смотрит лицо (единичный вектор в мире).
+  faceDir(out = new THREE.Vector3()) {
+    const q = this.bones.head.getWorldQuaternion(new THREE.Quaternion()).multiply(this.headRestInv);
+    return out.set(0, 0, 1).applyQuaternion(q);
   }
 
   // Куда повернуться, чтобы смотреть в камеру: угол в осях таза (с прошлого кадра).

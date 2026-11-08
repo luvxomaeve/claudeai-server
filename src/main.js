@@ -187,7 +187,7 @@ function orbitTarget(out) {
   }
   out.look.set(cx, lookY, cz);
   const cp = Math.cos(pitch);
-  out.pos.set(cx + Math.sin(camYaw) * dd * cp, lookY + Math.sin(pitch) * dd, cz + Math.cos(camYaw) * dd * cp);
+  out.pos.set(cx + Math.sin(camYaw) * dd * cp, Math.max(0.06 * camBase.S, lookY + Math.sin(pitch) * dd), cz + Math.cos(camYaw) * dd * cp);
   return out;
 }
 
@@ -204,8 +204,9 @@ function applyOrbit() {
 window.__setYaw = (y, pitch) => { camYaw = y; if (pitch != null) camPitch = pitch; applyOrbit(); };
 
 function rotateBy(delta, dPitch = 0) {
+  if (faceCam) setFaceCam(false); // крутишь сам — слежение за лицом выключается
   camYaw = (camYaw + delta) % (Math.PI * 2);
-  camPitch = THREE.MathUtils.clamp(camPitch + dPitch, -0.35, 1.35);
+  camPitch = THREE.MathUtils.clamp(camPitch + dPitch, -0.6, 1.35);
   applyOrbit();
 }
 
@@ -219,6 +220,7 @@ let camSitSeen = 0;
 function updateCamera(dt) {
   // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
   updateLieMid(dt);
+  updateFaceCam(dt);
   const lying = character && character.sitS > 0.8;
   const zoomedIn = camZoom < 0.9;
   if (character && camTween >= 1 && (lying || zoomedIn || Math.abs(character.sitS - camSitSeen) > 0.002)) {
@@ -720,7 +722,59 @@ function holdButton(id, action) {
 }
 holdButton('cam-in', () => zoomBy(0.96));
 holdButton('cam-out', () => zoomBy(1.04));
+// ---------- Быстрые ракурсы ----------
+// 🙂 «К лицу»: камера встаёт перед её лицом и держится там, как бы она ни
+// наклонялась, ни садилась и ни ложилась. Крутишь пальцем — слежение выключается.
+let faceCam = false;
+function setFaceCam(on) {
+  faceCam = on;
+  $('cam-face').classList.toggle('active', on);
+  if (on) {
+    camZoom = Math.min(camZoom, 0.6);
+    showToast('🙂 Камера у её лица');
+  }
+}
+function wrapAngle(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
+function updateFaceCam(dt) {
+  if (!faceCam || !character) return;
+  const f = character.faceDir();
+  const yaw = Math.atan2(f.x, f.z);
+  const pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(f.y, -1, 1)) + 0.08, -0.6, 1.35);
+  const k = 1 - Math.exp(-dt * 3);
+  camYaw += wrapAngle(yaw - camYaw) * k;
+  camPitch += (pitch - camPitch) * k;
+  if (camTween >= 1) applyOrbit();
+}
+// 🎥 Ракурсы по кругу: спереди → сбоку → сзади → сверху → снизу.
+const VIEWS = [
+  { name: 'Спереди', yaw: 0, pitch: 0.05 },
+  { name: 'Сбоку', yaw: Math.PI / 2, pitch: 0.1 },
+  { name: 'Сзади', yaw: Math.PI, pitch: 0.15 },
+  { name: 'Сверху', yaw: 0.3, pitch: 1.2 },
+  { name: 'Снизу', yaw: -0.4, pitch: -0.45 },
+];
+let viewIdx = 0;
+function setView(v) {
+  setFaceCam(false);
+  // Ракурс — относительно того, куда она повёрнута телом.
+  const f = character ? character.faceDir() : new THREE.Vector3(0, 0, 1);
+  const base = Math.abs(f.y) > 0.8 ? 0 : Math.atan2(f.x, f.z);
+  camYaw = base + v.yaw;
+  camPitch = v.pitch;
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+  showToast(`🎥 ${v.name}`);
+}
+$('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
+$('cam-view').addEventListener('click', () => {
+  viewIdx = (viewIdx + 1) % VIEWS.length;
+  setView(VIEWS[viewIdx]);
+});
+
 function resetView() {
+  setFaceCam(false);
+  viewIdx = 0;
   camYaw = 0;
   camPitch = 0.05;
   camZoom = 1;
@@ -940,7 +994,7 @@ function setPoseMode(on) {
   $('btn-handles').hidden = !on;
   $('pose-bar').hidden = !on;
   document.body.classList.toggle('posing', on);
-  $('cam-controls').hidden = !(on || cameraMode);
+  $('cam-controls').hidden = false;
   closePoseSaveForm();
   setPoseListOpen(false);
   if (on) {
@@ -1433,7 +1487,7 @@ function setCameraMode(on) {
   if (on && poseMode) setPoseMode(false);
   cameraMode = on;
   $('btn-camera').classList.toggle('active', on);
-  $('cam-controls').hidden = !(on || poseMode);
+  $('cam-controls').hidden = false;
   canvas.classList.toggle('camera', on);
   petting = null;
   stroking = null;

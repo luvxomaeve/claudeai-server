@@ -1054,3 +1054,7 @@ body.ui-hidden #hud * , body.ui-hidden #poses *, body.ui-hidden #cam-controls * 
 body.ui-hidden #sit-slider:not(.active) .track { opacity: 0.13; }
 body.ui-hidden #sit-slider:not(.active) .thumb { opacity: 0.5; }
 body.ui-hidden #sit-slider2:not(.active) .track { opacity: 0; }
+
+#cam-controls #cam-face.active { background: var(--pink); color: #fff; }
+/* На главной зум-колонка у правого края (там нет правой полосы). */
+body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0px)); }
