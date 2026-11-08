@@ -1158,6 +1158,8 @@ export class Character {
       this.applyFloorSupport(0);
       this.applyJointLimits();
     }
+    // Точная доводка взгляда: лицо смотрит прямо в камеру с любого ракурса.
+    this.applyHeadAim(dt);
 
     this.finishFrame(dt);
   }
@@ -1342,6 +1344,52 @@ export class Character {
         hand.updateWorldMatrix(false, true);
       }
     }
+  }
+
+  // Доводка головы на камеру после всех движений. Углы позы дают примерный поворот,
+  // а здесь шея и голова доворачиваются по реальному направлению на камеру —
+  // поэтому она смотрит в глаза и сверху, и снизу, и в наклоне, и вверх ногами.
+  // Камера за спиной — доводка плавно уходит (без выворачивания шеи).
+  applyHeadAim(dt) {
+    const b = this.bones;
+    const head = b.head;
+    const neck = b.neck;
+    if (!head || !this.headRestInv) return;
+    const P = (n) => n.getWorldPosition(new THREE.Vector3());
+    let want = this.gazeTarget ? 1 : 0;
+    want *= 1 - (this.sleep ?? 0);
+    want *= 1 - (this.shyNow ?? 0);
+    want *= 1 - 0.8 * (this.patAmount ?? 0);
+    let behindK = 1;
+    if (want > 0 && b.leftUpperArm && b.rightUpperArm && b.hips) {
+      // Где «перед» груди: от линии плеч и оси позвоночника.
+      const left = P(b.leftUpperArm).sub(P(b.rightUpperArm)).normalize();
+      const up = P(neck ?? head).sub(P(b.hips)).normalize();
+      const fwd = new THREE.Vector3().crossVectors(left, up).normalize();
+      const dir = this.gazeTarget.clone().sub(P(head)).normalize();
+      const ang = Math.acos(THREE.MathUtils.clamp(dir.dot(fwd), -1, 1));
+      behindK = 1 - THREE.MathUtils.smoothstep(ang, 1.7, 2.35);
+    }
+    want *= behindK;
+    this.aimW = (this.aimW ?? 0) + (want - (this.aimW ?? 0)) * (1 - Math.exp(-(dt || 0.016) * 4));
+    const w = this.aimW;
+    if (w < 0.01) return;
+    const rotateToward = (bone, share, maxA) => {
+      const face = this.faceDir(new THREE.Vector3());
+      const dir = this.gazeTarget.clone().sub(P(head)).normalize();
+      const full = new THREE.Quaternion().setFromUnitVectors(face, dir);
+      // Ограничиваем угол доводки.
+      const angle = 2 * Math.acos(THREE.MathUtils.clamp(Math.abs(full.w), 0, 1));
+      const k = angle > 1e-4 ? Math.min(1, maxA / angle) : 1;
+      const part = new THREE.Quaternion().slerp(full, k * share * w);
+      const parentQ = bone.parent.getWorldQuaternion(new THREE.Quaternion());
+      const boneW = bone.getWorldQuaternion(new THREE.Quaternion());
+      const nw = part.multiply(boneW);
+      bone.quaternion.copy(parentQ.invert().multiply(nw));
+      bone.updateWorldMatrix(false, true);
+    };
+    if (neck) rotateToward(neck, 0.4, 0.5);
+    rotateToward(head, 0.85, 0.75);
   }
 
   // Насколько рука сейчас занята жестом/реакцией (0…1, плавно по огибающей жеста).
