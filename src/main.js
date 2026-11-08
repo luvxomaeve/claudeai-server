@@ -699,15 +699,7 @@ function focusAt(e) {
   step();
 }
 canvas.addEventListener('pointerdown', (e) => {
-  {
-    const now = performance.now();
-    if (now - lastTap.t < 380 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30 && touches.size === 0) {
-      lastTap.t = 0;
-      focusAt(e);
-      return;
-    }
-    lastTap = { t: now, x: e.clientX, y: e.clientY };
-  }
+  // Двойной тап больше не приближает (мешал гладить/тапать её).
   if (!character) return;
   // Открыт список поз — касание по сцене просто закрывает его.
   if (!$('pose-list').hidden && !poseMode) { setPoseListOpen(false); return; }
