@@ -2097,7 +2097,8 @@ export class Character {
 
   // Сидя на полу кладёт руки на колени (плавно, по мере того как садится).
   handsOnKnees(side) {
-    let w = THREE.MathUtils.smoothstep(this.sitS, 0.25, 0.6);
+    // Руки ложатся на колени уже в приседе — не висят «на полпути».
+    let w = THREE.MathUtils.smoothstep(this.sitS, 0.08, 0.38);
     // Руки в выбранной позе (или примагничены) — так и остаются, когда она садится;
     // берём руку только для опоры о пол, когда она сидит боком или лежит.
     if (this.armPreset[side] || this.poseName !== 'stand') {
@@ -2118,9 +2119,12 @@ export class Character {
     const { p2, p3, p4 } = this.sitPhases();
     const kneePos = knee.getWorldPosition(new THREE.Vector3());
     const hipsPos = this.bones.hips.getWorldPosition(new THREE.Vector3());
+    // В приседе предплечья лежат на бёдрах, кисти мягко свисают с колен;
+    // на коленях — ладони на бёдрах, ближе к себе.
+    const squatK = (1 - p2);
     const target = kneePos.clone()
       .lerp(hipsPos, 0.3 * p2)
-      .add(new THREE.Vector3(0, 0.05 * this.scale, 0.03 * this.scale * (1 - p2)));
+      .add(new THREE.Vector3(0, (0.05 + 0.02 * squatK) * this.scale, (0.03 + 0.05 * squatK) * this.scale));
     let pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.4, -0.4));
     // Сидя боком: правая рука опирается о пол сбоку, левая лежит на бедре.
     if (p3 > 0 && side === 'right') {
@@ -2151,9 +2155,10 @@ export class Character {
       const out = side === 'left' ? 1 : -1;
       const behind = new THREE.Vector3(hipsPos.x + out * 0.17 * S, 0.03 * S, hipsPos.z - 0.2 * S);
       target.lerp(behind, c3 * (1 - c4));
+      // Лёжа на спине: одна ладонь мягко на животе, другая рядом с телом, локоть согнут.
       const lying = side === 'left'
-        ? new THREE.Vector3(hipsPos.x + 0.04 * S, hipsPos.y + 0.09 * S, hipsPos.z - 0.16 * S)
-        : new THREE.Vector3(hipsPos.x - 0.24 * S, 0.03 * S, hipsPos.z - 0.05 * S);
+        ? new THREE.Vector3(hipsPos.x + 0.02 * S, hipsPos.y + 0.08 * S, hipsPos.z - 0.1 * S)
+        : new THREE.Vector3(hipsPos.x - 0.21 * S, 0.04 * S, hipsPos.z - 0.17 * S);
       target.lerp(lying, c4);
       // Локти в стороны и к полу (не вверх).
       pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(out * 0.6, -0.3 * c4, -0.2)), c3);
@@ -2163,12 +2168,24 @@ export class Character {
     if (b3 > 0) {
       const S = this.scale;
       const out = side === 'left' ? 1 : -1;
-      const fwd = new THREE.Vector3(hipsPos.x + out * 0.16 * S, 0.04 * S, hipsPos.z + 0.55 * S);
+      // Ладони на полу впереди, локти чуть согнуты (не палками).
+      const fwd = new THREE.Vector3(hipsPos.x + out * 0.15 * S, 0.04 * S, hipsPos.z + 0.44 * S);
       target.lerp(fwd, b3 * (1 - b4));
       const headP = this.bones.head.getWorldPosition(new THREE.Vector3());
       const pillow = new THREE.Vector3(headP.x + out * 0.13 * S, 0.05 * S, headP.z - 0.02 * S);
       target.lerp(pillow, b4);
       pole = pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(out * 0.6, -0.2, -0.2)), b3);
+    }
+    // Руки не застывают: еле заметно «дышат» и чуть смещаются.
+    {
+      const ph = side === 'left' ? 0 : 2.1;
+      const t = this.time;
+      const opp = this.sitPhases();
+      const onFloor = Math.max(opp.p4 * (side === 'right' ? 1 : 0), opp.c3 * (1 - opp.c4), opp.b3 * (1 - opp.b4), opp.p3 * (side === 'right' ? 1 : 0));
+      const k = (1 - 0.8 * onFloor) * this.scale;
+      target.y += Math.sin(t * 1.1 + ph) * 0.008 * k;
+      target.x += Math.sin(t * 0.37 + ph) * 0.012 * k;
+      target.z += Math.sin(t * 0.29 + ph * 1.7) * 0.012 * k;
     }
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);
