@@ -61,6 +61,9 @@
     <button id="cam-face" class="icon-btn" title="Камера к лицу"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="9.2" cy="10.5" r="0.9" fill="currentColor"/><circle cx="14.8" cy="10.5" r="0.9" fill="currentColor"/><path d="M9 14.5c1.6 1.4 4.4 1.4 6 0"/></svg></button>
     <div id="cam-stick2" class="stick zoom" title="Лететь: вверх — вперёд, вниз — назад, вбок — в сторону · два пальца — высота"><b></b></div>
     <button id="cam-view" class="icon-btn" title="Ракурсы"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="12.5" height="10" rx="2.5"/><path d="M15.5 11l5-3v8l-5-3"/></svg></button>
+    <button id="cam-photo" class="icon-btn" title="Фото"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.5-2h5L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+    <button id="cam-pin" class="icon-btn" title="Запомнить ракурс"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><path d="M12 7.5v5M9.5 10h5"/></svg></button>
+    <span id="cam-views"></span>
     <button id="cam-in" class="icon-btn" title="Приблизить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg></button>
     <button id="cam-out" class="icon-btn" title="Отдалить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
     <button id="btn-zoom" class="icon-btn" title="Во весь рост / крупно"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg></button>
@@ -72,6 +75,7 @@
     <div id="pose-bar" hidden>
       <div id="pose-bar-buttons">
         <button id="pose-reset" class="pb-icon" title="Сбросить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v4h4"/></svg></button>
+        <button id="pose-undo" class="pb-icon" title="Отменить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
         <button id="pose-save" class="pb-icon" title="Сохранить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.6.9 5.2-4.6-2.4-4.6 2.4.9-5.2-3.8-3.6 5.2-.8z"/></svg></button>
         <button id="pose-done" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Готово</button>
       </div>
@@ -141,6 +145,11 @@
   </div>
 
   <div id="flash"></div>
+  <div id="photo-view" hidden>
+    <img id="photo-img" alt="Фото">
+    <p>Нажми и держи фото — «Сохранить изображение»</p>
+    <button id="photo-close" class="icon-btn" title="Закрыть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
   <div id="drop-overlay" class="hidden">Отпусти файл: .vrm — новый наряд, .vrma/.fbx — анимация</div>
 
   <script type="module" src="src/main.js"></script>

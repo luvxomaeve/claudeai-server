@@ -418,7 +418,7 @@ async function loadModel(source) {
     frameCamera();
     $('loading').classList.add('done');
     if (firstLoad) {
-      setTimeout(() => say(pick(IDLE_LINES[tier()])), 600);
+      greetOnLoad();
       // По умолчанию — живое ожидание на записях живых людей.
       setTimeout(() => { if (!currentAnim && !currentMocap && !character.loop && !character.dancing) { liveIdle = true; playMocap(nextIdle()); } }, 300);
     } else {
@@ -942,6 +942,91 @@ $('cam-view').addEventListener('click', () => {
   setView(VIEWS[viewIdx]);
 });
 
+// 📸 Фото: прячем интерфейс, снимаем кадр (фон — тот же, что на экране) и показываем,
+// чтобы сохранить долгим нажатием.
+let photoPending = false;
+$('cam-photo').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.body.classList.add('photo');
+  // Фон страницы в кадр не попадает (холст прозрачный) — рисуем его в сцену на время снимка.
+  const bg = getComputedStyle(document.body).backgroundColor;
+  const prev = scene.background;
+  const g = document.createElement('canvas');
+  g.width = 2; g.height = 256;
+  const ctx = g.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  const dark = document.body.classList.contains('dark');
+  grad.addColorStop(0, dark ? '#1b1238' : '#f6dcf1');
+  grad.addColorStop(1, dark ? '#3b2a6b' : '#d8c4ff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(g);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = tex;
+  setTimeout(() => {
+    photoPending = true;
+    setTimeout(() => { scene.background = prev; tex.dispose(); }, 200);
+  }, 120);
+  void bg;
+});
+$('photo-close').addEventListener('click', () => { $('photo-view').hidden = true; });
+
+// 📍 Свои ракурсы: запомнить текущее положение камеры и возвращаться одним тапом (до 4).
+const VIEWS_KEY = 'waifu-cam-views';
+let savedViews = [];
+try { savedViews = JSON.parse(localStorage.getItem(VIEWS_KEY) || '[]'); } catch { savedViews = []; }
+function camState() {
+  return freeCam
+    ? { free: true, pos: camera.position.toArray(), yaw: freeCam.yaw, pitch: freeCam.pitch }
+    : { yaw: camYaw, pitch: camPitch, zoom: camZoom, lift: camLift, full: fullBody };
+}
+function applyCamState(v) {
+  setFaceCam(false);
+  if (v.free) {
+    freeCam = { yaw: v.yaw, pitch: v.pitch };
+    camera.position.fromArray(v.pos);
+    applyFree();
+    return;
+  }
+  exitFreeCam();
+  camYaw = v.yaw; camPitch = v.pitch; camLift = v.lift ?? 0; camZoom = v.zoom;
+  if (v.full !== undefined && v.full !== fullBody) { fullBody = v.full; $('btn-zoom').classList.toggle('off', !fullBody); }
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+}
+function renderViews() {
+  const box = $('cam-views');
+  box.innerHTML = '';
+  savedViews.forEach((v, i) => {
+    const b = document.createElement('button');
+    b.className = 'cam-view-chip';
+    b.textContent = String(i + 1);
+    b.title = 'Тап — ракурс, удержание — удалить';
+    let hold = 0;
+    b.addEventListener('pointerdown', () => {
+      hold = setTimeout(() => {
+        hold = -1;
+        savedViews.splice(i, 1);
+        try { localStorage.setItem(VIEWS_KEY, JSON.stringify(savedViews)); } catch { /* ignore */ }
+        renderViews();
+        showToast('Ракурс удалён');
+      }, 650);
+    });
+    b.addEventListener('pointerup', () => { if (hold !== -1) { clearTimeout(hold); applyCamState(v); showToast(`📍 Ракурс ${i + 1}`); } });
+    b.addEventListener('pointerleave', () => { if (hold > 0) clearTimeout(hold); });
+    box.appendChild(b);
+  });
+}
+$('cam-pin').addEventListener('click', () => {
+  savedViews.push(camState());
+  if (savedViews.length > 4) savedViews.shift();
+  try { localStorage.setItem(VIEWS_KEY, JSON.stringify(savedViews)); } catch { /* ignore */ }
+  renderViews();
+  showToast(`📍 Ракурс ${savedViews.length} запомнен · удержание — удалить`);
+});
+renderViews();
+
 function resetView() {
   exitFreeCam();
   setFaceCam(false);
@@ -1114,6 +1199,7 @@ function addPoseButton(name, def) {
   }
   btn.addEventListener('click', () => {
     if (!character) return;
+    snapPose();
     if (currentAnim) stopAnim();
     if (currentMocap) stopMocap();
     character.dancing = false;
@@ -1192,7 +1278,28 @@ function setPoseMode(on) {
 }
 $('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
 $('pose-done').addEventListener('click', () => setPoseMode(false));
+// ↶ Отмена в режиме позы: снимок до каждого действия (тянешь точку, полосу, выбираешь позу, сброс).
+const undoStack = [];
+function snapPose() {
+  if (!character || !poseMode) return;
+  const snap = { name: character.poseName, touch: character.exportTouchPose() };
+  const last = undoStack[undoStack.length - 1];
+  if (last && JSON.stringify(last) === JSON.stringify(snap)) return;
+  undoStack.push(snap);
+  if (undoStack.length > 40) undoStack.shift();
+}
+$('pose-undo').addEventListener('click', () => {
+  const snap = undoStack.pop();
+  if (!snap || !character) { showToast('Отменять нечего'); return; }
+  const sit = character.sit;
+  character.setPose(snap.name);
+  character.importTouchPose(snap.touch);
+  if (snap.touch?.sit == null) character.sit = sit;
+  setActivePoseButton(snap.name);
+  showToast('↶ Отменено');
+});
 $('pose-reset').addEventListener('click', () => {
+  snapPose();
   character?.clearTouchPose();
   showToast('Поза сброшена');
 });
@@ -1413,6 +1520,7 @@ renderLieToggle();
 let sliderDrag = null;
 sitSlider.addEventListener('pointerdown', (e) => {
   if (!character) return;
+  snapPose();
   e.preventDefault();
   e.stopPropagation();
   sitSlider.setPointerCapture(e.pointerId);
@@ -1552,6 +1660,7 @@ function showLabel(text) {
   labelTimer = setTimeout(() => el.classList.remove('on'), 1200);
 }
 function poseDragStart(e) {
+  snapPose();
   const hit = performance.now() - lastCamMove < 450 ? null : (nearestHandle(e) ?? zoneAt(e, true));
   activeHandle = handleKeyFor(hit);
   snapAnchor = null;
@@ -2303,6 +2412,22 @@ let idleTime = 0;
 
 let saccadeT = 1;
 const saccade = new THREE.Vector3();
+// ---------- Настроение по времени суток и «скучала» ----------
+const VISIT_KEY = 'waifu-last-visit';
+function greetOnLoad() {
+  let last = 0;
+  try { last = Number(localStorage.getItem(VISIT_KEY)) || 0; localStorage.setItem(VISIT_KEY, String(Date.now())); } catch { /* ignore */ }
+  const away = last ? (Date.now() - last) / 3600000 : 0;
+  const h = new Date().getHours();
+  let line;
+  if (away > 24) line = pick(['Я так скучала… где ты был? 🥺', 'Наконец-то! Я ждала тебя ♥', 'Долго тебя не было…']);
+  else if (h >= 5 && h < 11) { line = pick(['Доброе утро~ *зевает*', 'Ммм… утро уже? Привет ♥', 'Утречко~']); character.playMotion('archStretch'); }
+  else if (h >= 22 || h < 5) { line = pick(['Уже поздно… а ты всё со мной? ♥', 'Не спится? Мне тоже~', 'Ночь… так тихо~']); character.sleepy = 1; }
+  else if (h >= 17) line = pick(['Добрый вечер~', 'Как прошёл день?', 'Вечер — моё любимое время ♥']);
+  else line = pick(['Привет! ♥', 'Ты пришёл~', 'О, привет!']);
+  setTimeout(() => say(line, 'happy'), 1200);
+}
+
 // ---------- Сама двигается (только на главном экране) ----------
 // Когда её не трогают, иногда сама плавно исполняет красивые гибкие движения:
 // наклон, прогиб, волна телом, покачивание бёдрами, присесть, на колени и потянуться.
@@ -2417,6 +2542,14 @@ function tick() {
     lookPoint.add(saccade);
     // Взгляд «на меня»: глаза в камеру, голова к тебе.
     if (gazeMode === 'me') lookPoint.copy(camera.position).add(saccade);
+    // Камера близко к лицу — она это чувствует (смущение, улыбка); смущаясь, отводит глаза.
+    {
+      const hp = character.bones.head.getWorldPosition(new THREE.Vector3());
+      const dist = camera.position.distanceTo(hp) / camBase.S;
+      character.camClose = THREE.MathUtils.clamp((1.5 - dist) / 0.6, 0, 1); // ближе ~1 м — «близко»
+      character.loveK = love / LOVE_MAX;
+      if ((character.shyNow ?? 0) > 0.2) lookPoint.add(new THREE.Vector3(0.6 * character.shyNow, -0.25 * character.shyNow, 0));
+    }
     character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * 18));
     // Головой за пальцем следит только когда мы перед ней.
     const facing = Math.max(0, Math.cos(camYaw));
@@ -2460,6 +2593,14 @@ function tick() {
   }
 
   renderer.render(scene, camera);
+  if (photoPending) {
+    photoPending = false;
+    try {
+      $('photo-img').src = canvas.toDataURL('image/png');
+      $('photo-view').hidden = false;
+    } catch { showToast('Не получилось сделать фото'); }
+    document.body.classList.remove('photo');
+  }
 }
 
 resize();

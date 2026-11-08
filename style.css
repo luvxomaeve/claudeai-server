@@ -1243,3 +1243,25 @@ body.posing #poses #pose-list button[data-pose^="saved:"] { display: none; }
 #poses #poses-toggle > span { display: none !important; }
 #poses #poses-toggle svg { width: 20px; height: 20px; }
 body.posing #poses #pose-list:not([hidden]) { right: calc(max(16px, env(safe-area-inset-right, 0px)) + 50px) !important; }
+
+/* Фото. */
+body.photo #hud, body.photo #poses, body.photo #cam-controls, body.photo #sit-slider, body.photo #sit-slider2,
+body.photo #handles, body.photo #bubble, body.photo #hint, body.photo #toast, body.photo #pose-label { visibility: hidden !important; }
+#photo-view {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: rgba(20, 10, 30, 0.82); backdrop-filter: blur(6px);
+  padding: 16px;
+}
+#photo-view[hidden] { display: none; }
+#photo-view img { max-width: 100%; max-height: 78vh; border-radius: 16px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); -webkit-touch-callout: default; }
+#photo-view p { color: #fff; font-size: 13px; font-weight: 700; margin: 0; opacity: 0.85; }
+#photo-close { position: absolute; top: 16px; right: 16px; }
+/* Свои ракурсы — маленькие кружки с номерами. */
+#cam-views { display: flex; gap: 3px; align-items: center; }
+.cam-view-chip {
+  width: 26px; height: 26px; padding: 0; border: none; border-radius: 50%;
+  background: rgba(255, 111, 168, 0.18); color: var(--pink);
+  font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+}
+.cam-view-chip:active { background: var(--pink); color: #fff; }

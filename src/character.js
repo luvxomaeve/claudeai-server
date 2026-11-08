@@ -138,6 +138,12 @@ const TOUCH_MOTIONS = {
     body: (p, s, e) => { p.hipsZ += 0.07 * s * e; p.spineZ -= 0.08 * s * e; p.headZ += 0.05 * s * e; } },
   hug: { dur: 5, both: true, path: [['otherUpperArm', [0, -0.07, 0.06]]],
     body: (p, s, e) => { p.spineX += 0.06 * e; p.headX += 0.1 * e; p.lShoulderZ += 0.1 * e; p.rShoulderZ -= 0.1 * e; } },
+  twirl: { dur: 5, wobble: 0.025, path: [['head', [0.1, 0.0, 0.03]], ['head', [0.11, -0.08, 0.04]]],
+    body: (p, s, e) => { p.headZ += 0.14 * s * e; p.headX += 0.05 * e; p.hipsZ -= 0.04 * s * e; } },
+  behindBack: { dur: 6, both: true, path: [['hips', [0.05, 0.02, -0.14]]],
+    body: (p, s, e, t) => { p.spineX -= 0.08 * e; p.headX += 0.05 * e; p.spineY += Math.sin(t * 1.4) * 0.12 * e; p.hipsZ += Math.sin(t * 1.4) * 0.05 * e; } },
+  knee: { dur: 5.5, path: [['UpperLeg', [0.03, -0.18, 0.11]], ['LowerLeg', [0.02, 0.02, 0.09]]],
+    body: (p, s, e) => { p.hipsRotX += 0.55 * e; p.spineX += 0.15 * e; p.headX -= 0.2 * e; p.headZ += 0.08 * s * e; } },
   archStretch: { dur: 6, both: true, path: [['head', [0.08, 0.12, -0.05]]],
     body: (p, s, e) => { p.spineX -= 0.16 * e; p.headX -= 0.1 * e; p.hipsZ += 0.04 * Math.sin(e * 3) * e; } },
 };
@@ -224,7 +230,7 @@ export class Character {
     this.hipsRestInv = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).invert();
     // Повороты в покое для костей, к которым тянутся руки в жестах.
     this.boneRestInv = new Map();
-    for (const n of ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftUpperLeg', 'rightUpperLeg', 'leftUpperArm', 'rightUpperArm']) {
+    for (const n of ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftUpperArm', 'rightUpperArm']) {
       const node = this.bones[n] ?? vrm.humanoid.getNormalizedBoneNode(n);
       if (node) this.boneRestInv.set(node, node.getWorldQuaternion(new THREE.Quaternion()).invert());
     }
@@ -771,6 +777,25 @@ export class Character {
     // Голова чуть поворачивается за пальцем/курсором.
     const bendHL = 1 - 0.6 * THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
     pose.headY += this.headLook.x * 0.35 * bendHL;
+    // Смущение, когда камера близко к лицу: сначала смотрит в глаза и улыбается,
+    // потом (чем выше симпатия, тем мягче и чаще) отводит взгляд и голову, краснеет — и снова смотрит.
+    {
+      const close = this.camClose ?? 0; // 0..1 — насколько камера близко к лицу
+      this.closeT = close > 0.5 ? (this.closeT ?? 0) + dt : Math.max(0, (this.closeT ?? 0) - dt * 2);
+      const level = this.loveK ?? 0; // 0..1 — уровень симпатии
+      const period = 7 - 2.5 * level;
+      const ph = this.closeT > 2.5 ? ((this.closeT - 2.5) % period) / period : -1;
+      const shy = ph >= 0 && ph < 0.28 ? Math.sin((ph / 0.28) * Math.PI) : 0;
+      this.shyNow = shy;
+      const side = Math.sin(Math.floor((this.closeT - 2.5) / period) * 12.9898) > 0 ? 1 : -1;
+      pose.headY += 0.45 * shy * side;
+      pose.headX += 0.18 * shy;
+      pose.headZ += 0.08 * shy * side;
+      pose.lShoulderZ += 0.06 * shy;
+      pose.rShoulderZ -= 0.06 * shy;
+      // Лёгкая (без закрытых глаз) улыбка и смущение — применяются в updateExpressions.
+      this.closeSmile = this.closeT > 1.2 ? (0.07 + 0.06 * level) * (1 - shy) : 0;
+    }
     // «Смотрит на тебя»: голова, шея и корпус поворачиваются к камере — как человек,
     // который оборачивается через плечо (до ~170°: шея ~95°, корпус ~80°).
     {
@@ -920,7 +945,7 @@ export class Character {
           pose.headY += 0.15 * e * s;
           break;
         default:
-          if (TOUCH_MOTIONS[m.name]) TOUCH_MOTIONS[m.name].body(pose, s, e);
+          if (TOUCH_MOTIONS[m.name]) TOUCH_MOTIONS[m.name].body(pose, s, e, m.t);
           break;
         case 'lieTurn':
           // Лёжа: поднимает голову и поворачивается к тебе, мягко улыбается.
@@ -1094,7 +1119,7 @@ export class Character {
         // Позиция вдоль пути (скользит от первой точки ко второй).
         const prog = THREE.MathUtils.clamp((m.t / m.dur - 0.15) / 0.55, 0, 1);
         const pts = def.path.map(([name, off]) => {
-          const boneName = name === 'UpperLeg' ? `${side}UpperLeg` : name === 'otherUpperArm' ? `${other}UpperArm` : name;
+          const boneName = name === 'UpperLeg' ? `${side}UpperLeg` : name === 'LowerLeg' ? `${side}LowerLeg` : name === 'otherUpperArm' ? `${other}UpperArm` : name;
           const bone = this.bones[boneName] ?? this.vrm.humanoid.getNormalizedBoneNode(boneName);
           if (!bone) return null;
           if (!this.boneRestInv.has(bone)) {
@@ -1109,6 +1134,8 @@ export class Character {
         }).filter(Boolean);
         if (!pts.length) continue;
         const target = pts.length > 1 ? pts[0].clone().lerp(pts[1], THREE.MathUtils.smoothstep(prog, 0, 1)) : pts[0];
+        // Теребит прядь: кисть делает маленькие круги.
+        if (def.wobble) target.add(new THREE.Vector3(0, Math.sin(m.t * 6) * def.wobble * S, Math.cos(m.t * 6) * def.wobble * S));
         const upper = this.bones[`${side}UpperArm`];
         const lower = this.bones[`${side}LowerArm`];
         const hand = this.bones[`${side}Hand`];
@@ -2211,7 +2238,8 @@ export class Character {
     if (this.patAmount > 0.2) this.exprTarget.happy = Math.max(this.exprTarget.happy, this.patAmount);
     // Лицо живее: смотрит на тебя — лёгкая улыбка; спит — спокойное расслабленное лицо.
     if (this.exprHold <= 0) {
-      this.exprTarget.relaxed = Math.max(this.exprTarget.relaxed, (this.sleep ?? 0) * 0.45);
+      this.exprTarget.relaxed = Math.max(this.exprTarget.relaxed, (this.sleep ?? 0) * 0.45, (this.shyNow ?? 0) * 0.22);
+      this.exprTarget.happy = Math.max(this.exprTarget.happy, this.closeSmile ?? 0);
     }
 
     const k = 1 - Math.exp(-dt * 8);
@@ -2225,12 +2253,13 @@ export class Character {
     if (this.blinkTimer <= 0 && this.blinkPhase === 0) this.blinkPhase = 0.001;
     let blink = 0;
     if (this.blinkPhase > 0) {
-      this.blinkPhase += dt / 0.16;
+      this.blinkPhase += dt / (this.sleepy ? 0.28 : 0.16);
       blink = Math.sin(Math.min(this.blinkPhase, 1) * Math.PI);
       if (this.blinkPhase >= 1) {
         this.blinkPhase = 0;
         // Иногда моргает дважды подряд — как живой человек.
-        this.blinkTimer = Math.random() < 0.18 ? 0.12 : 2 + Math.random() * 4;
+        // Ночью сонная — моргает чаще и медленнее.
+        this.blinkTimer = Math.random() < 0.18 ? 0.12 : (2 + Math.random() * 4) * (this.sleepy ? 0.6 : 1);
       }
     }
     const eyesBusy = Math.max(this.exprCurrent.happy, this.exprCurrent.relaxed);
