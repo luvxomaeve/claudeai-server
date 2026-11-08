@@ -1076,6 +1076,7 @@ export class Character {
     this.solveArms(pose, dt);
     // Руки, выставленные пальцем, тянутся к своим точкам.
     this.applyHandTargets();
+    this.applyHandRest(dt);
     this.applySelfTouch();
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
@@ -1109,6 +1110,93 @@ export class Character {
   }
 
   // Кисти касаются своего тела (жесты TOUCH_MOTIONS): IK поверх текущей позы с весом огибающей.
+  // Руки в покое не висят «растопыркой», а лежат на теле: на бёдрах, на талии, сцеплены
+  // перед собой, одна на бедре — другая на талии, за спиной. Место меняется само раз в 9–16 с,
+  // кисти плавно переезжают и чуть скользят. Жесты, позы и магниты имеют приоритет.
+  pickRestSpot() {
+    const spots = ['thighs', 'hips', 'clasp', 'hipThigh', 'thighHip', 'thighs'];
+    let n;
+    do { n = spots[Math.floor(Math.random() * spots.length)]; } while (n === this.restSpot && spots.length > 1);
+    return n;
+  }
+
+  restTargets(spot, t) {
+    const S = this.scale;
+    const b = this.bones;
+    const at = (bone, off, sx) => {
+      if (!bone) return null;
+      const ri = this.boneRestInv.get(bone);
+      const q = bone.getWorldQuaternion(new THREE.Quaternion());
+      if (ri) q.multiply(ri);
+      return bone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(off[0] * sx, off[1], off[2]).multiplyScalar(S).applyQuaternion(q));
+    };
+    const slide = Math.sin(t * 0.5) * 0.025; // кисти чуть скользят
+    const one = (kind, side) => {
+      const sx = side === 'left' ? 1 : -1;
+      const leg = b[`${side}UpperLeg`];
+      switch (kind) {
+        case 'thigh': return at(leg, [0.04, -0.13 + slide, 0.095], sx);
+        case 'hip': return at(b.hips, [0.15, 0.07, 0.03], sx);
+        case 'front': return at(b.hips, [0.025, -0.07, 0.14], sx);
+        case 'back': return at(b.hips, [0.05, 0.0, -0.13], sx);
+        default: return null;
+      }
+    };
+    const map = {
+      thighs: ['thigh', 'thigh'], hips: ['hip', 'hip'], clasp: ['front', 'front'],
+      hipThigh: ['hip', 'thigh'], thighHip: ['thigh', 'hip'], behind: ['back', 'back'],
+    }[spot] ?? ['thigh', 'thigh'];
+    return { left: one(map[0], 'left'), right: one(map[1], 'right') };
+  }
+
+  applyHandRest(dt) {
+    const free = !this.posing && this.poseName === 'stand' && !this.dancing && !this.loop && !this.mixer
+      && this.sitS < 0.15 && Math.abs(this.bodyOffset.hipsRotX) < 0.25;
+    const want = free ? 1 : 0;
+    this.restW = (this.restW ?? 0) + (want - (this.restW ?? 0)) * (1 - Math.exp(-dt * 2));
+    if (this.restW < 0.01) return;
+    this.restTimer = (this.restTimer ?? 0) - dt;
+    if (!this.restSpot || this.restTimer <= 0) {
+      this.prevSpot = this.restSpot ?? 'thighs';
+      this.restSpot = this.pickRestSpot();
+      this.restTimer = 9 + Math.random() * 7;
+      this.restMix = 0;
+    }
+    this.restMix = Math.min(1, (this.restMix ?? 1) + dt / 1.6);
+    const k = this.restMix * this.restMix * (3 - 2 * this.restMix);
+    const a = this.restTargets(this.prevSpot, this.time);
+    const c = this.restTargets(this.restSpot, this.time);
+    for (const side of ['left', 'right']) {
+      if (this.handTargets[side] || this.armPreset[side]) continue;
+      // Жест руками/реакция — рука свободна, покой уступает.
+      if (this.motions.some((m) => TOUCH_MOTIONS[m.name] || ARM_MOTIONS.has(m.name))) continue;
+      const p0 = a[side];
+      const p1 = c[side];
+      if (!p0 || !p1) continue;
+      const target = p0.clone().lerp(p1, k);
+      // Переезд — по дуге, чуть от тела, а не сквозь него.
+      if (k < 1) {
+        const sx = side === 'left' ? 1 : -1;
+        const hq = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
+        target.add(new THREE.Vector3(0.06 * sx, 0.03, 0.06).multiplyScalar(this.scale * Math.sin(Math.PI * k)).applyQuaternion(hq));
+      }
+      const upper = this.bones[`${side}UpperArm`];
+      const lower = this.bones[`${side}LowerArm`];
+      const hand = this.bones[`${side}Hand`];
+      if (!upper || !lower || !hand) continue;
+      const q1 = upper.quaternion.clone();
+      const q2 = lower.quaternion.clone();
+      const sx = side === 'left' ? 1 : -1;
+      const behind = (side === 'left' ? [a, c] : [a, c]) && (this.restSpot === 'behind');
+      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.5, -0.2, behind ? 0.1 : -0.45));
+      this.twoBoneIK(upper, lower, hand, target, pole);
+      const w = this.restW * (1 - (this.patAmount ?? 0) * 0.7);
+      upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
+      lower.quaternion.copy(q2.clone().slerp(lower.quaternion, w));
+      upper.updateWorldMatrix(false, true);
+    }
+  }
+
   applySelfTouch() {
     const active = this.motions.filter((m) => TOUCH_MOTIONS[m.name]);
     if (!active.length) return;
