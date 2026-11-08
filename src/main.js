@@ -971,6 +971,7 @@ function setPoseMode(on) {
   if (on && currentMocap) stopMocap(); // позу выставляем на «живом» скелете, без записи
   // Вкладки разные: дома — обычная живая она (без выставленной позы), во вкладке «Позы» —
   // твоя поза. Поза запоминается при выходе и возвращается, когда снова откроешь «Позы».
+  if (on) stopAuto(true);
   if (character && on !== poseMode) {
     if (!on) {
       poseTabState = { name: character.poseName, touch: character.exportTouchPose() };
@@ -2112,6 +2113,97 @@ let idleTime = 0;
 
 let saccadeT = 1;
 const saccade = new THREE.Vector3();
+// ---------- Сама двигается (только на главном экране) ----------
+// Когда её не трогают, иногда сама плавно исполняет красивые гибкие движения:
+// наклон, прогиб, волна телом, покачивание бёдрами, присесть, на колени и потянуться.
+// Любое касание — плавно возвращается.
+const AUTO_ROUTINES = [
+  { name: 'наклон', keys: [[0, {}], [3, { bend: 1.0 }], [4.2, { bend: 1.05 }], [7.5, {}]] },
+  { name: 'прогиб', keys: [[0, {}], [2.6, { bend: -0.38 }], [3.8, { bend: -0.42 }], [6.5, {}]] },
+  { name: 'волна', keys: [[0, {}], [2, { bend: 0.45 }], [4.2, { bend: -0.3 }], [6.2, { bend: 0.25 }], [8.4, {}]] },
+  { name: 'бёдра', keys: [[0, {}], [1.6, { sway: 1 }], [3.2, { sway: -1 }], [4.8, { sway: 1 }], [6.4, { sway: -0.6 }], [8, {}]] },
+  { name: 'присесть', keys: [[0, {}], [3, { sit: 0.42, bend: 0.25 }], [5, { sit: 0.45, bend: 0.35 }], [8.5, {}]] },
+  { name: 'колени', keys: [[0, {}], [4, { sit: 0.8 }], [5.5, { sit: 0.8, bend: -0.35 }], [7.5, { sit: 0.8, bend: 0.5 }], [9, { sit: 0.8 }], [13, {}]] },
+  { name: 'наклон-бёдра', keys: [[0, {}], [2.5, { bend: 0.6 }], [4, { bend: 0.6, sway: 1 }], [5.5, { bend: 0.6, sway: -1 }], [7, { bend: 0.5 }], [9.5, {}]] },
+];
+let autoMoves = true;
+try { autoMoves = localStorage.getItem('waifu-auto') !== '0'; } catch { /* ignore */ }
+let auto = null; // { keys, t, last }
+let autoIdle = 0;
+let autoCooldown = 6;
+let autoLastName = '';
+const AUTO_VALS = ['bend', 'sway', 'sit'];
+function autoValuesAt(keys, t) {
+  const out = { bend: 0, sway: 0, sit: 0 };
+  let i = 0;
+  while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
+  const [t0, a] = keys[i];
+  const [t1, b] = keys[Math.min(i + 1, keys.length - 1)];
+  const k = t1 > t0 ? THREE.MathUtils.smoothstep(t, t0, t1) : 1;
+  for (const v of AUTO_VALS) out[v] = (a[v] ?? 0) + ((b[v] ?? 0) - (a[v] ?? 0)) * k;
+  return out;
+}
+function applyAuto(v) {
+  const o = character.bodyOffset;
+  const S = character.scale;
+  o.hipsRotX = v.bend;
+  o.spineX = v.bend >= 0 ? v.bend * 0.45 : v.bend * 1.1;
+  o.hipsX = v.sway * 0.08 * S;
+  o.hipsZ = THREE.MathUtils.clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+  o.spineZ = -v.sway * 0.16;
+  character.sit = v.sit;
+  character.sitRate = 0.5;
+}
+// Плавно вернуться из текущего положения (касание или переход во вкладку «Позы»).
+function stopAuto(instant = false) {
+  if (!auto || !character) return;
+  if (instant) { applyAuto({ bend: 0, sway: 0, sit: 0 }); auto = null; return; }
+  const cur = auto.last ?? { bend: 0, sway: 0, sit: 0 };
+  auto = { keys: [[0, cur], [1.2, { sit: cur.sit }]], t: 0, returning: true };
+}
+function updateAuto(dt) {
+  if (!character) return;
+  autoIdle += dt;
+  if (auto) {
+    auto.t += dt;
+    const end = auto.keys[auto.keys.length - 1][0];
+    auto.last = autoValuesAt(auto.keys, Math.min(auto.t, end));
+    if (auto.returning) {
+      // При возврате посадку не трогаем — ей может управлять полоса.
+      const o = character.bodyOffset;
+      const S = character.scale;
+      o.hipsRotX = auto.last.bend;
+      o.spineX = auto.last.bend >= 0 ? auto.last.bend * 0.45 : auto.last.bend * 1.1;
+      o.hipsX = auto.last.sway * 0.06 * S;
+      o.hipsZ = THREE.MathUtils.clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+      o.spineZ = -auto.last.sway * 0.12;
+    } else applyAuto(auto.last);
+    if (auto.t >= end) { auto = null; autoCooldown = 6 + Math.random() * 7; }
+    return;
+  }
+  autoCooldown -= dt;
+  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0
+    && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
+    && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
+    && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
+  if (!calm) return;
+  const choices = AUTO_ROUTINES.filter((r) => r.name !== autoLastName);
+  const r = choices[Math.floor(Math.random() * choices.length)];
+  autoLastName = r.name;
+  auto = { keys: r.keys, t: 0 };
+}
+window.addEventListener('pointerdown', () => { autoIdle = 0; stopAuto(); }, { capture: true, passive: true });
+function renderAutoBtn() {
+  $('btn-auto').textContent = autoMoves ? '🌸 Сама двигается: вкл' : '🌸 Сама двигается: выкл';
+  $('btn-auto').classList.toggle('active', autoMoves);
+}
+$('btn-auto').addEventListener('click', () => {
+  autoMoves = !autoMoves;
+  try { localStorage.setItem('waifu-auto', autoMoves ? '1' : '0'); } catch { /* ignore */ }
+  renderAutoBtn();
+});
+renderAutoBtn();
+
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -2121,6 +2213,7 @@ function tick() {
   updateHandles();
   updateBlob();
   updateLiveIdle();
+  updateAuto(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
