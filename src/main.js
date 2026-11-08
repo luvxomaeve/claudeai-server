@@ -2943,6 +2943,7 @@ function tick() {
     else lookNdc.set(0, 0);
     character.eyesShut = gazeMode === 'closed' ? 1 : 0;
     character.gazeTarget = gazeMode === 'me' ? camera.position : null;
+    character.gazeUp = (character.gazeUp ?? new THREE.Vector3()).set(0, 1, 0).applyQuaternion(camera.quaternion);
     character.headLook.lerp(lookNdc, 1 - Math.exp(-dt * 4));
 
     const patTarget = petting && petting.ticks > 0 ? 1 : 0;

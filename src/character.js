@@ -660,6 +660,17 @@ export class Character {
       if (lying && this.wakeT <= 0) this.lieT = (this.lieT ?? 0) + dt;
       else if (!lying) this.lieT = 0;
       if (this.wakeT > 0) this.lieT = Math.min(this.lieT ?? 0, 3); // разбудили — снова задремлет не сразу
+      // Смотришь ей в лицо в режиме «смотрит на тебя» — не засыпает, смотрит в ответ.
+      let watched = false;
+      if (this.gazeTarget && this.headRestInv) {
+        const hp = this.bones.head.getWorldPosition(new THREE.Vector3());
+        const toCam = this.gazeTarget.clone().sub(hp).normalize();
+        // Камера с лицевой стороны тела (не со спины/затылка).
+        const chestQ = (this.chestNode() ?? this.bones.hips).getWorldQuaternion(new THREE.Quaternion());
+        const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(chestQ.multiply(this.hipsRestInv));
+        watched = toCam.dot(fwd) > 0.2;
+      }
+      if (watched) this.lieT = Math.min(this.lieT, 8);
       const want = lying && this.wakeT <= 0 && this.lieT > 10 ? 1 : 0;
       // Засыпает медленно (веки тяжелеют), просыпается быстрее.
       this.sleep += (want - this.sleep) * (1 - Math.exp(-dt * (want ? 0.7 : 3)));
@@ -907,11 +918,13 @@ export class Character {
       this.gazePitchS = (this.gazePitchS ?? 0) + (pitch - (this.gazePitchS ?? 0)) * k;
       const w = this.gazeW;
       // Сзади оборачивается умеренно (до ~125°), без выворачивания.
-      const total = THREE.MathUtils.clamp(this.gazeYawS, -2.2, 2.2) * w;
-      // В наклоне корпус не скручиваем — поворачивается только голова.
-      const bendK = THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
-      const head = THREE.MathUtils.clamp(total, -1.3 + 0.4 * bendK, 1.3 - 0.4 * bendK);
-      const body = THREE.MathUtils.clamp(total - head, -0.9, 0.9) * (1 - bendK);
+      // Камера сзади — оборачивается только чуть-чуть (голова ~70°, корпус ~25°),
+      // дальше не тянется: никаких выкрученных спин.
+      const total = THREE.MathUtils.clamp(this.gazeYawS, -1.65, 1.65) * w;
+      // В наклоне и на полу корпус не скручиваем — поворачивается только голова.
+      const bendK = Math.max(THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7), THREE.MathUtils.smoothstep(this.sitS, 0.3, 0.8));
+      const head = THREE.MathUtils.clamp(total, -1.2 + 0.3 * bendK, 1.2 - 0.3 * bendK);
+      const body = THREE.MathUtils.clamp(total - head, -0.45, 0.45) * (1 - bendK);
       pose.headY += head;
       pose.spineY += body;
       // Наклонена — поднимает голову к тебе сильнее (угол считается относительно корпуса).
@@ -1402,7 +1415,10 @@ export class Character {
       const fwd = new THREE.Vector3().crossVectors(left, up).normalize();
       const dir = this.gazeTarget.clone().sub(P(head)).normalize();
       const ang = Math.acos(THREE.MathUtils.clamp(dir.dot(fwd), -1, 1));
-      behindK = 1 - THREE.MathUtils.smoothstep(ang, 1.7, 2.35);
+      // Лёжа она может запрокинуть голову и смотреть на тебя «вверх ногами» — предел шире.
+      const ph = this.sitPhases();
+      const lieK = Math.max(ph.c4, ph.p4, ph.b4);
+      behindK = 1 - THREE.MathUtils.smoothstep(ang, 1.45 + 0.6 * lieK, 1.95 + 0.6 * lieK);
     }
     want *= behindK;
     this.aimW = (this.aimW ?? 0) + (want - (this.aimW ?? 0)) * (1 - Math.exp(-(dt || 0.016) * 4));
@@ -1424,6 +1440,24 @@ export class Character {
     };
     if (neck) rotateToward(neck, 0.4, 0.5);
     rotateToward(head, 0.85, 0.75);
+    // Голова ровно по экрану: «верх» лица совпадает с верхом кадра (без завала набок).
+    if (this.gazeUp) {
+      const qh = head.getWorldQuaternion(new THREE.Quaternion()).multiply(this.headRestInv);
+      const face = new THREE.Vector3(0, 0, 1).applyQuaternion(qh);
+      const upNow = new THREE.Vector3(0, 1, 0).applyQuaternion(qh);
+      const upWant = this.gazeUp.clone().addScaledVector(face, -this.gazeUp.dot(face));
+      if (upWant.lengthSq() > 1e-4) {
+        upWant.normalize();
+        upNow.addScaledVector(face, -upNow.dot(face)).normalize();
+        let roll = Math.atan2(new THREE.Vector3().crossVectors(upNow, upWant).dot(face), upNow.dot(upWant));
+        roll = THREE.MathUtils.clamp(roll, -0.6, 0.6) * w * 0.85;
+        const rq = new THREE.Quaternion().setFromAxisAngle(face, roll);
+        const parentQ = head.parent.getWorldQuaternion(new THREE.Quaternion());
+        const nw = rq.multiply(head.getWorldQuaternion(new THREE.Quaternion()));
+        head.quaternion.copy(parentQ.invert().multiply(nw));
+        head.updateWorldMatrix(false, true);
+      }
+    }
   }
 
   // Сдвиг таза пальцем действует в том положении, где его поставили
