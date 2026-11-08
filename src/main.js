@@ -153,7 +153,43 @@ function updateLieMid(dt) {
     .add(character.bones.head.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
   lieMid.lerp(m, 1 - Math.exp(-dt * 3));
 }
+// ---------- Ручная камера (после жестов двумя пальцами / двойного тапа) ----------
+// Точка взгляда T привязана к её тазу (едет вместе с ней, когда садится/ложится),
+// камера — на сфере вокруг T: поворот (camYaw/camPitch) и расстояние. Ничего не «утягивает»
+// кадр к голове — где поставил, там и стоит.
+let manualCam = null; // { off: Vector3, dist }
+const hipsTrack = new THREE.Vector3(0, 0.9, 0);
+let hipsTrackInit = false;
+function updateHipsTrack(dt) {
+  if (!character?.bones.hips) return;
+  const h = character.bones.hips.getWorldPosition(new THREE.Vector3());
+  if (!hipsTrackInit) { hipsTrack.copy(h); hipsTrackInit = true; }
+  hipsTrack.lerp(h, 1 - Math.exp(-dt * 4));
+}
+function enterManualCam() {
+  if (manualCam) return;
+  if (typeof freeCam !== 'undefined' && freeCam) exitFreeCam();
+  if (typeof faceCam !== 'undefined' && faceCam) setFaceCam(false);
+  const T = cameraLookAt.clone();
+  const v = camera.position.clone().sub(T);
+  const dist = v.length();
+  camYaw = Math.atan2(v.x, v.z);
+  camPitch = Math.asin(THREE.MathUtils.clamp(v.y / dist, -1, 1));
+  manualCam = { off: T.sub(hipsTrack), dist };
+  camTween = 1;
+}
+function exitManualCam() { manualCam = null; }
+function manualTarget(out) {
+  const T = hipsTrack.clone().add(manualCam.off);
+  const cp = Math.cos(camPitch);
+  out.look.copy(T);
+  out.pos.set(T.x + Math.sin(camYaw) * manualCam.dist * cp, T.y + Math.sin(camPitch) * manualCam.dist, T.z + Math.cos(camYaw) * manualCam.dist * cp);
+  out.pos.y = Math.max(0.05 * camBase.S, out.pos.y);
+  return out;
+}
+
 function orbitTarget(out) {
+  if (manualCam) return manualTarget(out);
   const d = camBase.dist * camZoom;
   // При приближении смещаем точку взгляда к лицу.
   const headY = (character ? character.headHeight : 1.4) + 0.05 * camBase.S;
@@ -207,6 +243,7 @@ function freeDir(out = new THREE.Vector3()) {
 }
 function enterFreeCam() {
   if (freeCam) return;
+  exitManualCam();
   if (typeof faceCam !== 'undefined' && faceCam) setFaceCam(false);
   const d = cameraLookAt.clone().sub(camera.position).normalize();
   freeCam = { yaw: Math.atan2(d.x, d.z), pitch: Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) };
@@ -249,11 +286,32 @@ function rotateBy(delta, dPitch = 0) {
   }
   if (faceCam) setFaceCam(false); // крутишь сам — слежение за лицом выключается
   camYaw = (camYaw + delta) % (Math.PI * 2);
-  camPitch = THREE.MathUtils.clamp(camPitch + dPitch, -0.6, 1.35);
+  camPitch = THREE.MathUtils.clamp(camPitch + dPitch, manualCam ? -1.2 : -0.6, manualCam ? 1.45 : 1.35);
   applyOrbit();
 }
 
 function zoomBy(factor) {
+  if (!freeCam && touches.size === 2) {
+    enterManualCam();
+    // Приближаем к точке между пальцами (а не к центру экрана).
+    const [a, b] = [...touches.values()];
+    const ndc = new THREE.Vector2(((a.x + b.x) / 2 / window.innerWidth) * 2 - 1, -((a.y + b.y) / 2 / window.innerHeight) * 2 + 1);
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(ndc, camera);
+    const P = ray.ray.at(manualCam.dist, new THREE.Vector3());
+    const T = hipsTrack.clone().add(manualCam.off);
+    const nd = THREE.MathUtils.clamp(manualCam.dist * factor, 0.12 * camBase.S, 6 * camBase.S);
+    const real = nd / manualCam.dist;
+    manualCam.off.addScaledVector(P.sub(T), 1 - real);
+    manualCam.dist = nd;
+    applyOrbit();
+    return;
+  }
+  if (manualCam) {
+    manualCam.dist = THREE.MathUtils.clamp(manualCam.dist * factor, 0.12 * camBase.S, 6 * camBase.S);
+    applyOrbit();
+    return;
+  }
   if (freeCam) {
     camera.position.addScaledVector(freeDir(), (1 - factor) * freeSpeed() * 1.5);
     applyFree();
@@ -268,8 +326,10 @@ let camSitSeen = 0;
 function updateCamera(dt) {
   // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
   updateLieMid(dt);
+  updateHipsTrack(dt);
   updateStick(dt);
   if (freeCam) return; // свободная камера — орбита не вмешивается
+  if (manualCam) { if (camTween >= 1) applyOrbit(); }
   updateFaceCam(dt);
   const lying = character && character.sitS > 0.8;
   const zoomedIn = camZoom < 0.9;
@@ -622,15 +682,21 @@ function focusAt(e) {
   if (!hit) { resetView(); showToast('⌂ Обычный вид'); return; }
   exitFreeCam();
   setFaceCam(false);
-  orbitTarget(camTo);
-  const d = hit.point.clone().sub(camTo.look);
-  camPanH.x += d.x;
-  camPanH.z += d.z;
-  camLift += d.y;
-  camZoom = Math.min(camZoom, 0.45);
-  animateCamera = true;
-  frameCamera();
-  animateCamera = false;
+  enterManualCam();
+  // Плавно: точка взгляда — туда, куда тапнул, и камера ближе.
+  const from = { off: manualCam.off.clone(), dist: manualCam.dist };
+  const to = { off: hit.point.clone().sub(hipsTrack), dist: Math.min(manualCam.dist, 0.7 * camBase.S) };
+  let t0 = performance.now();
+  const step = () => {
+    if (!manualCam) return;
+    const k = Math.min(1, (performance.now() - t0) / 450);
+    const e2 = k * k * (3 - 2 * k);
+    manualCam.off.lerpVectors(from.off, to.off, e2);
+    manualCam.dist = from.dist + (to.dist - from.dist) * e2;
+    applyOrbit();
+    if (k < 1) requestAnimationFrame(step);
+  };
+  step();
 }
 canvas.addEventListener('pointerdown', (e) => {
   {
@@ -774,31 +840,27 @@ canvas.addEventListener('pointermove', (e) => {
     const d = pinchDistance();
     zoomBy(pinchDist / d);
     pinchDist = d;
-    // Два пальца: вести — сдвинуть кадр в любую сторону, повернуть пальцы — повернуть камеру.
+    // Два пальца: щипок — ближе/дальше к тому месту, где пальцы; вести — сдвинуть кадр.
     const [a, b] = [...touches.values()];
     const midX = (a.x + b.x) / 2;
     const midY = (a.y + b.y) / 2;
-    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    const ang = 0;
     if (pinchMidY != null) {
       const dx = midX - pinchMidX;
       const dy = midY - pinchMidY;
-      let dAng = ang - pinchAng;
-      dAng = Math.atan2(Math.sin(dAng), Math.cos(dAng));
-      const dist = camera.position.distanceTo(cameraLookAt);
-      // Кадр едет ровно за пальцами (метров на пиксель на этой дистанции).
-      const k = (2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / window.innerHeight;
-      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
       if (freeCam) {
+        const dist = 1.5;
+        const k = (2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / window.innerHeight;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
         camera.position.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
-        freeCam.yaw -= dAng;
         applyFree();
       } else {
-        camPanH.addScaledVector(new THREE.Vector3(right.x, 0, right.z).normalize(), -dx * k);
-        camLift = THREE.MathUtils.clamp(camLift + dy * k, -1.3, 0.8);
-        if (camPanH.length() > 1.2 * camBase.S) camPanH.setLength(1.2 * camBase.S);
-        if (Math.abs(dAng) < 0.3) camYaw -= dAng;
-        if (faceCam) setFaceCam(false);
+        enterManualCam();
+        const k = (2 * manualCam.dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / window.innerHeight;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+        manualCam.off.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
         applyOrbit();
       }
     }
@@ -909,7 +971,7 @@ holdButton('cam-out', () => zoomBy(1.04));
 // наклонялась, ни садилась и ни ложилась. Крутишь пальцем — слежение выключается.
 let faceCam = false;
 function setFaceCam(on) {
-  if (on) exitFreeCam();
+  if (on) { exitFreeCam(); exitManualCam(); }
   faceCam = on;
   $('cam-face').classList.toggle('active', on);
   if (on) {
@@ -940,6 +1002,7 @@ const VIEWS = [
 let viewIdx = 0;
 function setView(v) {
   exitFreeCam();
+  exitManualCam();
   setFaceCam(false);
   // Ракурс — относительно того, куда она повёрнута телом.
   const f = character ? character.faceDir() : new THREE.Vector3(0, 0, 1);
@@ -1110,6 +1173,7 @@ $('cam-pin').addEventListener('click', () => {
 renderViews();
 
 function resetView() {
+  exitManualCam();
   exitFreeCam();
   setFaceCam(false);
   camLift = 0;
