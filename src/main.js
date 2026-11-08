@@ -2091,6 +2091,56 @@ function pieceName(srcId, cat) {
   const src = PIECE_SOURCES.find((x) => x.id === srcId);
   return src?.names?.[cat] ?? src?.name ?? srcId;
 }
+// ---------- Иногда сама предлагает переодеться ----------
+// Раз в 5–9 минут (когда ты её не трогаешь и шкаф закрыт) предлагает надеть
+// какую-нибудь вещь. «Надень» — надевает, «Не сейчас» — отложит надолго.
+const SUGGEST_LINES = [
+  (n) => `Слушай… может, надену «${n}»? ♥`,
+  (n) => `Хочу примерить «${n}». Можно?~`,
+  (n) => `Мне кажется, «${n}» мне пойдёт… Надеть?`,
+  (n) => `Скучно в одном и том же… «${n}»?`,
+];
+let suggestTimer = 300 + Math.random() * 240;
+let suggestion = null;
+window.__suggestNow = () => { suggestTimer = 0; };
+function updateSuggest(dt) {
+  if (!character || !PIECE_SOURCES.length) return;
+  if (suggestion) return;
+  if (pointerActive || poseMode || !$('wardrobe').classList.contains('hidden')) return;
+  suggestTimer -= dt;
+  if (suggestTimer > 0) return;
+  suggestTimer = 300 + Math.random() * 240;
+  // Случайная вещь, которая сейчас не надета.
+  const opts = [];
+  for (const c of PIECE_CATS) {
+    if (c.id === 'acc') continue;
+    for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && (wear[c.id] ?? 'base') !== src.id) opts.push({ cat: c.id, id: src.id });
+  }
+  if (!opts.length) return;
+  const o = opts[Math.floor(Math.random() * opts.length)];
+  const name = pieceName(o.id, o.cat);
+  suggestion = o;
+  say(pick(SUGGEST_LINES)(name), 'happy');
+  $('suggest').hidden = false;
+  setTimeout(() => { if (suggestion === o) closeSuggest(); }, 15000);
+}
+function closeSuggest() {
+  suggestion = null;
+  $('suggest').hidden = true;
+}
+$('suggest-yes').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const o = suggestion;
+  closeSuggest();
+  if (o) pickPiece(o.cat, o.id);
+});
+$('suggest-no').addEventListener('click', (e) => {
+  e.stopPropagation();
+  closeSuggest();
+  suggestTimer = 600 + Math.random() * 300;
+  say(pick(['Ладно, в другой раз~', 'Хорошо-хорошо…', 'Эх, ну ладно ♥']));
+});
+
 function renderPieces() {
   const box = $('piece-list');
   if (!box) return;
@@ -2709,6 +2759,7 @@ function tick() {
   updateBlob();
   updateLiveIdle();
   updateAuto(dt);
+  updateSuggest(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
