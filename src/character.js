@@ -719,9 +719,17 @@ export class Character {
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
         const hw = Math.tanh(1.8 * Math.sin(t * 0.6)) / Math.tanh(1.8);
         const squatK = p1 * (1 - p2);
-        pose.hipsZ += hw * 0.13 * (1 - lieAll * 0.35) * hipLife;
-        pose.hipsX += hw * 0.035 * squatK * this.scale;
-        pose.hipsRotY += Math.sin(t * 0.42 + 1.1) * 0.1 * (1 - lieAll * 0.4) * hipLife;
+        // На полу (колени, сидя, лёжа) — шире и пластичнее: бёдра плавно переносят вес
+        // из стороны в сторону с поворотом — мягкая «восьмёрка», а не мелкое дрожание.
+        const floorK = p2;
+        const fig = Math.sin(t * 0.6 * 2 + 0.7); // второй такт восьмёрки
+        pose.hipsZ += hw * (0.13 + 0.09 * floorK) * (1 - lieAll * 0.25) * hipLife;
+        pose.hipsX += hw * (0.035 * squatK + 0.045 * floorK * (1 - lieAll)) * this.scale;
+        pose.hipsRotY += (Math.sin(t * 0.6 + 1.3) * 0.08 * floorK + Math.sin(t * 0.42 + 1.1) * 0.1) * (1 - lieAll * 0.3) * hipLife;
+        pose.hipsY += fig * 0.012 * floorK * (1 - lieAll) * this.scale * hipLife;
+        // Корпус уравновешивает — плечи плывут в противофазе, шея держит голову ровно.
+        pose.spineY -= Math.sin(t * 0.6 + 1.3) * 0.05 * floorK * hipLife;
+        pose.headZ += hw * 0.05 * floorK * hipLife;
         // Таз мягко покачивается вперёд-назад — «волна» бёдрами.
         pose.hipsRotX += Math.sin(t * 0.5 + 0.4) * 0.06 * (1 - lieAll * 0.5) * hipLife;
         pose.spineX -= Math.sin(t * 0.5 + 0.4) * 0.04 * (1 - lieAll * 0.5) * hipLife;
