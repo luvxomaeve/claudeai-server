@@ -41,65 +41,65 @@ export { BASE_POSE };
 
 // Позы задаются целиком, ноги и бёдра тоже — так поза выглядит цельной, а не «руки отдельно».
 // Если руки где-то заденут тело, их аккуратно отведёт solveArms().
+// Позы: тело (наклоны, вес на одной ноге, голова) задаётся углами, а кисти — точками на
+// собственном теле (hands: [кость, смещение в осях тела]), к которым руки тянутся IK. Так руки
+// лежат на ней по-настоящему, а не «висят под углом». Смещение x — к боку этой руки.
 export const POSES = {
   stand: { label: 'Стоит' },
   flirty: {
     label: 'Кокетка',
-    // Левая рука на бедре, бедро в сторону, правая нога расслаблена, голова набок.
-    lUpperZ: -0.75, lUpperX: 0.2, lUpperTwist: 0.95, lLowerY: -1.5,
-    rUpperZ: 1.12, rUpperX: -0.05, rLowerY: 0.5,
-    hipsZ: 0.08, hipsX: 0.03, spineZ: -0.1, headZ: 0.16, headY: -0.08,
-    rKneeX: 0.28, rLegX: -0.12, lLegZ: -0.08, rLegZ: -0.08,
+    hands: { left: ['hips', [0.15, 0.07, 0.03]], right: ['head', [0.1, 0.11, -0.03]] },
+    hipsZ: 0.1, hipsX: 0.035, spineZ: -0.12, spineY: 0.08, headZ: 0.18, headY: -0.12,
+    rKneeX: 0.32, rLegX: -0.14, lLegZ: -0.08, rLegZ: -0.06, rFootIn: 0.03,
   },
   hips: {
     label: 'Руки в боки',
-    lUpperZ: -0.75, rUpperZ: 0.75, lUpperX: 0.2, rUpperX: 0.2,
-    lUpperTwist: 0.95, rUpperTwist: 0.95, lLowerY: -1.5, rLowerY: 1.5,
-    hipsZ: -0.04, spineZ: 0.03, headZ: 0.06, headX: -0.04, lKneeX: 0.15, lLegX: -0.06,
-  },
-  crossed: {
-    label: 'Скрестила руки',
-    lUpperZ: -1.0, lUpperX: -0.45, lUpperTwist: 0, lLowerY: -2.2,
-    rUpperZ: 1.0, rUpperX: -0.5, rUpperTwist: 0, rLowerY: 2.45,
-    spineX: -0.03, headX: -0.06, headZ: -0.08, hipsZ: 0.05, lKneeX: 0.2, lLegX: -0.08,
+    hands: { left: ['hips', [0.15, 0.07, 0.03]], right: ['hips', [0.15, 0.07, 0.03]] },
+    hipsZ: -0.05, spineZ: 0.04, spineX: -0.04, headZ: 0.08, headX: -0.05, lKneeX: 0.18, lLegX: -0.07,
   },
   shy: {
     label: 'Скромница',
-    lUpperZ: -0.85, rUpperZ: 0.85, lUpperX: 0.15, rUpperX: 0.15,
-    lUpperTwist: 0.75, rUpperTwist: 0.75, lLowerY: -2.1, rLowerY: 2.1,
-    spineX: 0.06, headX: 0.16, headZ: 0.12,
-    lLegZ: -0.05, rLegZ: 0.05, lKneeX: 0.18, lLegX: -0.08,
+    hands: { left: ['hips', [0.02, -0.08, 0.14]], right: ['hips', [0.02, -0.08, 0.14]] },
+    spineX: 0.08, headX: 0.18, headZ: 0.14, headY: 0.1,
+    lFootIn: 0.04, rFootIn: 0.04, lKneeX: 0.22, rKneeX: 0.1, lLegX: -0.08,
   },
   behind: {
     label: 'Руки за спиной',
     armDir: 1,
     lUpperZ: -0.95, rUpperZ: 0.95, lUpperX: 0.1, rUpperX: 0.1,
     lUpperTwist: 1.3, rUpperTwist: 1.3, lLowerY: -1.6, rLowerY: 1.6,
-    spineX: -0.05, headZ: -0.1, headX: -0.03, rKneeX: 0.2, rLegX: -0.08,
+    spineX: -0.08, headZ: -0.12, headX: -0.05, rKneeX: 0.25, rLegX: -0.1, hipsZ: 0.04,
   },
   think: {
     label: 'Задумалась',
-    lUpperZ: -0.85, lUpperX: 0.15, lUpperTwist: 0.75, lLowerY: -2.1,
-    rUpperZ: 1.0, rUpperX: -0.7, rUpperTwist: 0.5, rLowerY: 2.6,
-    headZ: -0.12, headX: 0.05, spineZ: 0.04, hipsZ: -0.05, lKneeX: 0.18, lLegX: -0.07,
+    hands: { left: ['otherLowerArm', [0.02, -0.02, 0.05]], right: ['head', [0.03, -0.09, 0.07]] },
+    headZ: -0.12, headX: 0.08, headY: -0.08, spineZ: 0.05, hipsZ: -0.06, lKneeX: 0.2, lLegX: -0.08,
   },
   hair: {
     label: 'Поправляет волосы',
-    // Правая рука у виска, левая на талии, голова чуть набок, вес на одной ноге.
-    rUpperZ: 0.1, rUpperX: -0.55, rUpperTwist: 0, rLowerY: 0.2, rLowerZ: -2.4,
-    lUpperZ: -0.75, lUpperX: 0.2, lUpperTwist: 0.95, lLowerY: -1.5,
-    headZ: -0.14, headY: 0.12, hipsZ: 0.05, spineZ: -0.05, rKneeX: 0.2, rLegX: -0.08,
+    hands: { right: ['head', [0.08, 0.13, -0.02]], left: ['hips', [0.15, 0.07, 0.03]] },
+    headZ: -0.16, headY: 0.14, headX: -0.04, hipsZ: 0.07, spineZ: -0.07, spineX: -0.05, rKneeX: 0.25, rLegX: -0.1,
   },
   cheek: {
     label: 'Ладонь у щеки',
-    // Левая ладонь у щеки, правая расслаблена; голова склонена к руке.
-    lUpperZ: -1.1, lUpperX: -0.5, lUpperTwist: 0, lLowerY: -2.3, lLowerZ: 0.2,
-    headZ: 0.16, headX: 0.06, hipsZ: -0.04, spineZ: 0.04, lKneeX: 0.16, lLegX: -0.06,
+    hands: { left: ['head', [0.09, -0.06, 0.04]], right: ['UpperLeg', [0.04, -0.12, 0.095]] },
+    headZ: 0.18, headX: 0.06, hipsZ: -0.05, spineZ: 0.05, lKneeX: 0.2, lLegX: -0.08,
+  },
+  dreamy: {
+    label: 'Мечтательно',
+    hands: { left: ['upperChest', [0.03, -0.02, 0.12]], right: ['upperChest', [0.03, 0.02, 0.12]] },
+    headX: -0.12, headZ: 0.12, spineX: -0.06, hipsZ: 0.05, rKneeX: 0.22, rLegX: -0.08,
+  },
+  hug: {
+    label: 'Обнимает себя',
+    hands: { left: ['otherUpperArm', [0.0, -0.07, 0.06]], right: ['otherUpperArm', [0.0, -0.07, 0.06]] },
+    spineX: 0.06, headX: 0.12, headZ: 0.1, lShoulderZ: 0.1, rShoulderZ: -0.1, lKneeX: 0.2, lFootIn: 0.03, rFootIn: 0.03,
   },
   hello: {
     label: 'Привет',
     lUpperZ: 0.15, lLowerZ: 1.3, lLowerY: 0,
-    headZ: 0.1, spineZ: -0.04, hipsZ: 0.04, rKneeX: 0.15,
+    hands: { right: ['hips', [0.15, 0.07, 0.03]] },
+    headZ: 0.12, spineZ: -0.05, hipsZ: 0.05, rKneeX: 0.18,
     wave: 'left',
   },
 };
@@ -230,7 +230,7 @@ export class Character {
     this.hipsRestInv = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).invert();
     // Повороты в покое для костей, к которым тянутся руки в жестах.
     this.boneRestInv = new Map();
-    for (const n of ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftUpperArm', 'rightUpperArm']) {
+    for (const n of ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm']) {
       const node = this.bones[n] ?? vrm.humanoid.getNormalizedBoneNode(n);
       if (node) this.boneRestInv.set(node, node.getWorldQuaternion(new THREE.Quaternion()).invert());
     }
@@ -311,6 +311,7 @@ export class Character {
     if (!POSES[name] || name === this.poseName) return;
     this.importTouchPose(POSES[name].touch);
     this.posePrev = this.currentBasePose();
+    this.posePrevName = this.poseName;
     this.poseName = name;
     this.poseT = 0;
   }
@@ -1077,6 +1078,7 @@ export class Character {
     // Руки, выставленные пальцем, тянутся к своим точкам.
     this.applyHandTargets();
     this.applyHandRest(dt);
+    this.applyPoseHands(dt);
     this.applySelfTouch();
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
@@ -1191,6 +1193,64 @@ export class Character {
       const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.5, -0.2, behind ? 0.1 : -0.45));
       this.twoBoneIK(upper, lower, hand, target, pole);
       const w = this.restW * (1 - (this.patAmount ?? 0) * 0.7);
+      upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
+      lower.quaternion.copy(q2.clone().slerp(lower.quaternion, w));
+      upper.updateWorldMatrix(false, true);
+    }
+  }
+
+  // Точка на теле: смещение в осях кости (в покое), x — к боку руки side.
+  bodyPoint(name, off, side) {
+    const other = side === 'left' ? 'right' : 'left';
+    const boneName = name === 'UpperLeg' ? `${side}UpperLeg` : name === 'otherUpperArm' ? `${other}UpperArm`
+      : name === 'otherLowerArm' ? `${other}LowerArm` : name;
+    const bone = this.bones[boneName] ?? this.vrm.humanoid.getNormalizedBoneNode(boneName);
+    if (!bone) return null;
+    if (!this.boneRestInv.has(bone)) this.boneRestInv.set(bone, null);
+    const ri = this.boneRestInv.get(bone);
+    const q = bone.getWorldQuaternion(new THREE.Quaternion());
+    if (ri) q.multiply(ri); else q.copy(this.bones.hips.getWorldQuaternion(new THREE.Quaternion())).multiply(this.hipsRestInv);
+    const xo = name.startsWith('other') ? off[0] : off[0] * (side === 'left' ? 1 : -1);
+    return bone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(xo, off[1], off[2]).multiplyScalar(this.scale).applyQuaternion(q));
+  }
+
+  // Кисти позы — к своим точкам на теле, плавно (в такт переходу позы).
+  applyPoseHands(dt) {
+    const def = POSES[this.poseName];
+    const prev = this.posePrevName ? POSES[this.posePrevName] : null;
+    const k = easeInOut(Math.min(this.poseT / 0.8, 1));
+    const seatK = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.3, 0.6);
+    for (const side of ['left', 'right']) {
+      if (this.handTargets[side] || this.armPreset[side]) continue;
+      if (this.motions.some((m) => TOUCH_MOTIONS[m.name] || ARM_MOTIONS.has(m.name))) continue;
+      const spec = def?.hands?.[side];
+      const pspec = prev?.hands?.[side];
+      let w = 0;
+      let target = null;
+      if (spec) {
+        target = this.bodyPoint(spec[0], spec[1], side);
+        w = k;
+        if (pspec && k < 1) {
+          const p0 = this.bodyPoint(pspec[0], pspec[1], side);
+          if (p0 && target) { target = p0.lerp(target, k); w = 1; }
+        }
+      } else if (pspec && k < 1) {
+        target = this.bodyPoint(pspec[0], pspec[1], side);
+        w = 1 - k;
+      }
+      w *= seatK;
+      if (!target || w < 0.01) continue;
+      // Лёгкое «дыхание» кисти — живая, не приклеенная.
+      target.y += Math.sin(this.time * 1.3 + (side === 'left' ? 0 : 1.7)) * 0.006 * this.scale;
+      const upper = this.bones[`${side}UpperArm`];
+      const lower = this.bones[`${side}LowerArm`];
+      const hand = this.bones[`${side}Hand`];
+      if (!upper || !lower || !hand) continue;
+      const q1 = upper.quaternion.clone();
+      const q2 = lower.quaternion.clone();
+      const sx = side === 'left' ? 1 : -1;
+      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.5, -0.25, -0.4));
+      this.twoBoneIK(upper, lower, hand, target, pole);
       upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
       lower.quaternion.copy(q2.clone().slerp(lower.quaternion, w));
       upper.updateWorldMatrix(false, true);

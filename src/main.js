@@ -1158,6 +1158,8 @@ $('btn-hitbox').addEventListener('click', () => {
 // ---------- Позы ----------
 
 const POSE_LINES = {
+  dreamy: 'Ах… о чём это я?~',
+  hug: 'Хочу обнимашки…',
   hair: 'Волосы растрепались~',
   cheek: 'Хи~',
   stand: 'Ну, стою. И?',
@@ -2631,6 +2633,12 @@ function applyAuto(v) {
 // Плавно вернуться из текущего положения (касание или переход во вкладку «Позы»).
 function stopAuto(instant = false) {
   if (!auto || !character) return;
+  if (auto.pose) {
+    // Позу, которую она приняла сама, не сбиваем касанием — дослушает и вернётся сама.
+    if (instant && character.poseName === auto.pose) character.setPose('stand');
+    if (instant) auto = null;
+    return;
+  }
   if (instant) { applyAuto({ bend: 0, sway: 0, sit: 0 }); auto = null; return; }
   const cur = auto.last ?? { bend: 0, sway: 0, sit: 0 };
   auto = { keys: [[0, cur], [1.2, { sit: cur.sit }]], t: 0, returning: true };
@@ -2652,7 +2660,11 @@ function updateAuto(dt) {
       o.hipsZ = THREE.MathUtils.clamp(o.hipsX / S * 1.6, -0.14, 0.14);
       o.spineZ = -auto.last.sway * 0.12;
     } else applyAuto(auto.last);
-    if (auto.t >= end) { auto = null; autoCooldown = 6 + Math.random() * 7; }
+    if (auto.t >= end) {
+      if (auto.pose && character.poseName === auto.pose) character.setPose('stand');
+      auto = null;
+      autoCooldown = 6 + Math.random() * 7;
+    }
     return;
   }
   autoCooldown -= dt;
@@ -2661,6 +2673,15 @@ function updateAuto(dt) {
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
   if (!calm) return;
+  // Иногда вместо движения — красивая поза на несколько секунд.
+  if (Math.random() < 0.4 && character.poseName === 'stand') {
+    const poses = ['flirty', 'hips', 'shy', 'think', 'hair', 'cheek', 'dreamy', 'hug'].filter((n) => n !== autoLastName);
+    const n = poses[Math.floor(Math.random() * poses.length)];
+    autoLastName = n;
+    character.setPose(n);
+    auto = { keys: [[0, {}], [7 + Math.random() * 5, {}]], t: 0, pose: n };
+    return;
+  }
   const choices = AUTO_ROUTINES.filter((r) => r.name !== autoLastName);
   const r = choices[Math.floor(Math.random() * choices.length)];
   autoLastName = r.name;
