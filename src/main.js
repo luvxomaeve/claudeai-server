@@ -1071,7 +1071,13 @@ function setPoseListOpen(open) {
     $('pose-list').querySelector('button.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   }
 }
-$('poses-toggle').addEventListener('click', () => setPoseListOpen($('pose-list').hidden));
+$('poses-toggle').addEventListener('click', () => {
+  if (!poseMode && !Object.keys(savedPoses).length) {
+    showToast('Сохранённых поз пока нет — сохрани ☆ во вкладке ✏️');
+    return;
+  }
+  setPoseListOpen($('pose-list').hidden);
+});
 
 function addPoseButton(name, def) {
   const btn = document.createElement('button');
