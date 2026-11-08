@@ -651,6 +651,9 @@ export class Character {
       if (this.pendingSit != null) { this.sit = this.pendingSit; this.pendingSit = null; }
     }
     this.wakeT = Math.max(0, (this.wakeT ?? 0) - dt);
+    // Пока ведёшь полосу (и пару секунд после) — ножками не болтает.
+    this.slideHold = Math.max(0, (this.slideHold ?? 0) - dt);
+    this.kickOn = (this.kickOn ?? 1) + ((this.slideHold > 0 ? 0 : 1) - (this.kickOn ?? 1)) * (1 - Math.exp(-dt * 2.5));
     // Сон: улеглась (на живот, на спину или на бок) — немного полежит (~10 с) и уснёт.
     // Тормошат — просыпается; гладят и нежно трогают — спит дальше, довольная.
     {
@@ -723,12 +726,13 @@ export class Character {
         // из стороны в сторону с поворотом — мягкая «восьмёрка», а не мелкое дрожание.
         const floorK = p2;
         const fig = Math.sin(t * 0.6 * 2 + 0.7); // второй такт восьмёрки
-        pose.hipsZ += hw * (0.13 + 0.09 * floorK + 0.08 * lieAll) * hipLife;
+        pose.hipsZ += hw * (0.13 + 0.13 * floorK + 0.12 * lieAll) * hipLife;
         pose.hipsX += hw * (0.035 * squatK + 0.045 * floorK * (1 - lieAll)) * this.scale;
-        pose.hipsRotY += (Math.sin(t * 0.6 + 1.3) * (0.08 * floorK + 0.08 * lieAll) + Math.sin(t * 0.42 + 1.1) * 0.1) * hipLife;
-        // Лёжа ёрзает: плечи и голова тоже плавно перекатываются.
-        pose.spineZ += Math.sin(t * 0.6 + 2.0) * 0.08 * lieAll * hipLife;
-        pose.headY += Math.sin(t * 0.5 + 0.4) * 0.15 * lieAll * hipLife;
+        pose.hipsRotY += (Math.sin(t * 0.6 + 1.3) * (0.11 * floorK + 0.12 * lieAll) + Math.sin(t * 0.42 + 1.1) * 0.1) * hipLife;
+        // Сидя и лёжа ёрзает: плечи и голова тоже плавно перекатываются.
+        pose.spineZ += Math.sin(t * 0.6 + 2.0) * (0.06 * floorK + 0.1 * lieAll) * hipLife;
+        pose.headY += Math.sin(t * 0.5 + 0.4) * (0.08 * floorK + 0.2 * lieAll) * hipLife;
+        pose.headZ += Math.sin(t * 0.43 + 1.7) * (0.06 * floorK + 0.08 * lieAll) * hipLife;
         pose.hipsY += fig * 0.012 * floorK * (1 - lieAll) * this.scale * hipLife;
         // Корпус уравновешивает — плечи плывут в противофазе, шея держит голову ровно.
         pose.spineY -= Math.sin(t * 0.6 + 1.3) * 0.05 * floorK * hipLife;
@@ -854,10 +858,15 @@ export class Character {
         // На полу полоса двигает и таз: наклон — таз подаётся вперёд, прогиб — назад,
         // и бёдра перекатываются вбок — она ёрзает по полу всем телом.
         const lieAll2 = Math.max(ph.p4, ph.b4, ph.c4);
-        pose.hipsRotX += bend * (0.3 * (1 - lieAll2) + 0.35 * lieAll2) * lie;
-        pose.hipsZ += bend * 0.25 * lie;
-        pose.hipsRotY -= bend * 0.2 * lie;
-        pose.headZ -= bend * 0.15 * lie;
+        // Лёжа на животе/спине таз почти не наклоняем (иначе ноги задирает и они кривые) —
+        // он перекатывается вбок и поворачивается; на боку и сидя — наклоняется.
+        const flat = Math.max(ph.b4, ph.c4);
+        pose.hipsRotX += bend * (0.3 * (1 - lieAll2) + 0.3 * ph.p4) * (1 - 0.85 * flat) * lie;
+        pose.hipsZ += bend * 0.4 * lie;
+        pose.hipsRotY -= bend * 0.3 * lie;
+        pose.spineZ -= bend * 0.2 * lie;
+        pose.headZ -= bend * 0.3 * lie;
+        pose.headY += bend * 0.15 * lie;
         pose.headX -= bend * 0.2 * lie * (bend >= 0 ? fwdLie : 1);
       }
     }
@@ -1872,7 +1881,7 @@ export class Character {
         // Лёжа на животе болтает ножками: голени по очереди плавно поднимаются
         // (колени остаются на полу), иногда замирает и отдыхает.
         const rest2 = THREE.MathUtils.smoothstep(Math.sin(this.time * 0.11 + 1), -0.3, 0.3);
-        const kick = Math.max(0, Math.sin(this.time * 1.05 + (L ? 0 : Math.PI))) * rest2 * (1 - (this.sleep ?? 0)); // во сне — тихо
+        const kick = Math.max(0, Math.sin(this.time * 1.05 + (L ? 0 : Math.PI))) * rest2 * (1 - (this.sleep ?? 0)) * (this.kickOn ?? 1); // во сне и пока ведёшь полосу — тихо
         (this.kickNow ??= {})[side] = kick * b4;
         const prone = new THREE.Vector3(
           rest.pos.x * 1.1 + (L ? 0.02 : -0.02) * S,

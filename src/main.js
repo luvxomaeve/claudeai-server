@@ -1699,6 +1699,7 @@ sitSlider.addEventListener('pointermove', (e) => {
   character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
+  character.slideHold = 3;
   if (poseMode) {
     // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
@@ -1736,6 +1737,7 @@ sitSlider2.addEventListener('pointermove', (e) => {
   character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
   slider2Drag.y = e.clientY;
   slider2Drag.t = now;
+  character.slideHold = 3;
   sitBy(dv / 0.004);
 });
 for (const ev of ['pointerup', 'pointercancel']) {
