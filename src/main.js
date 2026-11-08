@@ -132,7 +132,7 @@ let camYaw = 0;
 let camLift = 0; // сдвиг кадра вверх/вниз (двумя пальцами)
 let camPitch = 0.05; // наклон камеры: < 0 — снизу, > 0 — сверху
 let camZoom = 1; // < 1 — ближе, > 1 — дальше
-const ZOOM_MIN = 0.1; // можно подлететь почти вплотную к лицу
+const ZOOM_MIN = 0.05; // можно подлететь вплотную к лицу
 const ZOOM_MAX = 3;
 
 // Середина тела лёжа (сглаженная, чтобы камера не дрожала от дыхания).
@@ -825,38 +825,51 @@ function setView(v) {
 $('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
 // 🕹 Шарик-джойстик: держишь и ведёшь — камера плавно облетает её (вбок)
 // и опускается/поднимается (вверх-вниз). Отпустил — стоит на месте.
-const stick = { x: 0, y: 0, on: false };
-const stickEl = $('cam-stick');
-function stickMove(e) {
-  const r = stickEl.getBoundingClientRect();
-  const R = r.width / 2;
-  let dx = e.clientX - (r.left + R);
-  let dy = e.clientY - (r.top + R);
-  const len = Math.hypot(dx, dy);
-  if (len > R) { dx *= R / len; dy *= R / len; }
-  stick.x = dx / R;
-  stick.y = dy / R;
-  stickEl.querySelector('b').style.transform = `translate(${dx}px, ${dy}px)`;
-}
-stickEl.addEventListener('pointerdown', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  stickEl.setPointerCapture(e.pointerId);
-  stick.on = true;
-  stickMove(e);
-});
-stickEl.addEventListener('pointermove', (e) => { if (stick.on) stickMove(e); });
-for (const ev of ['pointerup', 'pointercancel']) {
-  stickEl.addEventListener(ev, () => {
-    stick.on = false; stick.x = 0; stick.y = 0;
-    stickEl.querySelector('b').style.transform = '';
+// Два шарика: 🕹 «облёт» — вбок облететь, вверх/вниз опустить/поднять камеру;
+// 🎯 «ближе» — вверх подлететь вплотную (к лицу), вниз отлететь; вбок — смотреть сверху/снизу.
+function makeStick(el) {
+  const st = { x: 0, y: 0, on: false, el };
+  const move = (e) => {
+    const r = el.getBoundingClientRect();
+    const R = r.width / 2;
+    let dx = e.clientX - (r.left + R);
+    let dy = e.clientY - (r.top + R);
+    const len = Math.hypot(dx, dy);
+    if (len > R) { dx *= R / len; dy *= R / len; }
+    st.x = dx / R;
+    st.y = dy / R;
+    el.querySelector('b').style.transform = `translate(${dx}px, ${dy}px)`;
+  };
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.setPointerCapture(e.pointerId);
+    st.on = true;
+    move(e);
   });
+  el.addEventListener('pointermove', (e) => { if (st.on) move(e); });
+  for (const ev of ['pointerup', 'pointercancel']) {
+    el.addEventListener(ev, () => { st.on = false; st.x = 0; st.y = 0; el.querySelector('b').style.transform = ''; });
+  }
+  return st;
 }
+const stick = makeStick($('cam-stick'));
+const stick2 = makeStick($('cam-stick2'));
+const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v * Math.abs(v));
 function updateStick(dt) {
-  if (!stick.on || (Math.abs(stick.x) < 0.08 && Math.abs(stick.y) < 0.08)) return;
+  const a = stick.on && (dz(stick.x) || dz(stick.y));
+  const b = stick2.on && (dz(stick2.x) || dz(stick2.y));
+  if (!a && !b) return;
   if (faceCam) setFaceCam(false);
-  camYaw -= stick.x * Math.abs(stick.x) * 1.6 * dt;
-  camLift = THREE.MathUtils.clamp(camLift - stick.y * Math.abs(stick.y) * 1.2 * camBase.S * Math.max(0.35, camZoom) * dt, -1.3, 0.6);
+  if (a) {
+    camYaw -= dz(stick.x) * 1.6 * dt;
+    camLift = THREE.MathUtils.clamp(camLift - dz(stick.y) * 1.2 * camBase.S * Math.max(0.35, camZoom) * dt, -1.3, 0.6);
+  }
+  if (b) {
+    // Вверх — ближе (экспоненциально: у лица медленнее, издалека быстрее).
+    camZoom = THREE.MathUtils.clamp(camZoom * Math.exp(dz(stick2.y) * 1.4 * dt), ZOOM_MIN, ZOOM_MAX);
+    camPitch = THREE.MathUtils.clamp(camPitch - dz(stick2.x) * 1.2 * dt, -1.2, 1.35);
+  }
   applyOrbit();
 }
 // 🎥 внизу: одна кнопка раскрывает маленькую строку камеры (к лицу, ракурс, ±, вид по умолчанию).

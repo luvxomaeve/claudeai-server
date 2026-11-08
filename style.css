@@ -1152,7 +1152,7 @@ body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0p
 }
 
 /* Шарик-джойстик камеры. */
-#cam-stick {
+#cam-stick, #cam-stick2 {
   position: relative;
   width: 40px; height: 40px;
   margin: 0 2px;
@@ -1162,7 +1162,7 @@ body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0p
   touch-action: none;
   cursor: grab;
 }
-#cam-stick b {
+#cam-stick b, #cam-stick2 b {
   position: absolute;
   left: 50%; top: 50%;
   width: 20px; height: 20px;
@@ -1173,3 +1173,11 @@ body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0p
   transition: transform 0.15s ease;
   pointer-events: none;
 }
+
+#cam-stick2 { background: rgba(181, 108, 255, 0.14); box-shadow: inset 0 0 0 1.5px rgba(181, 108, 255, 0.5); }
+#cam-stick2 b { background: #b56cff; box-shadow: 0 2px 6px rgba(181, 108, 255, 0.6); }
+#cam-stick2::before, #cam-stick2::after { content: ''; position: absolute; left: 50%; width: 0; height: 0; margin-left: -3px; border: 3px solid transparent; }
+#cam-stick2::before { top: 2px; border-bottom-color: rgba(181, 108, 255, 0.7); }
+#cam-stick2::after { bottom: 2px; border-top-color: rgba(181, 108, 255, 0.7); }
+/* Строка камеры шире — сдвигаем левее, чтобы влезла. */
+#cam-controls, body.posing #cam-controls, body:not(.posing) #cam-controls { left: max(12px, env(safe-area-inset-left, 0px)) !important; }
