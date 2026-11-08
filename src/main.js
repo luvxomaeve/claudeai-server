@@ -1196,9 +1196,29 @@ const LYING_LINES = {
   lie: ['Ложись рядом~', 'Мне так уютно…', 'Хи, щекотно~', 'Не мешай отдыхать… шучу ♥'],
   sit: ['Посиди со мной~', 'Ой, не тяни так ♥', 'Хи, я тут сижу~', 'Ты такой милый…'],
 };
+const SLEEP_LINES = ['Ммм… ♥', '*сопит*', 'Хи… приятно… zzz', 'Мур… 😴', '…ещё…'];
+const SLEEP_WAKE_LINES = ['Ммм?.. ну что такое… я же сплю 😣', 'Ой… ты меня разбудил…', 'А?.. ты чего тормошишь~', 'Пять минуточек ещё… 😴'];
 function triggerReaction(zone, hit, e) {
   const r = REACTIONS[zone];
   if (!r) return;
+  // Спит: нежное касание — спит дальше и улыбается во сне; тормошишь
+  // (несколько быстрых касаний подряд) — просыпается.
+  if (character.sitS > 1.05 && character.sleep > 0.5) {
+    character.disturb = (character.disturb ?? 0) + (zone === 'spam' ? 2 : 1);
+    if (character.disturb >= 3) {
+      character.disturb = 0;
+      character.wake(6);
+      character.react({ expression: 'relaxed', motion: 'lieTurn', side: hit?.side, strength: 0.8 });
+      say(pick(SLEEP_WAKE_LINES));
+      return;
+    }
+    character.sleepJoy = 1;
+    changeAffection(0.4);
+    floatHeart(e.clientX, e.clientY);
+    const now = performance.now();
+    if (now - lastZoneLineAt > 2500) { lastZoneLineAt = now; say(pick(SLEEP_LINES)); }
+    return;
+  }
   if (character.sitS > 0.6 && zone !== 'spam') {
     const lying = character.sitS > 1.05;
     const asleep = lying && character.sleep > 0.5;
@@ -2228,7 +2248,7 @@ window.__suggestNow = () => { suggestTimer = 0; };
 function updateSuggest(dt) {
   if (!character || !PIECE_SOURCES.length) return;
   if (suggestion) return;
-  if (pointerActive || poseMode || !$('wardrobe').classList.contains('hidden')) return;
+  if (pointerActive || poseMode || character.sleep > 0.3 || !$('wardrobe').classList.contains('hidden')) return;
   suggestTimer -= dt;
   if (suggestTimer > 0) return;
   suggestTimer = 300 + Math.random() * 240;
@@ -2955,7 +2975,8 @@ function tick() {
     idleTime = pointerActive ? 0 : idleTime + dt;
     if (idleTime > 18) {
       idleTime = 0;
-      say(pick(IDLE_LINES[tier()]), tier() === 2 ? 'relaxed' : 'sad');
+      if (character.sleep > 0.3) say(pick(['zzz…', '*тихо сопит*', 'Ммм… 😴']));
+      else say(pick(IDLE_LINES[tier()]), tier() === 2 ? 'relaxed' : 'sad');
     }
   }
 

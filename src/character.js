@@ -651,7 +651,20 @@ export class Character {
       if (this.pendingSit != null) { this.sit = this.pendingSit; this.pendingSit = null; }
     }
     this.wakeT = Math.max(0, (this.wakeT ?? 0) - dt);
-    this.sleep += ((Math.max(this.sitPhases().b4, this.sitPhases().c4) > 0.85 && this.wakeT <= 0 && !this.gazeTarget ? 1 : 0) - this.sleep) * (1 - Math.exp(-dt * (this.wakeT > 0 ? 4 : 1.2)));
+    // Сон: улеглась (на живот, на спину или на бок) — немного полежит (~10 с) и уснёт.
+    // Тормошат — просыпается; гладят и нежно трогают — спит дальше, довольная.
+    {
+      const ph = this.sitPhases();
+      const lying = Math.max(ph.b4, ph.c4, ph.p4) > 0.85;
+      this.disturb = Math.max(0, (this.disturb ?? 0) - dt * 0.6);
+      if (lying && this.wakeT <= 0) this.lieT = (this.lieT ?? 0) + dt;
+      else if (!lying) this.lieT = 0;
+      if (this.wakeT > 0) this.lieT = Math.min(this.lieT ?? 0, 3); // разбудили — снова задремлет не сразу
+      const want = lying && this.wakeT <= 0 && this.lieT > 10 ? 1 : 0;
+      // Засыпает медленно (веки тяжелеют), просыпается быстрее.
+      this.sleep += (want - this.sleep) * (1 - Math.exp(-dt * (want ? 0.7 : 3)));
+      this.sleepJoy = Math.max(0, (this.sleepJoy ?? 0) - dt * 0.25);
+    }
     this.sitDropNow = 0;
     this.sitBackNow = 0;
     this.sitSideNow = 0;
@@ -2705,10 +2718,13 @@ export class Character {
     // Эмоция держится, потом плавно уходит в нейтраль.
     this.exprHold -= dt;
     if (this.exprHold <= 0) for (const e of EXPRESSIONS) this.exprTarget[e] = 0;
-    if (this.patAmount > 0.2) this.exprTarget.happy = Math.max(this.exprTarget.happy, this.patAmount);
+    if (this.patAmount > 0.2) this.exprTarget.happy = Math.max(this.exprTarget.happy, this.patAmount * (1 - 0.6 * (this.sleep ?? 0)));
+    if (this.patAmount > 0.2 && (this.sleep ?? 0) > 0.5) this.sleepJoy = 1;
     // Лицо живее: смотрит на тебя — лёгкая улыбка; спит — спокойное расслабленное лицо.
     if (this.exprHold <= 0) {
       this.exprTarget.relaxed = Math.max(this.exprTarget.relaxed, (this.sleep ?? 0) * 0.45, (this.shyNow ?? 0) * 0.22);
+      // Гладят спящую — улыбается во сне.
+      this.exprTarget.happy = Math.max(this.exprTarget.happy, (this.sleep ?? 0) * Math.max(this.sleepJoy ?? 0, this.patAmount) * 0.35);
       this.exprTarget.happy = Math.max(this.exprTarget.happy, this.closeSmile ?? 0);
     }
 
