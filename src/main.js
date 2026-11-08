@@ -131,6 +131,7 @@ let animateCamera = false;
 const camBase = { dist: 2, cy: 1, S: 1 };
 let camYaw = 0;
 let camLift = 0; // сдвиг кадра вверх/вниз (двумя пальцами)
+const camPanH = new THREE.Vector3(); // сдвиг кадра вбок (двумя пальцами)
 let camPitch = 0.05; // наклон камеры: < 0 — снизу, > 0 — сверху
 let camZoom = 1; // < 1 — ближе, > 1 — дальше
 const ZOOM_MIN = 0.05; // можно подлететь вплотную к лицу
@@ -188,6 +189,8 @@ function orbitTarget(out) {
     }
   }
   lookY += camLift;
+  cx += camPanH.x;
+  cz += camPanH.z;
   out.look.set(cx, lookY, cz);
   const cp = Math.cos(pitch);
   out.pos.set(cx + Math.sin(camYaw) * dd * cp, Math.max(0.06 * camBase.S, lookY + Math.sin(pitch) * dd), cz + Math.cos(camYaw) * dd * cp);
@@ -604,13 +607,41 @@ let stroking = null;
 let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
 let pinchMidY = null;
+let pinchMidX = 0;
+let pinchAng = 0;
 
 function pinchDistance() {
   const [a, b] = [...touches.values()];
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+// Двойной тап: по ней — камера плавно подлетает к этому месту; по фону — обычный вид.
+let lastTap = { t: 0, x: 0, y: 0 };
+function focusAt(e) {
+  const hit = character ? zoneAt(e, true) : null;
+  if (!hit) { resetView(); showToast('⌂ Обычный вид'); return; }
+  exitFreeCam();
+  setFaceCam(false);
+  orbitTarget(camTo);
+  const d = hit.point.clone().sub(camTo.look);
+  camPanH.x += d.x;
+  camPanH.z += d.z;
+  camLift += d.y;
+  camZoom = Math.min(camZoom, 0.45);
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+}
 canvas.addEventListener('pointerdown', (e) => {
+  {
+    const now = performance.now();
+    if (now - lastTap.t < 380 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30 && touches.size === 0) {
+      lastTap.t = 0;
+      focusAt(e);
+      return;
+    }
+    lastTap = { t: now, x: e.clientX, y: e.clientY };
+  }
   if (!character) return;
   // Открыт список поз — касание по сцене просто закрывает его.
   if (!$('pose-list').hidden && !poseMode) { setPoseListOpen(false); return; }
@@ -743,17 +774,37 @@ canvas.addEventListener('pointermove', (e) => {
     const d = pinchDistance();
     zoomBy(pinchDist / d);
     pinchDist = d;
-    // Два пальца вверх/вниз — сдвинуть кадр: смотреть ниже или выше.
+    // Два пальца: вести — сдвинуть кадр в любую сторону, повернуть пальцы — повернуть камеру.
     const [a, b] = [...touches.values()];
+    const midX = (a.x + b.x) / 2;
     const midY = (a.y + b.y) / 2;
-    if (pinchMidY != null && freeCam) {
-      camera.position.y += (midY - pinchMidY) * 0.003 * camBase.S;
-      applyFree();
-    } else if (pinchMidY != null) {
-      camLift = THREE.MathUtils.clamp(camLift + (midY - pinchMidY) * 0.0025 * camBase.S * Math.max(0.3, camZoom), -1.3, 0.6);
-      applyOrbit();
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);
+    if (pinchMidY != null) {
+      const dx = midX - pinchMidX;
+      const dy = midY - pinchMidY;
+      let dAng = ang - pinchAng;
+      dAng = Math.atan2(Math.sin(dAng), Math.cos(dAng));
+      const dist = camera.position.distanceTo(cameraLookAt);
+      // Кадр едет ровно за пальцами (метров на пиксель на этой дистанции).
+      const k = (2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / window.innerHeight;
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      if (freeCam) {
+        camera.position.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
+        freeCam.yaw -= dAng;
+        applyFree();
+      } else {
+        camPanH.addScaledVector(new THREE.Vector3(right.x, 0, right.z).normalize(), -dx * k);
+        camLift = THREE.MathUtils.clamp(camLift + dy * k, -1.3, 0.8);
+        if (camPanH.length() > 1.2 * camBase.S) camPanH.setLength(1.2 * camBase.S);
+        if (Math.abs(dAng) < 0.3) camYaw -= dAng;
+        if (faceCam) setFaceCam(false);
+        applyOrbit();
+      }
     }
+    pinchMidX = midX;
     pinchMidY = midY;
+    pinchAng = ang;
     return;
   }
   if (poseDrag) {
@@ -1008,7 +1059,7 @@ try { savedViews = JSON.parse(localStorage.getItem(VIEWS_KEY) || '[]'); } catch 
 function camState() {
   return freeCam
     ? { free: true, pos: camera.position.toArray(), yaw: freeCam.yaw, pitch: freeCam.pitch }
-    : { yaw: camYaw, pitch: camPitch, zoom: camZoom, lift: camLift, full: fullBody };
+    : { yaw: camYaw, pitch: camPitch, zoom: camZoom, lift: camLift, pan: camPanH.toArray(), full: fullBody };
 }
 function applyCamState(v) {
   setFaceCam(false);
@@ -1020,6 +1071,7 @@ function applyCamState(v) {
   }
   exitFreeCam();
   camYaw = v.yaw; camPitch = v.pitch; camLift = v.lift ?? 0; camZoom = v.zoom;
+  camPanH.fromArray(v.pan ?? [0, 0, 0]);
   if (v.full !== undefined && v.full !== fullBody) { fullBody = v.full; $('btn-zoom').classList.toggle('off', !fullBody); }
   animateCamera = true;
   frameCamera();
@@ -1061,6 +1113,7 @@ function resetView() {
   exitFreeCam();
   setFaceCam(false);
   camLift = 0;
+  camPanH.set(0, 0, 0);
   viewIdx = 0;
   camYaw = 0;
   camPitch = 0.05;
