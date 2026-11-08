@@ -1270,3 +1270,27 @@ body.photo #handles, body.photo #bubble, body.photo #hint, body.photo #toast, bo
 #piece-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
 .piece-row { display: flex; flex-direction: column; gap: 4px; }
 .piece-cat { font-size: 12px; font-weight: 800; color: var(--ink); opacity: 0.7; }
+
+/* Шкаф: вкладки и карточки вещей. */
+.closet-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.closet-tabs::-webkit-scrollbar { display: none; }
+.closet-tab {
+  flex: none; display: flex; align-items: center; gap: 4px;
+  border: none; border-radius: 999px; padding: 7px 11px;
+  background: rgba(255, 111, 168, 0.1); color: var(--ink);
+  font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.closet-tab.active { background: var(--pink); color: #fff; }
+.closet-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px; }
+.closet-item {
+  display: flex; align-items: center; gap: 8px; text-align: left;
+  border: 2px solid transparent; border-radius: 14px; padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.75); color: var(--ink);
+  box-shadow: 0 2px 8px rgba(90, 40, 100, 0.08);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.closet-item.active { border-color: var(--pink); background: rgba(255, 111, 168, 0.12); }
+.closet-item .ci-icon { font-size: 20px; flex: none; }
+.closet-item .ci-name { line-height: 1.2; }
+/* Вкладки шкафа влезают: только иконка у неактивных на узком экране. */
+@media (max-width: 480px) { .closet-tab:not(.active) { font-size: 0; gap: 0; padding: 7px 10px; } .closet-tab span { font-size: 15px; } }

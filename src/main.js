@@ -2022,37 +2022,52 @@ async function pickPiece(cat, id) {
   character?.react({ expression: 'happy', motion: 'sway' });
   if (Math.random() < 0.6) say(pick(['Мне идёт? ♥', 'Хи, примерим~', 'Так лучше?', 'Нравится?']));
 }
+// Гардероб-шкаф: вкладки по частям (верх, низ, обувь, аксессуары, ноги) и карточки вещей с названиями.
+const PIECE_ICONS = { tops: '👚', bottoms: '🩳', shoes: '👠', acc: '🎀', legs: '🧦' };
+const BASE_NAMES = window.WAIFU_BASE_NAMES ?? {};
+let closetTab = 'tops';
+function pieceName(srcId, cat) {
+  if (srcId === 'none') return { shoes: 'Босиком', acc: 'Без аксессуара', bottoms: 'Без низа (платье)' }[cat] ?? 'Без';
+  if (srcId === 'base') return BASE_NAMES[cat] ?? (cat === 'legs' ? 'Свои' : 'Своё');
+  const src = PIECE_SOURCES.find((x) => x.id === srcId);
+  return src?.names?.[cat] ?? src?.name ?? srcId;
+}
 function renderPieces() {
   const box = $('piece-list');
   if (!box) return;
   box.innerHTML = '';
-  if (!PIECE_SOURCES.length) { box.innerHTML = '<p class="panel-note">Наряды по частям появятся, когда добавишь модели.</p>'; return; }
+  if (!PIECE_SOURCES.length) { box.innerHTML = '<p class="panel-note">Пришли наряды (.vrm из VRoid) — вещи появятся здесь.</p>'; return; }
+  const tabs = document.createElement('div');
+  tabs.className = 'closet-tabs';
   for (const c of PIECE_CATS) {
-    const opts = [{ id: 'base', name: c.skin ? 'Свои' : 'Своё' }];
-    for (const src of PIECE_SOURCES) if (src.cats.includes(c.id)) opts.push({ id: src.id, name: src.name });
-    if (c.id === 'shoes') opts.push({ id: 'none', name: 'Босиком' });
-    if (c.id === 'acc') opts.push({ id: 'none', name: 'Без' });
-    if (c.id === 'bottoms' && isDress(wear.tops)) opts.push({ id: 'none', name: 'Без (платье)' });
-    const row = document.createElement('div');
-    row.className = 'piece-row';
-    row.innerHTML = `<span class="piece-cat">${c.name}</span>`;
-    const chips = document.createElement('div');
-    chips.className = 'chips';
-    const cur = wear[c.id] ?? 'base';
-    for (const o of opts) {
-      const b = document.createElement('button');
-      b.className = 'chip' + (o.id === cur ? ' active' : '');
-      b.textContent = o.name;
-      b.addEventListener('click', () => pickPiece(c.id, o.id));
-      chips.appendChild(b);
-    }
-    row.appendChild(chips);
-    box.appendChild(row);
+    const t = document.createElement('button');
+    t.className = 'closet-tab' + (c.id === closetTab ? ' active' : '');
+    t.innerHTML = `<span>${PIECE_ICONS[c.id]}</span>${c.name}`;
+    t.addEventListener('click', () => { closetTab = c.id; renderPieces(); });
+    tabs.appendChild(t);
   }
+  box.appendChild(tabs);
+  const c = PIECE_CATS.find((x) => x.id === closetTab);
+  const opts = ['base'];
+  for (const src of PIECE_SOURCES) if (src.cats.includes(c.id)) opts.push(src.id);
+  if (c.id === 'shoes' || c.id === 'acc') opts.push('none');
+  if (c.id === 'bottoms' && isDress(wear.tops)) opts.push('none');
+  const grid = document.createElement('div');
+  grid.className = 'closet-grid';
+  const cur = wear[c.id] ?? 'base';
+  for (const id of opts) {
+    const b = document.createElement('button');
+    b.className = 'closet-item' + (id === cur ? ' active' : '');
+    b.innerHTML = `<span class="ci-icon">${id === 'none' ? '✕' : PIECE_ICONS[c.id]}</span><span class="ci-name">${pieceName(id, c.id)}</span>`;
+    b.addEventListener('click', () => pickPiece(c.id, id));
+    grid.appendChild(b);
+  }
+  box.appendChild(grid);
 }
 
 function applyLook() {
   if (!character) return;
+  look.stockings = 'off'; // старые нарисованные чулки убраны — чулки берутся из нарядов
   applyClothColor();
   tintMaterials(/HAIR/i, HAIR_COLORS.find((c) => c.id === look.hair)?.color ?? null, 0.6);
   stockings?.apply(look.stockings);
@@ -2171,27 +2186,6 @@ function renderWardrobe() {
     say(pick(['Новый цвет волос! Ну как?', 'Мне идёт?', 'Хе-хе, перекрасилась~']));
   });
 
-  const st = $('stocking-list');
-  st.innerHTML = '';
-  if (stockings && !stockings.available) {
-    st.innerHTML = '<p class="panel-note">У этой модели чулки нарисовать не получится (нужна модель из VRoid).</p>';
-  } else {
-    for (const c of STOCKING_STYLES) {
-      const b = document.createElement('button');
-      b.className = 'chip' + (c.id === look.stockings ? ' active' : '');
-      b.textContent = c.name;
-      b.addEventListener('click', () => {
-        look.stockings = c.id;
-        saveLook();
-        applyLook();
-        renderWardrobe();
-        character?.react({ expression: 'happy', motion: 'sway' });
-        say(c.id === 'off' ? 'Так удобнее~' : pick(['Чулочки — моя слабость ♥', 'Красивые, правда?', 'Хи, нравятся?']));
-      });
-      st.appendChild(b);
-    }
-  }
-
   renderBackgrounds();
 }
 
@@ -2199,7 +2193,7 @@ function renderWardrobe() {
 $('goth-preset').addEventListener('click', () => {
   clothColor = 'black';
   saveLook();
-  Object.assign(look, { hair: 'black', stockings: 'black', dark: true, bg: 'night' });
+  Object.assign(look, { hair: 'black', stockings: 'off', dark: true, bg: 'night' });
   saveLook();
   applyLook();
   renderWardrobe();
