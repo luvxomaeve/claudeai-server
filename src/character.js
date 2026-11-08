@@ -228,6 +228,7 @@ export class Character {
     // Поворот головы в покое — чтобы потом знать, куда смотрит лицо (камера «к лицу»).
     this.headRestInv = this.bones.head.getWorldQuaternion(new THREE.Quaternion()).invert();
     this.hipsRestInv = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).invert();
+    this.rootRestQ = this.bones.hips.getWorldQuaternion(new THREE.Quaternion());
     // Повороты в покое для костей, к которым тянутся руки в жестах.
     this.boneRestInv = new Map();
     for (const n of ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm']) {
@@ -747,8 +748,13 @@ export class Character {
     // (таз наклоняется так же красиво, как стоя); уходит только когда она садится
     // на пол / ложится — там наклон делает спина.
     this.bendW = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.8, 1.0);
+    // Лёжа наклон вперёд почти некуда делать (особенно на животе — в пол):
+    // ослабляем, чтобы спину не складывало пополам и голова не уходила под тело.
+    const phL = this.sitPhases();
+    const fwdLie = 1 - Math.max(0.92 * phL.b4, 0.55 * phL.c4, 0.45 * phL.p4);
     for (const key in this.bodyOffset) {
-      const w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.offK : 1;
+      let w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.offK : 1;
+      if (key === 'spineX' && this.bodyOffset.spineX > 0) w *= fwdLie;
       pose[key] += this.bodyOffset[key] * w;
     }
     // Мягкий предел наклона таза (в приседе/на коленях наклон складывается с посадкой):
@@ -771,10 +777,12 @@ export class Character {
         const ph = this.sitPhases();
         // Сидя на полу / лёжа наклон делает спина — с хорошей амплитудой;
         // немного помогает и таз (кроме «на боку», где он лежит).
-        const k = bend >= 0 ? 1.15 : 1.0 * (1 - 0.4 * ph.b4);
+        const k = bend >= 0 ? 1.15 * fwdLie : 1.0 * (1 - 0.4 * ph.b4);
         pose.spineX += bend * k * lie;
+        // Общий предел изгиба спины лёжа/сидя на полу.
+        pose.spineX = THREE.MathUtils.clamp(pose.spineX, -1.0 - 0.2 * ph.b4, 1.3);
         pose.hipsRotX += bend * 0.3 * lie * (1 - Math.max(ph.p4, ph.b4, ph.c4));
-        pose.headX -= bend * 0.2 * lie;
+        pose.headX -= bend * 0.2 * lie * (bend >= 0 ? fwdLie : 1);
       }
     }
     // Руки висят по гравитации: корпус наклонили вперёд/прогнули назад — плечи
@@ -1122,6 +1130,8 @@ export class Character {
     this.applyHandRest(dt);
     this.applyPoseHands(dt);
     this.applySelfTouch();
+    // Низко к полу — упирается ладонями в пол (а не проводит руки сквозь него).
+    this.applyFloorSupport(dt);
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
     this.applyJointLimits();
@@ -1131,6 +1141,7 @@ export class Character {
       this.plantFeet(pose);
       this.applyHandTargets();
       this.applySelfTouch();
+      this.applyFloorSupport(0);
       this.applyJointLimits();
     }
 
@@ -1239,6 +1250,83 @@ export class Character {
       upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
       lower.quaternion.copy(q2.clone().slerp(lower.quaternion, w));
       upper.updateWorldMatrix(false, true);
+    }
+  }
+
+  // Опора на руки: когда плечо опускается ниже длины руки (наклон в приседе, на коленях,
+  // глубокий наклон стоя), ладонь ложится на пол под плечом и держит её; тело
+  // двигается — локоть мягко сгибается, а ладонь стоит на месте и лишь
+  // плавно «переступает», если ушла далеко. Рука никогда не уходит сквозь пол.
+  applyFloorSupport(dt) {
+    const S = this.scale;
+    const ph = this.sitPhases();
+    this.supW ??= { left: 0, right: 0 };
+    this.plant ??= { left: null, right: null };
+    const hq = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
+    // Куда она смотрит по горизонтали (вперёд по телу).
+    const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, 1);
+    fwd.normalize();
+    const side3 = new THREE.Vector3(1, 0, 0).applyQuaternion(hq);
+    side3.y = 0;
+    if (side3.lengthSq() < 1e-4) side3.set(1, 0, 0);
+    side3.normalize();
+    const palmY = 0.035 * S;
+    for (const side of ['left', 'right']) {
+      const upper = this.bones[`${side}UpperArm`];
+      const lower = this.bones[`${side}LowerArm`];
+      const hand = this.bones[`${side}Hand`];
+      if (!upper || !lower || !hand) continue;
+      const shoulder = upper.getWorldPosition(new THREE.Vector3());
+      const handPos = hand.getWorldPosition(new THREE.Vector3());
+      const len = this.armLength(side) + 0.07 * S; // с кистью
+      // Свои позы рук на полу уже есть: лёжа, сидя на полу, опора сбоку.
+      const own = Math.max(ph.p4, ph.b3, ph.c3, side === 'right' ? ph.p3 : 0);
+      const busy = this.handTargets[side] || this.armPreset[side] ? 1 : this.gestureYield(side);
+      const low = THREE.MathUtils.smoothstep(len * 1.12 - (shoulder.y - palmY), 0, len * 0.3);
+      const want = low * (1 - own) * (1 - busy);
+      if (dt > 0) this.supW[side] += (want - this.supW[side]) * (1 - Math.exp(-dt * 3.5));
+      const w = this.supW[side];
+      const below = handPos.y < palmY * 0.9;
+      if (w < 0.01 && !below) { if (w < 0.01) this.plant[side] = null; continue; }
+      const sx = side === 'left' ? 1 : -1;
+      // Где ладонь стоит удобнее всего: под плечом, чуть впереди и в сторону.
+      const ideal = shoulder.clone()
+        .addScaledVector(fwd, 0.1 * S)
+        .addScaledVector(side3, sx * 0.04 * S);
+      ideal.y = palmY;
+      // Не дальше, чем дотянется рука.
+      const reach = ideal.clone().sub(shoulder);
+      if (reach.length() > len * 0.95) ideal.copy(shoulder).addScaledVector(reach.normalize(), len * 0.95);
+      if (!this.plant[side]) this.plant[side] = handPos.y < palmY * 2 ? handPos.clone().setY(palmY) : ideal.clone();
+      const pl = this.plant[side];
+      // Ладонь стоит; ушла далеко — плавно переставляет.
+      if (dt > 0 && pl.distanceTo(ideal) > 0.1 * S) pl.lerp(ideal, 1 - Math.exp(-dt * 3));
+      const target = handPos.clone().lerp(pl, w);
+      if (target.y < palmY) target.y = palmY;
+      const q1 = upper.quaternion.clone();
+      const q2 = lower.quaternion.clone();
+      // Локоть — назад и чуть в сторону, как у человека, который упирается в пол.
+      const pole = lower.getWorldPosition(new THREE.Vector3())
+        .addScaledVector(side3, sx * 0.3).addScaledVector(fwd, -0.35).add(new THREE.Vector3(0, 0.25, 0));
+      this.twoBoneIK(upper, lower, hand, target, pole);
+      const k = below ? Math.max(w, 1) : w;
+      upper.quaternion.copy(q1.clone().slerp(upper.quaternion, k));
+      lower.quaternion.copy(q2.clone().slerp(lower.quaternion, k));
+      upper.updateWorldMatrix(false, true);
+      // Ладонь — плашмя на полу, пальцы вперёд.
+      if (w > 0.05) {
+        const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -sx * Math.PI / 2);
+        const want = hq.clone();
+        // Только поворот по горизонтали от таза.
+        const yaw = Math.atan2(fwd.x, fwd.z);
+        want.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw).multiply(this.rootRestQ ?? new THREE.Quaternion()).multiply(turn);
+        const parentQ = lower.getWorldQuaternion(new THREE.Quaternion());
+        const local = parentQ.invert().multiply(want);
+        hand.quaternion.slerp(local, Math.min(1, w) * 0.85);
+        hand.updateWorldMatrix(false, true);
+      }
     }
   }
 
@@ -2186,6 +2274,15 @@ export class Character {
       target.y += Math.sin(t * 1.1 + ph) * 0.008 * k;
       target.x += Math.sin(t * 0.37 + ph) * 0.012 * k;
       target.z += Math.sin(t * 0.29 + ph * 1.7) * 0.012 * k;
+    }
+    // Глубоко наклонилась — колени уже выше плеч: ладони на коленях выглядят
+    // выкрученными, руки просто свисают к полу (там их подхватит опора о пол).
+    {
+      const sh = upper.getWorldPosition(new THREE.Vector3());
+      const ph = this.sitPhases();
+      const free = 1 - Math.max(ph.p3 * (side === 'right' ? 1 : 0), ph.p4, ph.b3, ph.c3);
+      w *= 1 - free * THREE.MathUtils.smoothstep(target.y - sh.y, -0.2 * this.scale, -0.04 * this.scale);
+      if (w <= 0.001) return;
     }
     this.twoBoneIK(upper, lower, hand, target, pole);
     upper.quaternion.slerpQuaternions(q1, upper.quaternion.clone(), w);
