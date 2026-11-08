@@ -129,6 +129,7 @@ let animateCamera = false;
 // Орбита камеры вокруг девушки: поворот (yaw) и приближение (zoom).
 const camBase = { dist: 2, cy: 1, S: 1 };
 let camYaw = 0;
+let camLift = 0; // сдвиг кадра вверх/вниз (двумя пальцами)
 let camPitch = 0.05; // наклон камеры: < 0 — снизу, > 0 — сверху
 let camZoom = 1; // < 1 — ближе, > 1 — дальше
 const ZOOM_MIN = 0.1; // можно подлететь почти вплотную к лицу
@@ -185,6 +186,7 @@ function orbitTarget(out) {
       lookY = THREE.MathUtils.lerp(lookY, headTrack.y, k);
     }
   }
+  lookY += camLift;
   out.look.set(cx, lookY, cz);
   const cp = Math.cos(pitch);
   out.pos.set(cx + Math.sin(camYaw) * dd * cp, Math.max(0.06 * camBase.S, lookY + Math.sin(pitch) * dd), cz + Math.cos(camYaw) * dd * cp);
@@ -534,6 +536,7 @@ let orbitDrag = null; // { lastX }
 let stroking = null;
 let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
+let pinchMidY = null;
 
 function pinchDistance() {
   const [a, b] = [...touches.values()];
@@ -666,6 +669,14 @@ canvas.addEventListener('pointermove', (e) => {
     const d = pinchDistance();
     zoomBy(pinchDist / d);
     pinchDist = d;
+    // Два пальца вверх/вниз — сдвинуть кадр: смотреть ниже или выше.
+    const [a, b] = [...touches.values()];
+    const midY = (a.y + b.y) / 2;
+    if (pinchMidY != null) {
+      camLift = THREE.MathUtils.clamp(camLift + (midY - pinchMidY) * 0.0025 * camBase.S * Math.max(0.3, camZoom), -1.3, 0.6);
+      applyOrbit();
+    }
+    pinchMidY = midY;
     return;
   }
   if (poseDrag) {
@@ -729,7 +740,7 @@ function endPointer(e) {
   touches.delete(e.pointerId);
   poseDrag = null;
   bgSwipe = null;
-  if (touches.size < 2) pinchDist = 0;
+  if (touches.size < 2) { pinchDist = 0; pinchMidY = null; }
   orbitDrag = null;
   if (touches.size > 0) return;
   pointerActive = false;
@@ -830,6 +841,7 @@ $('cam-view').addEventListener('click', () => {
 
 function resetView() {
   setFaceCam(false);
+  camLift = 0;
   viewIdx = 0;
   camYaw = 0;
   camPitch = 0.05;
@@ -1027,6 +1039,7 @@ function setPoseMode(on) {
   if (on && currentMocap) stopMocap(); // позу выставляем на «живом» скелете, без записи
   // Вкладки разные: дома — обычная живая она (без выставленной позы), во вкладке «Позы» —
   // твоя поза. Поза запоминается при выходе и возвращается, когда снова откроешь «Позы».
+  if (character) character.posing = on;
   if (on) stopAuto(true);
   if (character && on !== poseMode) {
     if (!on) {

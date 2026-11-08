@@ -120,6 +120,28 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 // Огибающая движения: быстро вошли, подержали, плавно вышли.
+// Нежные жесты руками в ожидании: кисть касается своего тела и плавно скользит.
+// Точки — смещения от кости в осях тела в покое: x — к её левому боку, y — вверх, z — вперёд
+// (для правой руки x зеркалится). body(s, e) — сопровождающее движение корпуса/головы.
+const TOUCH_MOTIONS = {
+  collar: { dur: 5.5, path: [['upperChest', [0.03, 0.0, 0.11]], ['upperChest', [0.07, 0.05, 0.09]]],
+    body: (p, s, e) => { p.spineX -= 0.06 * e; p.headZ += 0.1 * s * e; p.headX += 0.04 * e; } },
+  neck: { dur: 5, path: [['neck', [0.05, 0.03, 0.06]], ['neck', [0.06, 0.07, 0.03]]],
+    body: (p, s, e) => { p.headZ -= 0.16 * s * e; p.spineX -= 0.08 * e; p.hipsZ += 0.04 * s * e; } },
+  lips: { dur: 4, path: [['head', [0.01, 0.03, 0.1]]],
+    body: (p, s, e) => { p.headX += 0.07 * e; p.headZ += 0.06 * s * e; } },
+  hairBack: { dur: 5, path: [['head', [0.08, 0.14, 0.0]], ['head', [0.1, 0.05, -0.05]]],
+    body: (p, s, e) => { p.headZ += 0.12 * s * e; p.headY -= 0.1 * s * e; p.spineX -= 0.05 * e; } },
+  thigh: { dur: 5.5, path: [['UpperLeg', [0.03, -0.04, 0.11]], ['UpperLeg', [0.04, -0.2, 0.1]]],
+    body: (p, s, e) => { p.hipsZ += 0.06 * s * e; p.spineZ -= 0.07 * s * e; p.headX += 0.06 * e; p.headZ -= 0.06 * s * e; } },
+  waistSlide: { dur: 5, path: [['hips', [0.13, 0.13, 0.05]], ['hips', [0.16, 0.0, 0.03]]],
+    body: (p, s, e) => { p.hipsZ += 0.07 * s * e; p.spineZ -= 0.08 * s * e; p.headZ += 0.05 * s * e; } },
+  hug: { dur: 5, both: true, path: [['otherUpperArm', [0, -0.07, 0.06]]],
+    body: (p, s, e) => { p.spineX += 0.06 * e; p.headX += 0.1 * e; p.lShoulderZ += 0.1 * e; p.rShoulderZ -= 0.1 * e; } },
+  archStretch: { dur: 6, both: true, path: [['head', [0.08, 0.12, -0.05]]],
+    body: (p, s, e) => { p.spineX -= 0.16 * e; p.headX -= 0.1 * e; p.hipsZ += 0.04 * Math.sin(e * 3) * e; } },
+};
+
 function envelope(t, dur) {
   const p = t / dur;
   if (p <= 0 || p >= 1) return 0;
@@ -199,6 +221,13 @@ export class Character {
     this.measureBody();
     // Поворот головы в покое — чтобы потом знать, куда смотрит лицо (камера «к лицу»).
     this.headRestInv = this.bones.head.getWorldQuaternion(new THREE.Quaternion()).invert();
+    this.hipsRestInv = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).invert();
+    // Повороты в покое для костей, к которым тянутся руки в жестах.
+    this.boneRestInv = new Map();
+    for (const n of ['hips', 'spine', 'chest', 'upperChest', 'neck', 'head', 'leftUpperLeg', 'rightUpperLeg', 'leftUpperArm', 'rightUpperArm']) {
+      const node = this.bones[n] ?? vrm.humanoid.getNormalizedBoneNode(n);
+      if (node) this.boneRestInv.set(node, node.getWorldQuaternion(new THREE.Quaternion()).invert());
+    }
     this.initIK();
     this.handTargets = { left: null, right: null }; // позы «пальцем»: цель кисти в системе груди
     this.headOffset = { x: 0, y: 0 };
@@ -257,7 +286,7 @@ export class Character {
       squirm: 1.3, shyLegs: 1.8, sigh: 2.6, clasp: 4.5, handOnHip: 4.5, nails: 3.4,
     };
     this.motions = this.motions.filter((m) => m.name !== name);
-    this.motions.push({ name, side, t: 0, dur: durations[name] ?? 1.5 });
+    this.motions.push({ name, side, t: 0, dur: TOUCH_MOTIONS[name]?.dur ?? durations[name] ?? 1.5 });
   }
 
   // Поза из редактора: применяется сразу, без плавного перехода.
@@ -886,6 +915,9 @@ export class Character {
           pose.headX += 0.18 * e;
           pose.headY += 0.15 * e * s;
           break;
+        default:
+          if (TOUCH_MOTIONS[m.name]) TOUCH_MOTIONS[m.name].body(pose, s, e);
+          break;
         case 'lieTurn':
           // Лёжа: поднимает голову и поворачивается к тебе, мягко улыбается.
           pose.headY += 0.5 * e * (this.lieStyle === 'belly' ? 1 : 0.4);
@@ -917,6 +949,21 @@ export class Character {
           'shift', 'lookAround', 'tiltHead', 'sigh',
           'touchHair', 'clasp', 'handOnHip', 'nails', 'stretch',
         ]));
+      }
+    }
+
+    // Нежные жесты руками по своему телу — раз в 7–13 с, когда она просто стоит.
+    this.touchTimer = (this.touchTimer ?? 6) - dt;
+    if (this.touchTimer <= 0) {
+      this.touchTimer = 7 + Math.random() * 6;
+      const free = !this.posing && this.poseName === 'stand' && this.sitS < 0.15 && !this.dancing && !this.loop
+        && !this.mixer && this.patAmount < 0.1 && !this.motions.some((m) => TOUCH_MOTIONS[m.name] || ARM_MOTIONS.has(m.name))
+        && !this.handTargets.left && !this.handTargets.right && !this.armPreset.left && !this.armPreset.right
+        && Math.abs(this.bodyOffset.hipsRotX) < 0.1;
+      if (free) {
+        const names = Object.keys(TOUCH_MOTIONS).filter((n) => n !== this.lastTouch);
+        this.lastTouch = pick(names);
+        this.playMotion(this.lastTouch);
       }
     }
 
@@ -988,6 +1035,7 @@ export class Character {
     this.solveArms(pose, dt);
     // Руки, выставленные пальцем, тянутся к своим точкам.
     this.applyHandTargets();
+    this.applySelfTouch();
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
     this.applyJointLimits();
@@ -996,6 +1044,7 @@ export class Character {
     if (this.floorPush()) {
       this.plantFeet(pose);
       this.applyHandTargets();
+      this.applySelfTouch();
       this.applyJointLimits();
     }
 
@@ -1016,6 +1065,59 @@ export class Character {
     this.vrm.scene.updateMatrixWorld(true);
     this.updateZones();
     this.measureGaze();
+  }
+
+  // Кисти касаются своего тела (жесты TOUCH_MOTIONS): IK поверх текущей позы с весом огибающей.
+  applySelfTouch() {
+    const active = this.motions.filter((m) => TOUCH_MOTIONS[m.name]);
+    if (!active.length) return;
+    this.boneRestInv ??= new Map();
+    const restInv = (bone) => {
+      if (!this.boneRestInv.has(bone)) return null;
+      return this.boneRestInv.get(bone);
+    };
+    const S = this.scale;
+    const bq = new THREE.Quaternion();
+    for (const m of active) {
+      const def = TOUCH_MOTIONS[m.name];
+      const e = envelope(m.t, m.dur);
+      if (e <= 0) continue;
+      const sides = def.both ? ['left', 'right'] : [m.side];
+      for (const side of sides) {
+        if (this.handTargets[side] || this.armPreset[side]) continue;
+        const sx = side === 'left' ? 1 : -1;
+        const other = side === 'left' ? 'right' : 'left';
+        // Позиция вдоль пути (скользит от первой точки ко второй).
+        const prog = THREE.MathUtils.clamp((m.t / m.dur - 0.15) / 0.55, 0, 1);
+        const pts = def.path.map(([name, off]) => {
+          const boneName = name === 'UpperLeg' ? `${side}UpperLeg` : name === 'otherUpperArm' ? `${other}UpperArm` : name;
+          const bone = this.bones[boneName] ?? this.vrm.humanoid.getNormalizedBoneNode(boneName);
+          if (!bone) return null;
+          if (!this.boneRestInv.has(bone)) {
+            // Поворот кости в покое неизвестен до первого раза — берём от таза (тело почти прямое).
+            this.boneRestInv.set(bone, this.headRestInv && bone === this.bones.head ? this.headRestInv : null);
+          }
+          const ri = restInv(bone);
+          if (ri) bq.copy(bone.getWorldQuaternion(new THREE.Quaternion())).multiply(ri);
+          else bq.copy(this.bones.hips.getWorldQuaternion(new THREE.Quaternion())).multiply(this.hipsRestInv);
+          const xo = name === 'otherUpperArm' ? off[0] : off[0] * sx;
+          return bone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(xo, off[1], off[2]).multiplyScalar(S).applyQuaternion(bq));
+        }).filter(Boolean);
+        if (!pts.length) continue;
+        const target = pts.length > 1 ? pts[0].clone().lerp(pts[1], THREE.MathUtils.smoothstep(prog, 0, 1)) : pts[0];
+        const upper = this.bones[`${side}UpperArm`];
+        const lower = this.bones[`${side}LowerArm`];
+        const hand = this.bones[`${side}Hand`];
+        if (!upper || !lower || !hand) continue;
+        const q1 = upper.quaternion.clone();
+        const q2 = lower.quaternion.clone();
+        const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.35, -0.45, -0.25));
+        this.twoBoneIK(upper, lower, hand, target, pole);
+        upper.quaternion.copy(q1.clone().slerp(upper.quaternion, e));
+        lower.quaternion.copy(q2.clone().slerp(lower.quaternion, e));
+        upper.updateWorldMatrix(false, true);
+      }
+    }
   }
 
   // Куда смотрит лицо (единичный вектор в мире).
