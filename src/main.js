@@ -25,7 +25,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20);
+const camera = new THREE.PerspectiveCamera(32, 1, 0.02, 20);
 const cameraLookAt = new THREE.Vector3(0, 1, 0);
 
 // Свет как в студии: основной (с мягкой тенью на пол) + розоватый контровой
@@ -131,7 +131,7 @@ const camBase = { dist: 2, cy: 1, S: 1 };
 let camYaw = 0;
 let camPitch = 0.05; // наклон камеры: < 0 — снизу, > 0 — сверху
 let camZoom = 1; // < 1 — ближе, > 1 — дальше
-const ZOOM_MIN = 0.35;
+const ZOOM_MIN = 0.1; // можно подлететь почти вплотную к лицу
 const ZOOM_MAX = 3;
 
 // Середина тела лёжа (сглаженная, чтобы камера не дрожала от дыхания).
@@ -773,8 +773,8 @@ function setFaceCam(on) {
   faceCam = on;
   $('cam-face').classList.toggle('active', on);
   if (on) {
-    camZoom = Math.min(camZoom, 0.6);
-    showToast('🙂 Камера у её лица');
+    camZoom = Math.min(camZoom, 0.28);
+    showToast('🙂 Близко к лицу · щипок — ещё ближе');
   }
 }
 function wrapAngle(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
@@ -782,7 +782,8 @@ function updateFaceCam(dt) {
   if (!faceCam || !character) return;
   const f = character.faceDir();
   const yaw = Math.atan2(f.x, f.z);
-  const pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(f.y, -1, 1)) + 0.08, -0.6, 1.35);
+  // Лицо смотрит вниз (наклон) — камера опускается под лицо, к самому полу.
+  const pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(f.y, -1, 1)) + 0.08, -1.35, 1.35);
   const k = 1 - Math.exp(-dt * 3);
   camYaw += wrapAngle(yaw - camYaw) * k;
   camPitch += (pitch - camPitch) * k;
@@ -810,6 +811,18 @@ function setView(v) {
   showToast(`🎥 ${v.name}`);
 }
 $('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
+// 🎥 внизу: одна кнопка раскрывает маленькую строку камеры (к лицу, ракурс, ±, вид по умолчанию).
+$('btn-cam').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('cam-controls').hidden = !$('cam-controls').hidden;
+  $('btn-cam').classList.toggle('active', !$('cam-controls').hidden);
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!$('cam-controls').hidden && !e.target.closest('#cam-controls, #btn-cam, #scene')) {
+    $('cam-controls').hidden = true;
+    $('btn-cam').classList.remove('active');
+  }
+});
 $('cam-view').addEventListener('click', () => {
   viewIdx = (viewIdx + 1) % VIEWS.length;
   setView(VIEWS[viewIdx]);
@@ -1038,12 +1051,11 @@ function setPoseMode(on) {
   $('btn-handles').hidden = !on;
   $('pose-bar').hidden = !on;
   document.body.classList.toggle('posing', on);
-  $('cam-controls').hidden = false;
   closePoseSaveForm();
   setPoseListOpen(false);
   if (on) {
     // Позируем во весь рост — видно и руки, и ноги.
-    if (!fullBody) setFullBody(true);
+    if (!fullBody && !faceCam) setFullBody(true);
     $('hint').style.opacity = 0;
     hintOnce('pose', 'Тяни за точки · по фону — камера');
   }
@@ -1531,7 +1543,6 @@ function setCameraMode(on) {
   if (on && poseMode) setPoseMode(false);
   cameraMode = on;
   $('btn-camera').classList.toggle('active', on);
-  $('cam-controls').hidden = false;
   canvas.classList.toggle('camera', on);
   petting = null;
   stroking = null;

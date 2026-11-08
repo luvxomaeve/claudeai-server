@@ -1126,3 +1126,27 @@ body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0p
 }
 #love-max { background: var(--pink) !important; color: #fff !important; }
 #hud { z-index: 9; }
+
+/* Камера: одна кнопка 🎥 внизу; по нажатию — маленькая строка над нижней панелью. */
+#poses #btn-cam {
+  position: fixed;
+  bottom: 16px;
+  width: 44px; height: 44px; padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  left: calc(max(16px, env(safe-area-inset-left, 0px)) + 104px);
+}
+#poses #btn-cam.active { background: var(--pink); color: #fff; border-color: transparent; }
+#poses #btn-gaze { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 156px) !important; }
+#poses #btn-handles { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 208px) !important; }
+#cam-controls #btn-zoom { display: none !important; }
+#cam-controls, body.posing #cam-controls, body:not(.posing) #cam-controls {
+  top: auto !important;
+  transform: none !important;
+  right: auto !important;
+  left: calc(max(16px, env(safe-area-inset-left, 0px)) + 80px) !important;
+  bottom: 68px !important;
+  flex-direction: row !important;
+  z-index: 8;
+}
