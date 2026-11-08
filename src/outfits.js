@@ -129,6 +129,26 @@ export class PieceWardrobe {
     }
   }
 
+  // Перекрасить вещь (цвет умножается на текстуру; null — оригинал).
+  tint(cat, srcId, hex) {
+    const src = srcId === 'base' ? this.base : this.sources.get(srcId);
+    for (const mesh of src?.pieces[cat] ?? []) {
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        if (!m?.color) continue;
+        m.userData.origColor ??= m.color.clone();
+        if (m.shadeColorFactor) m.userData.origShade ??= m.shadeColorFactor.clone();
+        if (hex == null) {
+          m.color.copy(m.userData.origColor);
+          if (m.shadeColorFactor) m.shadeColorFactor.copy(m.userData.origShade);
+        } else {
+          const c = new THREE.Color(hex);
+          m.color.copy(c);
+          if (m.shadeColorFactor) m.shadeColorFactor.copy(c).multiplyScalar(0.6);
+        }
+      }
+    }
+  }
+
   dispose() {
     for (const [, s] of this.sources) {
       this.scene.remove(s.vrm.scene);

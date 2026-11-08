@@ -1900,7 +1900,8 @@ let clothColor = 'original'; // хранится в образе модели (�
 // Перекрашивает материалы одежды (в моделях VRoid в их имени есть «CLOTH»).
 function applyClothColor() {
   if (!character) return;
-  const def = CLOTH_COLORS.find((c) => c.id === clothColor) ?? CLOTH_COLORS[0];
+  // Общая перекраска одежды убрана — цвет теперь у каждой вещи свой (повторный тап в шкафу).
+  const def = CLOTH_COLORS[0];
   character.vrm.scene.traverse((o) => {
     if (!o.isMesh) return;
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -1996,10 +1997,38 @@ function applyWear() {
     stockings?.setBase(map);
     stockings?.apply(look.stockings);
   });
+  // Цвет каждой надетой вещи.
+  for (const c of PIECE_CATS) {
+    if (c.skin) continue;
+    const t = TINTS[wearTint[`${c.id}:${w[c.id]}`] ?? 0];
+    pieceWardrobe.tint(c.id, w[c.id], t.hex);
+  }
 }
 function preloadWornSources() {
   const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
   for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
+}
+// Цвета вещей: тап по уже надетой вещи — следующий цвет.
+const TINTS = [
+  { name: 'Оригинал', hex: null },
+  { name: 'Чёрный', hex: 0x2b2530 },
+  { name: 'Бордо', hex: 0x7a2238 },
+  { name: 'Алый', hex: 0xc8283c },
+  { name: 'Роза', hex: 0xf2a7c3 },
+  { name: 'Фиалка', hex: 0x6b45a0 },
+  { name: 'Небо', hex: 0x8fc4ee },
+  { name: 'Мята', hex: 0x9fdcc4 },
+];
+const TINT_KEY = 'waifu-wear-tint';
+let wearTint = {};
+try { wearTint = JSON.parse(localStorage.getItem(TINT_KEY) || '{}'); } catch { wearTint = {}; }
+function cycleTint(cat, id) {
+  const key = `${cat}:${id}`;
+  wearTint[key] = ((wearTint[key] ?? 0) + 1) % TINTS.length;
+  try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
+  applyWear();
+  renderPieces();
+  showToast(`🎨 ${TINTS[wearTint[key]].name}`);
 }
 const isDress = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.dress;
 async function pickPiece(cat, id) {
@@ -2059,10 +2088,24 @@ function renderPieces() {
     const b = document.createElement('button');
     b.className = 'closet-item' + (id === cur ? ' active' : '');
     b.innerHTML = `<span class="ci-icon">${id === 'none' ? '✕' : PIECE_ICONS[c.id]}</span><span class="ci-name">${pieceName(id, c.id)}</span>`;
-    b.addEventListener('click', () => pickPiece(c.id, id));
+    const tint = TINTS[wearTint[`${c.id}:${id}`] ?? 0];
+    if (id !== 'none' && !c.skin) {
+      const dot = document.createElement('span');
+      dot.className = 'ci-tint';
+      dot.style.background = tint.hex == null ? 'conic-gradient(#f2a7c3, #8fc4ee, #9fdcc4, #c8283c, #f2a7c3)' : `#${tint.hex.toString(16).padStart(6, '0')}`;
+      b.appendChild(dot);
+    }
+    // Тап по надетой вещи — сменить её цвет.
+    b.addEventListener('click', () => (id === cur && id !== 'none' && !c.skin ? cycleTint(c.id, id) : pickPiece(c.id, id)));
     grid.appendChild(b);
   }
   box.appendChild(grid);
+  if (!c.skin) {
+    const hint = document.createElement('p');
+    hint.className = 'panel-note';
+    hint.textContent = 'Тапни надетую вещь ещё раз — сменится цвет 🎨';
+    box.appendChild(hint);
+  }
 }
 
 function applyLook() {

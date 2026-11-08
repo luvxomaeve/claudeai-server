@@ -1294,3 +1294,6 @@ body.photo #handles, body.photo #bubble, body.photo #hint, body.photo #toast, bo
 .closet-item .ci-name { line-height: 1.2; }
 /* Вкладки шкафа влезают: только иконка у неактивных на узком экране. */
 @media (max-width: 480px) { .closet-tab:not(.active) { font-size: 0; gap: 0; padding: 7px 10px; } .closet-tab span { font-size: 15px; } }
+
+.closet-item { position: relative; }
+.ci-tint { position: absolute; right: 8px; top: 8px; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px #fff, 0 1px 3px rgba(0,0,0,.25); }
