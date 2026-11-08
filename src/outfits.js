@@ -85,13 +85,86 @@ export class PieceWardrobe {
     for (const [, s] of this.sources) {
       s.active = PIECE_CATS.some((c) => !c.skin && (s.pieces[c.id] ?? []).some((m) => m.visible));
       s.vrm.scene.visible = s.active;
+      // VRoid вырезает тело под своей одеждой. Чужая вещь закрывает другие места — под ней
+      // остаются дыры. Тело донора (с нашей кожей) показываем «позади» нашего: оно закрывает дыры.
+      for (const m of s.skins) {
+        m.visible = s.active;
+        const mat = Array.isArray(m.material) ? m.material[0] : m.material;
+        if (!mat) continue;
+        mat.polygonOffset = true;
+        mat.polygonOffsetFactor = 2;
+        mat.polygonOffsetUnits = 2;
+      }
     }
-    // Чулки/колготки нарисованы на коже — меняем рисунок кожи.
-    const legs = wear.legs ?? 'base';
-    const src = legs === 'base' ? this.base : this.sources.get(legs);
-    const map = src?.skinMap ?? this.base.skinMap;
+    // Кожа собирается из двух нарядов: торс — от того, чей верх надет (у VRoid под каждым
+    // верхом своя майка/бельё, нарисованные на коже), ноги — от выбранных чулок/колготок.
+    const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : this.sources.get(id))?.skinMap ?? this.base.skinMap;
+    const topId = wear.tops ?? 'base';
+    const map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
     this.setSkin(map);
     onSkin?.(map);
+  }
+
+  compositeSkin(torsoMap, legsMap) {
+    if (!torsoMap || !legsMap || torsoMap === legsMap) return legsMap ?? torsoMap;
+    this.skinCache ??= new Map();
+    const key = `${torsoMap.uuid}|${legsMap.uuid}`;
+    if (this.skinCache.has(key)) return this.skinCache.get(key);
+    const body = this.base.skins.find((m) => /^Body/i.test(m.name) || /Body/i.test(m.parent?.name ?? '')) ?? this.base.skins[0];
+    const ti = torsoMap.image;
+    const li = legsMap.image;
+    if (!body || !ti || !li) return legsMap;
+    const w = li.width;
+    const h = li.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(ti, 0, 0, w, h);
+    // Ноги — всё ниже линии бёдер (по высоте вершин тела в исходной позе).
+    if (!this.legTris) {
+      const hip = this.base.vrm.humanoid.getRawBoneNode('leftUpperLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.9;
+      const knee = this.base.vrm.humanoid.getRawBoneNode('leftLowerLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.5;
+      const cut = hip + (hip - knee) * 0.12;
+      this.legTris = [];
+      for (const mesh of this.base.skins) {
+        const g = mesh.geometry;
+        const pos = g.attributes.position;
+        const uv = g.attributes.uv;
+        if (!uv) continue;
+        mesh.updateMatrixWorld(true);
+        const v = new THREE.Vector3();
+        const idx = g.index;
+        const n = idx ? idx.count : pos.count;
+        const id = (k) => (idx ? idx.getX(k) : k);
+        for (let t = 0; t < n; t += 3) {
+          const a = id(t), b = id(t + 1), c = id(t + 2);
+          const maxY = Math.max(v.fromBufferAttribute(pos, a).applyMatrix4(mesh.matrixWorld).y,
+            v.fromBufferAttribute(pos, b).applyMatrix4(mesh.matrixWorld).y,
+            v.fromBufferAttribute(pos, c).applyMatrix4(mesh.matrixWorld).y);
+          if (maxY > cut) continue;
+          this.legTris.push(uv.getX(a), uv.getY(a), uv.getX(b), uv.getY(b), uv.getX(c), uv.getY(c));
+        }
+      }
+    }
+    ctx.save();
+    ctx.beginPath();
+    const T = this.legTris;
+    for (let i = 0; i < T.length; i += 6) {
+      ctx.moveTo(T[i] * w, T[i + 1] * h);
+      ctx.lineTo(T[i + 2] * w, T[i + 3] * h);
+      ctx.lineTo(T[i + 4] * w, T[i + 5] * h);
+      ctx.closePath();
+    }
+    ctx.lineWidth = 2;
+    ctx.clip();
+    ctx.drawImage(li, 0, 0, w, h);
+    ctx.restore();
+    const tex = new THREE.CanvasTexture(canvas);
+    for (const k of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[k] = legsMap[k];
+    tex.needsUpdate = true;
+    this.skinCache.set(key, tex);
+    return tex;
   }
 
   setSkin(map) {
@@ -106,6 +179,16 @@ export class PieceWardrobe {
       mat.map = map;
       if (mat.userData.shadeSame) mat.shadeMultiplyTexture = map;
       mat.needsUpdate = true;
+    }
+    // Тела доноров (заплатки под чужой одеждой) — той же кожи.
+    for (const [, s] of this.sources) {
+      for (const mesh of s.skins) {
+        const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+        if (!mat || mat.map === map) continue;
+        mat.map = map;
+        if (mat.shadeMultiplyTexture) mat.shadeMultiplyTexture = map;
+        mat.needsUpdate = true;
+      }
     }
   }
 
