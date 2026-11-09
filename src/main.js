@@ -1963,6 +1963,7 @@ const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
   if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
+    loopNoteMove(); // повтор: точки рук и ног тоже запоминаются
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
@@ -2849,7 +2850,9 @@ function renderGaze() {
   b.classList.toggle('active', gazeMode !== 'follow');
   b.title = { follow: 'Взгляд: за пальцем', me: 'Взгляд: на тебя', closed: 'Глаза закрыты' }[gazeMode];
 }
+let gazeSwitchAt = 0;
 $('btn-gaze').addEventListener('click', () => {
+  gazeSwitchAt = performance.now();
   gazeMode = { follow: 'me', me: 'closed', closed: 'follow' }[gazeMode];
   try { localStorage.setItem('waifu-gaze', gazeMode); } catch { /* ignore */ }
   renderGaze();
@@ -2994,7 +2997,8 @@ window.addEventListener('pointerdown', (e) => {
   if (!zoneAt(e)) return;
   autoIdle = 0;
   stopAuto();
-  if (curRep().on) setRepeat(false);
+  // Во вкладке «Позы» касания — это точки (управление), повтор не выключаем.
+  if (curRep().on && !poseMode) setRepeat(false);
 }, { capture: true, passive: true });
 // ---------- «Повтор»: она повторяет твоё движение ползунком по кругу ----------
 // Нажал кнопку над ползунком → двигаешь (наклон, прогиб, присесть, лечь) → отпустил —
@@ -3010,7 +3014,32 @@ const favKey = (r) => (r.tab === 'pose' ? 'waifu-repeat-favs-pose' : 'waifu-repe
 const repBtns = () => [$('cam-auto'), $('rep-btn')].filter(Boolean);
 function loadFavs(r) { try { return JSON.parse(localStorage.getItem(favKey(r)) || '[]'); } catch { return []; } }
 function saveFavs(r, list) { try { localStorage.setItem(favKey(r), JSON.stringify(list)); } catch { /* ignore */ } }
-function nowPose() { return { bend: character.bodyOffset.hipsRotX, spine: character.bodyOffset.spineX, sit: character.sit }; }
+// Снимок того, что повторяем: наклон, посадка и точки рук/ног (во вкладке «Позы»).
+const vArr = (v) => (v ? [v.x, v.y, v.z] : null);
+function nowPose() {
+  const c = character;
+  return {
+    bend: c.bodyOffset.hipsRotX, spine: c.bodyOffset.spineX, sit: c.sit,
+    hL: vArr(c.handTargets.left), hR: vArr(c.handTargets.right),
+    fL: vArr(c.footOffset.left), fR: vArr(c.footOffset.right),
+  };
+}
+// Точки: плавно между двумя снимками (если точка есть в обоих).
+const lerpArr = (a, b, k) => (a && b ? [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k] : (b ?? a));
+function applyPoints(p) {
+  const c = character;
+  const set = (obj, side, arr) => {
+    if (!arr) return;
+    if (obj[side]) obj[side].set(arr[0], arr[1], arr[2]);
+    else obj[side] = new THREE.Vector3(arr[0], arr[1], arr[2]);
+  };
+  set(c.handTargets, 'left', p.hL);
+  set(c.handTargets, 'right', p.hR);
+  set(c.footOffset, 'left', p.fL);
+  set(c.footOffset, 'right', p.fR);
+  if (p.hL) c.armPreset.left = null;
+  if (p.hR) c.armPreset.right = null;
+}
 // Включить конкретное движение (из памяти или избранного) — плавно перетекая в него.
 function playMove(r, mv) {
   r.samples = mv.samples;
@@ -3132,7 +3161,7 @@ function updateLoop(dt) {
   const now = performance.now();
   if (r.state === 'rec') {
     r.samples.push({ t: (now - r.recStart) / 1000, ...nowPose() });
-    const dragging = !!(sliderDrag || slider2Drag);
+    const dragging = !!(sliderDrag || slider2Drag || (poseDrag && /hand|foot|knee/.test(poseDrag.kind)));
     if (!dragging && now - r.lastMove > 250) {
       const endT = (r.lastMove - r.recStart) / 1000;
       r.samples = r.samples.filter((x) => x.t <= endT + 0.05);
@@ -3171,14 +3200,18 @@ function updateLoop(dt) {
   let bend = r.midBend + (L(a.bend, b.bend) - r.midBend) * amp;
   let spine = bendSpine(bend);
   let sit = L(a.sit, b.sit);
+  let pts = { hL: lerpArr(a.hL, b.hL, k), hR: lerpArr(a.hR, b.hR, k), fL: lerpArr(a.fL, b.fL, k), fR: lerpArr(a.fR, b.fR, k) };
   if (r.blendFrom) {
     r.blendK = Math.min(1, r.blendK + dt / 1.2);
     const e = r.blendK * r.blendK * (3 - 2 * r.blendK);
     bend = r.blendFrom.bend + (bend - r.blendFrom.bend) * e;
     spine = r.blendFrom.spine + (spine - r.blendFrom.spine) * e;
     sit = r.blendFrom.sit + (sit - r.blendFrom.sit) * e;
+    const bf = r.blendFrom;
+    pts = { hL: lerpArr(bf.hL, pts.hL, e), hR: lerpArr(bf.hR, pts.hR, e), fL: lerpArr(bf.fL, pts.fL, e), fR: lerpArr(bf.fR, pts.fR, e) };
     if (r.blendK >= 1) r.blendFrom = null;
   }
+  applyPoints(pts);
   const o = character.bodyOffset;
   o.hipsRotX = bend;
   o.spineX = spine;
@@ -3361,7 +3394,9 @@ function tick() {
       character.loveK = love / LOVE_MAX;
       if ((character.shyNow ?? 0) > 0.2) lookPoint.add(new THREE.Vector3(0.6 * character.shyNow, -0.25 * character.shyNow, 0));
     }
-    character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * 18));
+    // Сразу после переключения взгляда глаза переводятся мягко (без скачка).
+    const gazeEase = Math.min(1, (performance.now() - gazeSwitchAt) / 900);
+    character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * (4 + 14 * gazeEase * gazeEase)));
     // Головой за пальцем следит только когда мы перед ней.
     const facing = Math.max(0, Math.cos(camYaw));
     if (gazeMode === 'follow') lookNdc.set(pointer.x * facing, pointer.y * facing);

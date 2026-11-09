@@ -1452,7 +1452,7 @@ export class Character {
       behindK = 1 - THREE.MathUtils.smoothstep(ang, 1.45 + 0.6 * lieK, 1.95 + 0.6 * lieK);
     }
     want *= behindK;
-    this.aimW = (this.aimW ?? 0) + (want - (this.aimW ?? 0)) * (1 - Math.exp(-(dt || 0.016) * 4));
+    this.aimW = (this.aimW ?? 0) + (want - (this.aimW ?? 0)) * (1 - Math.exp(-(dt || 0.016) * 2.2)); // мягко включается/выключается
     const w = this.aimW;
     if (w < 0.01) return;
     const rotateToward = (bone, share, maxA) => {
