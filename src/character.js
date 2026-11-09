@@ -730,6 +730,24 @@ export class Character {
       // Присед на каблуках: таз уходит назад и наклоняется вперёд, поясница прогибается,
       // корпус подаётся вперёд, грудь раскрыта. На коленях — прямая спина с лёгким прогибом.
       const squat = p1 * (1 - p2);
+      // Динамика движения вниз-вверх: опускаясь, корпус подаётся вперёд и бёдра уходят
+      // в сторону (каждый раз в другую); поднимаясь — грудь раскрывается, лёгкая пружинка.
+      {
+        const v = THREE.MathUtils.clamp(this.sitV ?? 0, -2, 2);
+        this.sitVS = (this.sitVS ?? 0) + (v - (this.sitVS ?? 0)) * Math.min(1, (this.lastDt ?? 0.016) * 6);
+        const vs = this.sitVS;
+        if (Math.sign(vs) !== Math.sign(this.sitDirPrev ?? 0) && Math.abs(vs) > 0.15) {
+          this.sitDirPrev = Math.sign(vs);
+          if (vs > 0) this.sitSideSign = -(this.sitSideSign ?? 1);
+        }
+        const near = 1 - p2 * 0.6; // на полу — мягче
+        const down = Math.max(0, vs), up = Math.max(0, -vs);
+        pose.spineX += (down * 0.16 - up * 0.12) * near;
+        pose.headX -= down * 0.06 * near;
+        pose.hipsZ += (this.sitSideSign ?? 1) * Math.min(1, Math.abs(vs)) * 0.1 * near;
+        pose.spineZ -= (this.sitSideSign ?? 1) * Math.min(1, Math.abs(vs)) * 0.06 * near;
+        pose.hipsRotY += (this.sitSideSign ?? 1) * Math.min(1, Math.abs(vs)) * 0.07 * near;
+      }
       // Баланс как у человека: центр тяжести над стопами, поэтому в приседе
       // корпус наклоняется вперёд примерно параллельно голени (угол голени
       // берём с прошлого кадра). Наклон делят таз (больше) и поясница (с прогибом).
