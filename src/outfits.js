@@ -218,13 +218,23 @@ export class PieceWardrobe {
         }
       }
     }
+    // Гладкая ткань: грубые складки и швы сглаживаем — яркость тянем к средней.
+    let lSum = 0, lN = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (!m[i]) continue;
+      const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]);
+      if (mx - mn > 26 || mx > 200) continue;
+      lSum += (d[i] + d[i + 1] + d[i + 2]) / 3; lN++;
+    }
+    const lMid = lN ? lSum / lN : 0;
     for (let i = 0; i < d.length; i += 4) {
       if (!m[i]) continue;
       const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
       const mx = Math.max(r0, g0, b0), mn = Math.min(r0, g0, b0);
       if (mx - mn > 26) continue; // кожа — не трогаем
       if (mx > 242 && hex == null) continue; // белое (верх белых чулок) без цвета — остаётся белым
-      const l = (r0 + g0 + b0) / 3;
+      const l0 = (r0 + g0 + b0) / 3;
+      const l = mx > 200 ? l0 : lMid + (l0 - lMid) * 0.3;
       if (hex == null) {
         const k = 0.32; // темнее: серый → почти чёрный, складки остаются видны
         d[i] = l * k + 6; d[i + 1] = l * k + 3; d[i + 2] = l * k + 10;
