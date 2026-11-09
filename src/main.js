@@ -1831,6 +1831,13 @@ sitSlider.addEventListener('pointermove', (e) => {
 for (const ev of ['pointerup', 'pointercancel']) {
   sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
 }
+// Палец отпустили где угодно (в т.ч. за краем полосы) — полоса не «залипает».
+for (const ev of ['pointerup', 'pointercancel']) {
+  window.addEventListener(ev, () => {
+    if (sliderDrag) { sliderDrag = null; sitSlider.classList.remove('active'); }
+    if (typeof slider2Drag !== 'undefined' && slider2Drag) { slider2Drag = null; $('sit-slider2')?.classList.remove('active'); }
+  });
+}
 // Правая полоса во вкладке «Позы»: присесть → на колени → сесть → лечь (поза остаётся).
 const sitSlider2 = $('sit-slider2');
 let slider2Drag = null;

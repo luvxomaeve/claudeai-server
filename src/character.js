@@ -1376,10 +1376,13 @@ export class Character {
     // Свободные руки лежат на теле и в режиме поз; в приседе их берут колени,
     // в глубоком наклоне — опора о пол (плавно уступают).
     const free = this.poseName === 'stand' && !this.dancing && !this.loop && !this.mixer;
-    const want = free ? (1 - THREE.MathUtils.smoothstep(this.sitS, 0.08, 0.3)) * (1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.5, 1.0)) : 0;
-    this.restW = (this.restW ?? 0) + (want - (this.restW ?? 0)) * (1 - Math.exp(-dt * 2));
+    // Без «перескоков»: руки на бёдрах держатся во всём наклоне и неглубоком приседе,
+    // а колени забирают их плавно и внахлёст (руки не повисают между).
+    const want = free ? (1 - THREE.MathUtils.smoothstep(this.sitS, 0.28, 0.48)) * (1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 1.1, 1.5)) : 0;
+    this.restW = (this.restW ?? 0) + (want - (this.restW ?? 0)) * (1 - Math.exp(-dt * 1.4));
     if (this.restW < 0.01) return;
-    this.restTimer = (this.restTimer ?? 0) - dt;
+    // Пока ведёшь полосу/идёт повтор — руки не перекладывает (без рывков).
+    if (!((this.slideHold ?? 0) > 0)) this.restTimer = (this.restTimer ?? 0) - dt;
     if (!this.restSpot || this.restTimer <= 0) {
       this.prevSpot = this.restSpot ?? 'thighs';
       this.restSpot = this.pickRestSpot();
@@ -1510,6 +1513,11 @@ export class Character {
     const neck = b.neck;
     if (!head || !this.headRestInv) return;
     const P = (n) => n.getWorldPosition(new THREE.Vector3());
+    // Цель взгляда; после выключения «смотрит на тебя» доводим к последней точке,
+    // пока доводка плавно гаснет (без ошибок и рывков).
+    if (this.gazeTarget) (this.aimPoint ??= new THREE.Vector3()).copy(this.gazeTarget);
+    const target = this.aimPoint;
+    if (!target) return;
     let want = this.gazeTarget ? 1 : 0;
     want *= 1 - (this.sleep ?? 0);
     want *= 1 - (this.shyNow ?? 0);
@@ -1520,7 +1528,7 @@ export class Character {
       const left = P(b.leftUpperArm).sub(P(b.rightUpperArm)).normalize();
       const up = P(neck ?? head).sub(P(b.hips)).normalize();
       const fwd = new THREE.Vector3().crossVectors(left, up).normalize();
-      const dir = this.gazeTarget.clone().sub(P(head)).normalize();
+      const dir = target.clone().sub(P(head)).normalize();
       const ang = Math.acos(THREE.MathUtils.clamp(dir.dot(fwd), -1, 1));
       // Лёжа она может запрокинуть голову и смотреть на тебя «вверх ногами» — предел шире.
       const ph = this.sitPhases();
@@ -1532,7 +1540,7 @@ export class Character {
     {
       const hq = b.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
       const bf = new THREE.Vector3(0, 0, 1).applyQuaternion(hq); bf.y = 0;
-      const toCam = this.gazeTarget ? this.gazeTarget.clone().sub(P(head)) : new THREE.Vector3(0, 0, 1);
+      const toCam = target.clone().sub(P(head));
       toCam.y = 0;
       if (bf.lengthSq() > 1e-4 && toCam.lengthSq() > 1e-4) {
         const ph2 = this.sitPhases();
@@ -1547,7 +1555,7 @@ export class Character {
     if (w < 0.01) return;
     const rotateToward = (bone, share, maxA) => {
       const face = this.faceDir(new THREE.Vector3());
-      const dir = this.gazeTarget.clone().sub(P(head)).normalize();
+      const dir = target.clone().sub(P(head)).normalize();
       const full = new THREE.Quaternion().setFromUnitVectors(face, dir);
       // Ограничиваем угол доводки.
       const angle = 2 * Math.acos(THREE.MathUtils.clamp(Math.abs(full.w), 0, 1));
@@ -2535,7 +2543,7 @@ export class Character {
   // Сидя на полу кладёт руки на колени (плавно, по мере того как садится).
   handsOnKnees(side) {
     // Руки ложатся на колени уже в приседе — не висят «на полпути».
-    let w = THREE.MathUtils.smoothstep(this.sitS, 0.08, 0.38);
+    let w = THREE.MathUtils.smoothstep(this.sitS, 0.22, 0.45);
     // Руки в выбранной позе (или примагничены) — так и остаются, когда она садится;
     // берём руку только для опоры о пол, когда она сидит боком или лежит.
     if (this.armPreset[side] || this.poseName !== 'stand') {
@@ -2562,6 +2570,11 @@ export class Character {
     const target = kneePos.clone()
       .lerp(hipsPos, 0.3 * p2)
       .add(new THREE.Vector3(0, (0.05 + 0.02 * squatK) * this.scale, (0.03 + 0.05 * squatK) * this.scale));
+    // Ладонь — на внутренней стороне колена (ближе к центру), локти не разлетаются.
+    {
+      const inward = hipsPos.clone().sub(kneePos); inward.y = 0;
+      if (inward.lengthSq() > 1e-6) target.addScaledVector(inward.normalize(), 0.05 * this.scale * (1 - p2));
+    }
     let pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.4, -0.4));
     // Сидя боком: правая рука опирается о пол сбоку, левая лежит на бедре.
     if (p3 > 0 && side === 'right') {
@@ -2739,7 +2752,7 @@ export class Character {
       if (this.dancing) w *= 2.2;
       // Ведёшь полосу (или играет запись) быстро — тело отзывается быстрее;
       // медленно — остаётся мягким и плавным. Скорость следует за пальцем.
-      if ((this.dragBoostT ?? 0) > 0 && /^(hips|spine|head)|Leg|Knee/.test(key)) w *= 1 + Math.min(this.sitRate ?? 0, 3) * 0.55;
+      if ((this.dragBoostT ?? 0) > 0 && /^(hips|spine|head)|Leg|Knee/.test(key)) w *= 1 + Math.min(this.sitRate ?? 0, 3) * 0.25; // чуть живее за пальцем, но гибко
       let x = this.sp[key] ?? target[key];
       let v = this.spv[key] ?? 0;
       // Бёдра — упругие: чуть «пружинят» после движения (сочнее, пластичнее);
