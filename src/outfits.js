@@ -83,6 +83,21 @@ export class PieceWardrobe {
       for (const m of this.base.pieces[cat.id] ?? []) m.visible = choice === 'base';
       for (const [id, s] of this.sources) for (const m of s.pieces[cat.id] ?? []) m.visible = choice === id;
     }
+    // Одежда чуть «впереди» тела по глубине: там, где кожа почти касается ткани
+    // (бёдра под юбкой в наклоне), она не просвечивает сквозь одежду.
+    const clothOffset = (m) => {
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+        if (!mat || mat.userData.clothOffset) continue;
+        mat.userData.clothOffset = true;
+        mat.polygonOffset = true;
+        mat.polygonOffsetFactor = -1;
+        mat.polygonOffsetUnits = -4;
+      }
+    };
+    for (const id of ['tops', 'bottoms']) {
+      for (const m of this.base.pieces[id] ?? []) clothOffset(m);
+      for (const [, s] of this.sources) for (const m of s.pieces[id] ?? []) clothOffset(m);
+    }
     for (const [, s] of this.sources) {
       s.active = PIECE_CATS.some((c) => !c.skin && (s.pieces[c.id] ?? []).some((m) => m.visible));
       s.vrm.scene.visible = s.active;
@@ -256,6 +271,6 @@ export function tuneSkirt(vrm) {
     j.settings.stiffness = 0.3;
     j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.14);
     j.settings.gravityDir.set(0, -1, 0);
-    j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.03);
+    j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.05); // юбка держится чуть дальше от ног
   }
 }
