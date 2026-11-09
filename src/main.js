@@ -1850,6 +1850,7 @@ sitSlider.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   sitSlider.setPointerCapture(e.pointerId);
   sliderDrag = { y: e.clientY, t: performance.now() };
+  sliderTakesOver();
   sitSlider.classList.add('active');
 });
 sitSlider.addEventListener('pointermove', (e) => {
@@ -1865,6 +1866,7 @@ sitSlider.addEventListener('pointermove', (e) => {
   sliderDrag.t = now;
   character.slideHold = 3;
   character.dragBoostT = 0.5; // палец на полосе — тело отзывается в его темпе
+  sliderTakesOver();
   loopNoteMove();
   if (poseMode) {
     // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
@@ -1898,6 +1900,7 @@ sitSlider2.addEventListener('pointerdown', (e) => {
   e.stopPropagation();
   sitSlider2.setPointerCapture(e.pointerId);
   slider2Drag = { y: e.clientY, t: performance.now() };
+  sliderTakesOver();
   sitSlider2.classList.add('active');
 });
 sitSlider2.addEventListener('pointermove', (e) => {
@@ -1912,6 +1915,7 @@ sitSlider2.addEventListener('pointermove', (e) => {
   slider2Drag.t = now;
   character.slideHold = 3;
   character.dragBoostT = 0.5;
+  sliderTakesOver();
   loopNoteMove();
   sitBy(dv / 0.004);
 });
@@ -3175,6 +3179,12 @@ function stopAuto(instant = false) {
   const cur = auto.last ?? { bend: 0, sway: 0, sit: 0 };
   auto = { keys: [[0, cur], [1.2, { sit: cur.sit }]], t: 0, returning: true };
 }
+// Палец на полосе — её собственное движение плавно останавливается и не мешает
+// (иначе оно каждый кадр перезаписывает посадку и полоса «залипает»). Посадку не сбрасываем.
+function sliderTakesOver() {
+  autoIdle = 0;
+  if (auto && !auto.pose && !auto.returning) stopAuto();
+}
 function updateAuto(dt) {
   if (!character) return;
   autoIdle += dt;
@@ -3200,7 +3210,7 @@ function updateAuto(dt) {
     return;
   }
   autoCooldown -= dt;
-  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0 && !reps.home.on
+  const calm = autoMoves && !poseMode && autoIdle > 5 && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
     && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
