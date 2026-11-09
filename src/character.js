@@ -1177,6 +1177,9 @@ export class Character {
         else if (lying) {
           // Лёжа: изредка поворачивает голову, вздыхает, потягивается корпусом.
           if (r < 0.6) this.playMotion(pickFresh(['lookAround', 'sigh', 'tiltHead', 'lieTurn']));
+        } else if (this.posing) {
+          // Во вкладке «Позы» руки — твои: только голова живёт.
+          this.playMotion(pickFresh(['lookAround', 'tiltHead', 'sigh']));
         } else if (this.sitS > 0.2) {
           // Сидя / на коленях: голова, вздох, иногда поправляет волосы.
           this.playMotion(pickFresh(['lookAround', 'tiltHead', 'sigh', 'tiltHead', 'touchHair']));
@@ -1378,7 +1381,7 @@ export class Character {
     const free = this.poseName === 'stand' && !this.dancing && !this.loop && !this.mixer;
     // Без «перескоков»: руки на бёдрах держатся во всём наклоне и неглубоком приседе,
     // а колени забирают их плавно и внахлёст (руки не повисают между).
-    const want = free ? (1 - THREE.MathUtils.smoothstep(this.sitS, 0.28, 0.48)) * (1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 1.1, 1.5)) : 0;
+    const want = free ? (1 - THREE.MathUtils.smoothstep(this.sitS, 0.35, 0.55)) * (1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 1.2, 1.6)) : 0;
     this.restW = (this.restW ?? 0) + (want - (this.restW ?? 0)) * (1 - Math.exp(-dt * 1.4));
     if (this.restW < 0.01) return;
     // Пока ведёшь полосу/идёт повтор — руки не перекладывает (без рывков).
@@ -1415,7 +1418,20 @@ export class Character {
       const q1 = upper.quaternion.clone();
       const q2 = lower.quaternion.clone();
       const sx = side === 'left' ? 1 : -1;
-      const behind = (side === 'left' ? [a, c] : [a, c]) && (this.restSpot === 'behind');
+      // Наклоняется / приседает — ладони съезжают по бёдрам к коленям (как у человека):
+      // руки всегда у тела, без «крыльев» и без перескоков в присед.
+      const slide = Math.max(THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.15, 0.85), THREE.MathUtils.smoothstep(this.sitS, 0.05, 0.3));
+      if (slide > 0.001) {
+        const knee = this.bones[`${side}LowerLeg`]?.getWorldPosition(new THREE.Vector3());
+        const hp = this.bones.hips.getWorldPosition(new THREE.Vector3());
+        if (knee) {
+          const kt = knee.clone().lerp(hp, 0.12).add(new THREE.Vector3(0, 0.06 * this.scale, 0));
+          const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv));
+          fw.y = 0; if (fw.lengthSq() > 1e-6) kt.addScaledVector(fw.normalize(), 0.06 * this.scale);
+          target.lerp(kt, slide);
+        }
+      }
+      const behind = (side === 'left' ? [a, c] : [a, c]) && (this.restSpot === 'behind') && slide < 0.5;
       // Локти — назад и вдоль тела, а не в стороны (рука лежит естественно, не «растопыркой»).
       const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.18, -0.25, behind ? 0.1 : -0.6));
       this.twoBoneIK(upper, lower, hand, target, pole);
