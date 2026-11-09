@@ -593,7 +593,7 @@ export class Character {
     // Живая плавная пластика: медленные несинхронные волны в корпусе, плечах и голове —
     // она будто дышит всем телом, ни на секунду не замирая (небольшая амплитуда).
     {
-      const aw = (1 - 0.7 * (this.sleep ?? 0)) * (this.posing ? 0.6 : 1);
+      const aw = (1 - 0.92 * (this.sleep ?? 0)) * (this.posing ? 0.6 : 1);
       const n = (a, b, c) => Math.sin(t * a + b) * 0.6 + Math.sin(t * a * 2.17 + c) * 0.4;
       pose.spineZ += n(0.29, 0.3, 1.7) * 0.035 * aw;
       pose.spineY += n(0.21, 2.1, 0.4) * 0.04 * aw;
@@ -781,9 +781,9 @@ export class Character {
       // Сидит — не замирает: мягко покачивается, наклоняет голову.
       // Бёдра живые и в приседе (на пятках), и на коленях, и сидя/лёжа.
       // Свои «часы» бёдер: на полу и лёжа покачивание живее (быстрее), во сне — тише, но не замирает.
-      this.hipClock = (this.hipClock ?? t) + (this.lastDt ?? 0.016) * (1 + 0.7 * p2);
+      this.hipClock = (this.hipClock ?? t) + (this.lastDt ?? 0.016) * (1 + 0.7 * p2) * (1 - 0.5 * (this.sleep ?? 0));
       const tt = this.hipClock;
-      const hipLife = p1 * (1 - 0.35 * (this.sleep ?? 0)) * (1 + 0.25 * p2);
+      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2); // во сне — почти неподвижна
       if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
@@ -835,7 +835,7 @@ export class Character {
         pose.spineX -= Math.max(0, Math.sin(t * 0.17)) * 0.08 * ph3.c4;
         pose.hipsRotY += Math.sin(t * 0.22) * 0.06 * ph3.c4;
       }
-      const seatedLife = p2 * (1 - 0.5 * this.sitPhases(s).p4);
+      const seatedLife = p2 * (1 - 0.5 * this.sitPhases(s).p4) * (1 - 0.85 * (this.sleep ?? 0));
       if (seatedLife > 0) {
         pose.spineZ += Math.sin(t * 0.47) * 0.05 * seatedLife;
         pose.spineX += Math.sin(t * 0.31 + 1.2) * 0.03 * seatedLife;
