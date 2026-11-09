@@ -185,10 +185,13 @@ function manualTarget(out) {
   const cp = Math.cos(camPitch);
   out.look.copy(T);
   out.pos.set(T.x + Math.sin(camYaw) * manualCam.dist * cp, T.y + Math.sin(camPitch) * manualCam.dist, T.z + Math.cos(camYaw) * manualCam.dist * cp);
-  out.pos.y = Math.max(0.05 * camBase.S, out.pos.y);
+  out.pos.y = Math.max(camFloor(), out.pos.y);
   return out;
 }
 
+// Самая низкая точка камеры. В релизе (Яндекс Игры) — не ниже колен:
+// без ракурсов снизу (требования модерации).
+function camFloor() { return (window.WAIFU_RELEASE ? 0.5 : 0.05) * camBase.S; }
 function orbitTarget(out) {
   if (manualCam) return manualTarget(out);
   const d = camBase.dist * camZoom;
@@ -230,7 +233,7 @@ function orbitTarget(out) {
   cz += camPanH.z;
   out.look.set(cx, lookY, cz);
   const cp = Math.cos(pitch);
-  out.pos.set(cx + Math.sin(camYaw) * dd * cp, Math.max(0.06 * camBase.S, lookY + Math.sin(pitch) * dd), cz + Math.cos(camYaw) * dd * cp);
+  out.pos.set(cx + Math.sin(camYaw) * dd * cp, Math.max(camFloor(), lookY + Math.sin(pitch) * dd), cz + Math.cos(camYaw) * dd * cp);
   return out;
 }
 
@@ -253,7 +256,7 @@ function enterFreeCam() {
 }
 function exitFreeCam() { freeCam = null; }
 function applyFree() {
-  camera.position.y = Math.max(0.05 * camBase.S, camera.position.y);
+  camera.position.y = Math.max(camFloor(), camera.position.y);
   cameraLookAt.copy(camera.position).add(freeDir());
   camera.lookAt(cameraLookAt);
 }
