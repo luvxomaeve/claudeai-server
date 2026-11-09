@@ -922,7 +922,7 @@ export class Character {
       pose.lUpperX -= hang;
       pose.rUpperX -= hang;
       // Руки чуть отводятся от тела в наклоне/прогибе и сидя — не проходят сквозь бёдра и бока.
-      const away = 0.05 * Math.min(1, Math.abs(pitch)) + 0.04 * THREE.MathUtils.smoothstep(this.sitS, 0.2, 0.6); // ближе к телу
+      const away = 0.03 * Math.min(1, Math.abs(pitch)) + 0.03 * THREE.MathUtils.smoothstep(this.sitS, 0.2, 0.6); // ближе к телу
       pose.lUpperZ += away;
       pose.rUpperZ -= away;
       this.armHang = hang;
@@ -1413,7 +1413,8 @@ export class Character {
       const q2 = lower.quaternion.clone();
       const sx = side === 'left' ? 1 : -1;
       const behind = (side === 'left' ? [a, c] : [a, c]) && (this.restSpot === 'behind');
-      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.5, -0.2, behind ? 0.1 : -0.45));
+      // Локти — назад и вдоль тела, а не в стороны (рука лежит естественно, не «растопыркой»).
+      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.18, -0.25, behind ? 0.1 : -0.6));
       this.twoBoneIK(upper, lower, hand, target, pole);
       const w = this.restW * (1 - (this.patAmount ?? 0) * 0.7) * (1 - yieldK);
       upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
@@ -1673,7 +1674,7 @@ export class Character {
       const q1 = upper.quaternion.clone();
       const q2 = lower.quaternion.clone();
       const sx = side === 'left' ? 1 : -1;
-      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.5, -0.25, -0.4));
+      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.22, -0.3, -0.55));
       this.twoBoneIK(upper, lower, hand, target, pole);
       upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
       lower.quaternion.copy(q2.clone().slerp(lower.quaternion, w));
