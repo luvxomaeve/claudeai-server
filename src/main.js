@@ -8,7 +8,7 @@ import { parseMixamo, mixamoClip } from './mixamo.js';
 import { MOCAP, loadMocap, mocapClip, mocapUpperClip } from './mocap.js';
 import { PieceWardrobe, PIECE_CATS } from './outfits.js';
 import { Character, POSES, LOOPS } from './character.js';
-import { initPlatform, gameReady, rewarded as adsRewarded, interstitial, onAdPause } from './ads.js';
+import { initPlatform, gameReady, rewarded as adsRewarded, interstitial, onAdPause, hasAds } from './ads.js';
 import { REACTIONS, STROKES, IDLE_LINES, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
@@ -556,7 +556,7 @@ function setLove(v, silent = false) {
   renderLocks();
   if (!silent && after > before) {
     say(LEVEL_UP_LINES[after], 'happy');
-    const opened = FEATURES.filter((f) => f.lvl === after && !adUnlocked.has(f.id));
+    const opened = FEATURES.filter((f) => f.lvl === after && !adOpen(f.id));
     if (opened.length) setTimeout(() => showToast(`🔓 Открыто: ${opened.map((f) => f.name).join(', ')}`), 2200);
     $('affection').classList.remove('levelup');
     void $('affection').offsetWidth;
@@ -576,14 +576,28 @@ const FEATURES = [
   { id: 'dance', lvl: 4, name: 'Танцы и анимации', ids: ['btn-anims'] },
   { id: 'flow', lvl: 5, name: '«Повтор движения»', ids: ['cam-auto'] },
 ];
-const UNLOCK_KEY = 'waifu-unlocked';
-let adUnlocked = new Set();
-try { adUnlocked = new Set(JSON.parse(localStorage.getItem(UNLOCK_KEY) || '[]')); } catch { /* ignore */ }
+// За рекламу фича открывается на 30 минут (навсегда — только уровнем симпатии).
+const UNLOCK_KEY = 'waifu-unlocked2';
+const AD_UNLOCK_MS = 30 * 60000;
+let adUnlocked = {}; // id → до какого времени открыто
+try { adUnlocked = JSON.parse(localStorage.getItem(UNLOCK_KEY) || '{}') || {}; } catch { /* ignore */ }
+const adOpen = (id) => (adUnlocked[id] ?? 0) > Date.now();
 function unlocked(id) {
   const f = FEATURES.find((x) => x.id === id);
   if (!f) return true;
-  return levelOf(love) >= f.lvl || adUnlocked.has(id);
+  return levelOf(love) >= f.lvl || adOpen(id);
 }
+// Время вышло — замочки возвращаются (проверка раз в 5 с).
+let lockSig = '';
+setInterval(() => {
+  const sig = FEATURES.map((f) => (unlocked(f.id) ? 1 : 0)).join('');
+  if (lockSig && sig !== lockSig) {
+    const closed = FEATURES.filter((f, i) => lockSig[i] === '1' && sig[i] === '0');
+    if (closed.length) showToast(`⏳ Время вышло: ${closed.map((f) => f.name).join(', ')}`);
+  }
+  lockSig = sig;
+  renderLocks(); // кнопки всегда по текущему состоянию
+}, 5000);
 function renderLocks() {
   for (const f of FEATURES) {
     const on = unlocked(f.id);
@@ -600,16 +614,18 @@ function showLock(f) {
     lockPop.querySelector('.lp-ok').addEventListener('click', () => { lockPop.hidden = true; });
   }
   lockPop.querySelector('.lp-title').textContent = `🔒 ${f.name}`;
-  lockPop.querySelector('.lp-text').textContent = `Откроется на уровне ${f.lvl + 1} — «${LEVELS[f.lvl].label}». Общайся с ней, чтобы симпатия росла 💗`;
+  lockPop.querySelector('.lp-text').textContent = `Откроется навсегда на уровне ${f.lvl + 1} — «${LEVELS[f.lvl].label}». Общайся с ней, чтобы симпатия росла 💗`;
   const ad = lockPop.querySelector('.lp-ad');
-  ad.textContent = '▶ Открыть сейчас (реклама)';
+  ad.textContent = '▶ Открыть на 30 минут (реклама)';
+  ad.hidden = !hasAds(); // без рекламы (нет SDK) — только по уровню
   ad.onclick = () => {
     lockPop.hidden = true;
     adsRewarded(() => {
-      adUnlocked.add(f.id);
-      try { localStorage.setItem(UNLOCK_KEY, JSON.stringify([...adUnlocked])); } catch { /* ignore */ }
+      adUnlocked[f.id] = Date.now() + AD_UNLOCK_MS;
+      try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(adUnlocked)); } catch { /* ignore */ }
+      lockSig = FEATURES.map((x) => (unlocked(x.id) ? 1 : 0)).join('');
       renderLocks();
-      showToast(`🔓 Открыто: ${f.name}`);
+      showToast(`🔓 Открыто на 30 минут: ${f.name}`);
     }, () => showToast('Реклама не досмотрена — ничего страшного'));
   };
   lockPop.hidden = false;
@@ -630,6 +646,12 @@ document.addEventListener('click', (e) => {
 // Полностью открыть всё — несколько часов игры (растягивается на дни);
 // не хочешь ждать — фичу можно открыть за рекламу.
 const GAIN_CAP = 30, GAIN_PER_MIN = 4, GAIN_KEY = 'waifu-gain';
+// «x2 симпатия на 10 минут» — за рекламу (кнопка в меню сердечка).
+const BOOST_KEY = 'waifu-boost', BOOST_MS = 10 * 60000;
+let boostUntil = 0;
+try { boostUntil = Number(localStorage.getItem(BOOST_KEY)) || 0; } catch { /* ignore */ }
+const boostOn = () => boostUntil > Date.now();
+let tiredHintAt = 0;
 let gainBudget = GAIN_CAP, gainAt = Date.now();
 try {
   const g = JSON.parse(localStorage.getItem(GAIN_KEY) || 'null');
@@ -646,8 +668,13 @@ function changeAffection(delta) {
     refillGain();
     const full = Math.min(d, Math.max(0, gainBudget));
     gainBudget -= full;
-    d = full + (d - full) * 0.05;
+    d = (full + (d - full) * 0.05) * (boostOn() ? 2 : 1);
     try { localStorage.setItem(GAIN_KEY, JSON.stringify({ b: gainBudget, t: gainAt })); } catch { /* ignore */ }
+    // Запас кончился — подсказка про x2 (не чаще раза в 10 минут).
+    if (gainBudget < 1 && !boostOn() && hasAds() && Date.now() - tiredHintAt > 600000 && love < LOVE_MAX) {
+      tiredHintAt = Date.now();
+      setTimeout(() => showToast('💗 Нажми на сердечко сверху — x2 симпатия за рекламу'), 1500);
+    }
   }
   setLove(love + d);
 }
@@ -668,6 +695,34 @@ $('affection').addEventListener('click', (e) => {
   e.stopPropagation();
   $('love-menu').hidden = !$('love-menu').hidden;
 });
+const boostBtn = document.createElement('button');
+boostBtn.id = 'love-boost';
+$('love-menu').prepend(boostBtn);
+function renderBoost() {
+  boostBtn.hidden = !hasAds() || love >= LOVE_MAX;
+  if (boostOn()) {
+    boostBtn.textContent = `✨ x2 ещё ${Math.ceil((boostUntil - Date.now()) / 60000)} мин`;
+    boostBtn.disabled = true;
+  } else {
+    boostBtn.textContent = '▶ x2 симпатия 10 мин (реклама)';
+    boostBtn.disabled = false;
+  }
+}
+boostBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('love-menu').hidden = true;
+  if (boostOn()) return;
+  adsRewarded(() => {
+    boostUntil = Date.now() + BOOST_MS;
+    try { localStorage.setItem(BOOST_KEY, String(boostUntil)); } catch { /* ignore */ }
+    refillGain(); gainBudget = GAIN_CAP; // и запас касаний полный
+    showToast('✨ x2 симпатия на 10 минут!');
+    say(pick(['Ой, мне так хорошо с тобой~', 'Хи, я вся твоя ♥', 'Давай ещё пообщаемся~']), 'happy');
+    renderBoost();
+  }, () => showToast('Реклама не досмотрена — ничего страшного'));
+});
+$('affection').addEventListener('click', renderBoost, true);
+setInterval(() => { if (!$('love-menu').hidden) renderBoost(); }, 10000);
 $('love-max').addEventListener('click', (e) => { e.stopPropagation(); setLove(LOVE_MAX); $('love-menu').hidden = true; showToast('♥ Максимум'); });
 $('love-reset').addEventListener('click', (e) => { e.stopPropagation(); setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#affection, #love-menu')) $('love-menu').hidden = true; });
@@ -3654,7 +3709,7 @@ function tick() {
   // Пока ты с ней — симпатия понемногу растёт и сама (раз в минуту).
   if (!document.hidden) {
     playGain += dt;
-    if (playGain > 60) { playGain = 0; setLove(love + 1); }
+    if (playGain > 60) { playGain = 0; setLove(love + (boostOn() ? 2 : 1)); }
   }
   updateSuggest(dt);
   updateSelfDress(dt);
