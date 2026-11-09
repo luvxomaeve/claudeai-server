@@ -2072,6 +2072,7 @@ function poseDragMove(e) {
     return;
   }
   if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
+    loopNoteMove(); // повтор запоминает и движение точек рук/ног
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
@@ -3254,7 +3255,18 @@ function applyPoints(p) {
   if (p.hR) c.armPreset.right = null;
 }
 // Включить конкретное движение (из памяти или избранного) — плавно перетекая в него.
+function movedPoints(samples) {
+  const out = {};
+  for (const key of ['hL', 'hR', 'fL', 'fR']) {
+    const vals = samples.map((x) => x[key]).filter(Boolean);
+    if (vals.length < 2) continue;
+    const f = vals[0];
+    out[key] = vals.some((v) => Math.hypot(v[0] - f[0], v[1] - f[1], v[2] - f[2]) > 0.01);
+  }
+  return out;
+}
 function playMove(r, mv) {
+  r.movedPts = movedPoints(mv.samples);
   r.samples = mv.samples;
   r.dur = mv.dur;
   r.t = 0;
@@ -3374,7 +3386,7 @@ function updateLoop(dt) {
   const now = performance.now();
   if (r.state === 'rec') {
     r.samples.push({ t: (now - r.recStart) / 1000, ...nowPose() });
-    const dragging = !!(sliderDrag || slider2Drag || poseDrag?.kind === 'sitdrag');
+    const dragging = !!(sliderDrag || slider2Drag || (poseDrag && /sitdrag|hand|foot|knee/.test(poseDrag.kind)));
     if (!dragging && now - r.lastMove > 250) {
       const endT = (r.lastMove - r.recStart) / 1000;
       r.samples = r.samples.filter((x) => x.t <= endT + 0.05);
@@ -3384,6 +3396,9 @@ function updateLoop(dt) {
       r.t = r.dur;
       r.blendFrom = null;
       r.state = 'play';
+      // Какие точки реально двигались в записи — только их и повторяем
+      // (остальные точки остаются как поставил, их можно править на ходу).
+      r.movedPts = movedPoints(r.samples);
       r.midFor = null;
       try { localStorage.setItem(repKey(r), JSON.stringify({ dur: r.dur, samples: r.samples.filter((_, i) => i % 2 === 0 || i === r.samples.length - 1) })); } catch { /* ignore */ }
       if (!r.toldOnce) { r.toldOnce = true; showToast('Повторяю~ ♥ ＋ — в избранное, подвигай — запомню новое'); }
@@ -3424,7 +3439,10 @@ function updateLoop(dt) {
     pts = { hL: lerpArr(bf.hL, pts.hL, e), hR: lerpArr(bf.hR, pts.hR, e), fL: lerpArr(bf.fL, pts.fL, e), fR: lerpArr(bf.fR, pts.fR, e) };
     if (r.blendK >= 1) r.blendFrom = null;
   }
-  // (точки рук/ног повтором не двигаем — только ползунок)
+  {
+    const m = r.movedPts ?? {};
+    applyPoints({ hL: m.hL ? pts.hL : null, hR: m.hR ? pts.hR : null, fL: m.fL ? pts.fL : null, fR: m.fR ? pts.fR : null });
+  }
   const o = character.bodyOffset;
   o.hipsRotX = bend;
   o.spineX = spine;
