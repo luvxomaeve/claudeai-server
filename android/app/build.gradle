@@ -1,0 +1,30 @@
+plugins { id 'com.android.application' }
+// Ключ подписи и пароль — НЕ в репозитории: keystore.properties рядом (storeFile=..., password=...).
+def ks = new Properties()
+def ksFile = new File(rootDir, 'keystore.properties')
+if (ksFile.exists()) ksFile.withInputStream { ks.load(it) }
+android {
+  namespace 'ru.ogroman.waifutouch'
+  compileSdk 35
+  defaultConfig {
+    applicationId 'ru.ogroman.waifutouch'
+    minSdk 24
+    targetSdk 34
+    versionCode 16
+    versionName '2.5'
+  }
+  signingConfigs {
+    release {
+      storeFile ks['storeFile'] ? file(ks['storeFile']) : null
+      storePassword ks['password']
+      keyAlias 'waifutouch'
+      keyPassword ks['password']
+    }
+  }
+  buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+  androidResources { noCompress += ['glb', 'json'] }
+  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies {
+  implementation 'com.yandex.android:mobileads:8.6.0'
+}

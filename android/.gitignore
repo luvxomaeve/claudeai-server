@@ -1,0 +1,8 @@
+# Игра (assets/www) копируется при сборке; модели не публикуются.
+app/src/main/assets/
+keystore.properties
+*.jks
+local.properties
+.gradle/
+build/
+app/build/
