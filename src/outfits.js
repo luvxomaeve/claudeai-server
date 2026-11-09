@@ -74,6 +74,7 @@ export class PieceWardrobe {
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
     this.skinCache?.clear();
+    this.darkCache?.clear();
   }
 
   // wear: { tops: 'base' | 'o1' | ... | 'none', ... }
@@ -104,27 +105,13 @@ export class PieceWardrobe {
     // верхом своя майка/бельё, нарисованные на коже), ноги — от выбранных чулок/колготок.
     const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : this.sources.get(id))?.skinMap ?? this.base.skinMap;
     const topId = wear.tops ?? 'base';
-    const map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
+    let map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
+    if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     this.setSkin(map);
     onSkin?.(map);
   }
 
-  compositeSkin(torsoMap, legsMap) {
-    if (!torsoMap || !legsMap || torsoMap === legsMap) return legsMap ?? torsoMap;
-    this.skinCache ??= new Map();
-    const key = `${torsoMap.uuid}|${legsMap.uuid}`;
-    if (this.skinCache.has(key)) return this.skinCache.get(key);
-    const body = this.base.skins.find((m) => /^Body/i.test(m.name) || /Body/i.test(m.parent?.name ?? '')) ?? this.base.skins[0];
-    const ti = torsoMap.image;
-    const li = legsMap.image;
-    if (!body || !ti || !li) return legsMap;
-    const w = li.width;
-    const h = li.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(ti, 0, 0, w, h);
+  ensureLegTris() {
     // Ноги — всё ниже линии бёдер (по высоте вершин тела в исходной позе).
     if (!this.legTris) {
       const hip = this.base.vrm.humanoid.getRawBoneNode('leftUpperLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.9;
@@ -152,6 +139,60 @@ export class PieceWardrobe {
         }
       }
     }
+  }
+
+  // Колготки темнее (полупрозрачный чёрный): ноги на текстуре кожи затемняются «умножением».
+  darkenLegs(map, k = 0.55) {
+    if (!map?.image || !this.base) return map;
+    this.darkCache ??= new Map();
+    const key = `${map.uuid}|${k}`;
+    if (this.darkCache.has(key)) return this.darkCache.get(key);
+    this.ensureLegTris();
+    const img = map.image;
+    const w = img.width, h = img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    ctx.save();
+    ctx.beginPath();
+    const T = this.legTris;
+    for (let i = 0; i < T.length; i += 6) {
+      ctx.moveTo(T[i] * w, T[i + 1] * h);
+      ctx.lineTo(T[i + 2] * w, T[i + 3] * h);
+      ctx.lineTo(T[i + 4] * w, T[i + 5] * h);
+      ctx.closePath();
+    }
+    ctx.clip();
+    ctx.globalCompositeOperation = 'multiply';
+    const v = Math.round(255 * (1 - k));
+    ctx.fillStyle = `rgb(${v},${v - 4},${v + 4})`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+    const tex = new THREE.CanvasTexture(canvas);
+    for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
+    tex.needsUpdate = true;
+    this.darkCache.set(key, tex);
+    return tex;
+  }
+
+  compositeSkin(torsoMap, legsMap) {
+    if (!torsoMap || !legsMap || torsoMap === legsMap) return legsMap ?? torsoMap;
+    this.skinCache ??= new Map();
+    const key = `${torsoMap.uuid}|${legsMap.uuid}`;
+    if (this.skinCache.has(key)) return this.skinCache.get(key);
+    const body = this.base.skins.find((m) => /^Body/i.test(m.name) || /Body/i.test(m.parent?.name ?? '')) ?? this.base.skins[0];
+    const ti = torsoMap.image;
+    const li = legsMap.image;
+    if (!body || !ti || !li) return legsMap;
+    const w = li.width;
+    const h = li.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(ti, 0, 0, w, h);
+    this.ensureLegTris();
     ctx.save();
     ctx.beginPath();
     const T = this.legTris;

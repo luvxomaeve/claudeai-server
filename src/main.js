@@ -2387,6 +2387,10 @@ function applyWear() {
     const v = wear[c.id] ?? 'base';
     w[c.id] = v === 'base' || v === 'none' || pieceWardrobe.hasSource(v) ? v : 'base';
   }
+  // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
+  const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
+  if (lt?.hex != null && lt.name.includes('чёрн')) w.legsDark = 0.6;
+  else if (lt?.name === 'Чёрный') w.legsDark = 0.5;
   pieceWardrobe.apply(w, (map) => {
     stockings?.setBase(map);
     stockings?.apply(look.stockings);
@@ -2412,6 +2416,7 @@ const TINTS = [
   { name: 'Фиалка', hex: 0x6b45a0 },
   { name: 'Небо', hex: 0x8fc4ee },
   { name: 'Мята', hex: 0x9fdcc4 },
+  { name: 'Глубокий чёрный', hex: 0x16121a },
 ];
 const TINT_KEY = 'waifu-wear-tint';
 let wearTint = {};
@@ -2737,7 +2742,11 @@ function renderWardrobe() {
 $('goth-preset').addEventListener('click', async () => {
   // Готик-образ: чёрный свитер-кроп, тёмная юбка с сакурой, чёрные колготки, чёрные платформы.
   const src = PIECE_SOURCES.find((s) => s.id === 'o5' && s.cats.includes('bottoms'));
-  wearTint['bottoms:o5'] = TINTS.findIndex((t) => t.name === 'Чёрный');
+  const deep = TINTS.findIndex((t) => t.name === 'Глубокий чёрный');
+  wearTint['bottoms:o5'] = deep;
+  wearTint['tops:base'] = deep;
+  wearTint['acc:base'] = deep;
+  wearTint['legs:base'] = deep; // колготки — полупрозрачные чёрные
   try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
   await pickPiece('tops', 'base', true);
   await pickPiece('bottoms', src ? 'o5' : 'base', true);
