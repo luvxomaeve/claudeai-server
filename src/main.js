@@ -3272,7 +3272,13 @@ function updateLoop(dt) {
   o.hipsRotX = bend;
   o.spineX = spine;
   character.sit = sit;
-  character.sitRate = 1.2;
+  // Темп записи: где ты вёл быстро — она двигается быстро, где медленно — плавно.
+  {
+    const span = Math.max(0.016, b.t - a.t);
+    const du = Math.PI * 0.5 * Math.sin(Math.PI * tri) * tempo; // скорость по кривой туда-обратно
+    const speed = (Math.abs(b.sit - a.sit) + Math.abs(b.bend - a.bend) * 0.6) / span * Math.max(0.3, du);
+    character.sitRate = THREE.MathUtils.clamp(speed, 0.25, 3);
+  }
   character.slideHold = 3; // ножками не болтает
   character.hipsSetSit = character.sitS;
   // Лицо живёт: улыбается, подмигивает, смущается.

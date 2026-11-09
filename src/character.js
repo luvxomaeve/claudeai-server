@@ -2735,6 +2735,9 @@ export class Character {
       else if (/Leg|Knee/.test(key)) w = 7;
       else if (/Upper|Lower/.test(key)) w = fast ? 12 : 7.5;
       if (this.dancing) w *= 2.2;
+      // Ведёшь полосу (или играет запись) быстро — тело отзывается быстрее;
+      // медленно — остаётся мягким и плавным. Скорость следует за пальцем.
+      if ((this.slideHold ?? 0) > 0 && /^(hips|spine|head)|Leg|Knee/.test(key)) w *= 1 + Math.min(this.sitRate ?? 0, 3) * 0.55;
       let x = this.sp[key] ?? target[key];
       let v = this.spv[key] ?? 0;
       // Бёдра — упругие: чуть «пружинят» после движения (сочнее, пластичнее);
