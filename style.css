@@ -1340,3 +1340,12 @@ body.ui-hidden #suggest { opacity: 1; pointer-events: auto; }
 body.ui-hidden #flow-panel { opacity: 0.35; }
 #cam-controls #cam-auto.rec { background: #e8455f; color: #fff; animation: recPulse 1s ease-in-out infinite; }
 @keyframes recPulse { 50% { opacity: 0.6; } }
+
+/* Кнопка «Повтор движения» над левым ползунком. */
+#rep-btn { margin-bottom: 10px; width: 34px; height: 34px; padding: 0; border: none; border-radius: 50%; background: var(--panel);
+  color: var(--pink); display: grid; place-items: center; cursor: pointer; box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15); flex: none; position: relative; }
+#rep-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+#rep-btn.active { background: var(--pink); color: #fff; }
+#rep-btn.rec { background: #e8455f; color: #fff; animation: recPulse 1s ease-in-out infinite; }
+#cam-controls #cam-auto { display: none; }
+body.ui-hidden #rep-btn:not(.active) { opacity: 0.35; }
