@@ -357,10 +357,28 @@ export function tuneSkirt(vrm) {
   }
 }
 
-// Форма бёдер: немного объёма сзади (ягодицы) и сбоку, мягким «холмом» —
-// чтобы на изгибах и в приседе не было плоскостей. Меняем вершины тела один раз
-// при загрузке (в позе привязки), вдоль нормали — кожа и чулки едут вместе.
-export function shapeHips(vrm, amount = 0.032) {
+// Форма бёдер. Статический небольшой объём + КОРРЕКТИРУЮЩИЙ объём, зависящий от позы:
+// при сгибе бедра (присед, колени, сидя) кожа модели на сгибе «сминается» — мы выпукло
+// выталкиваем её наружу пропорционально сгибу каждой ноги (HIP_FLEX), стоя — почти ноль.
+export const HIP_FLEX = { value: new THREE.Vector2() };
+function patchBulge(mat) {
+  if (!mat || mat.userData.bulgePatched) return;
+  mat.userData.bulgePatched = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    prev?.call(mat, sh, r);
+    sh.uniforms.hipFlex = HIP_FLEX;
+    sh.vertexShader = 'attribute vec2 hipBulge;\nuniform vec2 hipFlex;\n' + sh.vertexShader;
+    if (sh.vertexShader.includes('#include <begin_vertex>')) {
+      sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>',
+        '#include <begin_vertex>\n  transformed += normalize(objectNormal) * dot(hipBulge, hipFlex);');
+    }
+  };
+  const prevKey = mat.customProgramCacheKey?.bind(mat);
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge`;
+  mat.needsUpdate = true;
+}
+export function shapeHips(vrm, amount = 0.02) {
   vrm?.scene?.traverse((o) => {
     if (!o.isSkinnedMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -381,7 +399,6 @@ export function shapeHips(vrm, amount = 0.032) {
     const foot = bindPos('leftFoot');
     const toe = bindPos('leftToes');
     if (!L || !R || !H || !foot || !toe) return;
-    // «Назад» — противоположно носку стопы.
     const back = new THREE.Vector3(0, 0, Math.sign(foot.z - toe.z) || 1);
     const pos = g.attributes.position;
     const nor = g.attributes.normal;
@@ -389,25 +406,31 @@ export function shapeHips(vrm, amount = 0.032) {
     const v = new THREE.Vector3();
     const n = new THREE.Vector3();
     const legLen = Math.max(0.3, H.y - foot.y);
-    const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * legLen / 0.8).add(new THREE.Vector3(0, -0.02, 0)));
-    const sigma = 0.085 * legLen / 0.8;
+    const k0 = legLen / 0.8;
+    // Центр выпуклости — ягодица (сзади от тазобедренного сустава, чуть ниже).
+    const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.035 * k0, 0)));
+    // Ткань — шире и чуть сильнее тела: всегда накрывает выпуклость, не прорезается.
+    const cloth = mats.some((m) => /_Bottoms_/i.test(m?.name ?? ''));
+    const sigma = 0.09 * k0 * (cloth ? 1.4 : 1);
+    const gain = cloth ? 1.25 : 1;
+    const bulge = new Float32Array(pos.count * 2);
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
       n.fromBufferAttribute(nor, i);
-      let w = 0;
-      for (const c of centers) {
-        const d = v.distanceTo(c) / sigma;
-        w = Math.max(w, Math.exp(-d * d));
-      }
+      const facing = Math.min(1, Math.max(0, n.dot(back) * 0.85 + 0.3));
+      if (facing <= 0) continue;
+      const ws = centers.map((c) => { const d = v.distanceTo(c) / sigma; return Math.min(1.3, Math.exp(-d * d) * (cloth ? Math.max(facing, 0.6) : facing) * gain); });
+      bulge[i * 2] = ws[0];
+      bulge[i * 2 + 1] = ws[1];
+      const w = Math.max(ws[0], ws[1]);
       if (w < 0.01) continue;
-      // Только наружу назад/вбок (не спереди, не внутрь между ног).
-      const facing = Math.max(0, n.dot(back) * 0.8 + 0.35);
-      const k = amount * w * Math.min(1, facing);
-      if (k <= 0) continue;
+      const k = amount * w;
       pos.setXYZ(i, v.x + n.x * k, v.y + n.y * k, v.z + n.z * k);
     }
     pos.needsUpdate = true;
+    g.setAttribute('hipBulge', new THREE.BufferAttribute(bulge, 2));
     g.computeBoundingSphere();
     g.userData.hipsShaped = true;
+    for (const m of mats) patchBulge(m);
   });
 }

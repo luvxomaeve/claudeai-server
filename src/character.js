@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { tuneSkirt, shapeHips } from './outfits.js';
+import { tuneSkirt, shapeHips, HIP_FLEX } from './outfits.js';
 
 const EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
 
@@ -1272,6 +1272,21 @@ export class Character {
     }
     // Точная доводка взгляда: лицо смотрит прямо в камеру с любого ракурса.
     this.applyHeadAim(dt);
+    // Корректирующий объём бёдер: чем сильнее согнута нога в тазу, тем выпуклее сзади.
+    {
+      const b = this.bones;
+      const hq = b.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
+      const down = new THREE.Vector3(0, -1, 0).applyQuaternion(hq);
+      const flex = (side) => {
+        const up = b[`${side}UpperLeg`];
+        const lo = b[`${side}LowerLeg`];
+        if (!up || !lo) return 0;
+        const d = lo.getWorldPosition(new THREE.Vector3()).sub(up.getWorldPosition(new THREE.Vector3())).normalize();
+        return THREE.MathUtils.smoothstep(Math.acos(THREE.MathUtils.clamp(d.dot(down), -1, 1)), 0.3, 1.75);
+      };
+      const amt = 0.045;
+      HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
+    }
 
     this.finishFrame(dt);
   }
