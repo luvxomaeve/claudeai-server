@@ -1119,7 +1119,15 @@ function makeStick(el) {
   return st;
 }
 const stick = { x: 0, y: 0, on: false }; // розовый шарик убран (высота — двумя пальцами)
-const stick2 = { x: 0, y: 0, on: false }; // шарик убран — камера пальцами
+// 🟣 Фиолетовый джойстик свободной камеры — в строке камеры: вверх — лететь вперёд
+// (куда смотришь), вниз — назад, вбок — в сторону. Двумя пальцами — как раньше.
+const stick2El = document.createElement('div');
+stick2El.id = 'cam-stick2';
+stick2El.className = 'stick zoom';
+stick2El.title = 'Свободная камера: вверх — вперёд, вниз — назад, вбок — в сторону';
+stick2El.innerHTML = '<b></b>';
+$('cam-controls').prepend(stick2El);
+const stick2 = makeStick(stick2El);
 const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v * Math.abs(v));
 function updateStick(dt) {
   const a = stick.on && (dz(stick.x) || dz(stick.y));

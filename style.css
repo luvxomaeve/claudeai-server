@@ -1307,7 +1307,8 @@ body.ui-hidden #suggest { opacity: 1; pointer-events: auto; }
 #suggest button { white-space: nowrap; }
 
 /* Строка камеры: 🙂 📸 📍 [1][2][3] ⌂ — всё влезает. */
-#cam-controls #cam-stick2, #cam-controls #cam-view { display: none !important; }
+#cam-controls #cam-view { display: none !important; }
+#cam-controls #cam-stick2 { flex: none; margin-right: 4px; }
 #cam-controls { max-width: calc(100vw - 24px); }
 .cam-view-chip { width: 30px; height: 30px; font-size: 13px; }
 #cam-controls button.cam-view-chip { width: 30px; height: 30px; margin: 0 1px; background: rgba(255, 111, 168, 0.18); color: var(--pink); font-size: 13px; font-weight: 800; box-shadow: none; border: none; }
