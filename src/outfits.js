@@ -297,7 +297,7 @@ export class PieceWardrobe {
     sk.v.lerp(vel.add(tv.multiplyScalar(1.2)), 1 - Math.exp(-dt * 8));
     sk.t += dt;
     const breeze = new THREE.Vector3(Math.sin(sk.t * 0.9) * 0.045 + Math.sin(sk.t * 2.3) * 0.02, 0, Math.cos(sk.t * 0.7) * 0.03);
-    const hz = new THREE.Vector3(-sk.v.x * 6, 0, -sk.v.z * 6).add(breeze);
+    const hz = new THREE.Vector3(-sk.v.x * 8.5, 0, -sk.v.z * 8.5).add(breeze);
     if (hz.length() > 0.3) hz.setLength(0.3);
     const down = -0.22 + THREE.MathUtils.clamp(-sk.v.y * 0.6, -0.25, 0.04); // вниз всегда
     const g = new THREE.Vector3(hz.x, down, hz.z);
@@ -348,8 +348,8 @@ export function tuneSkirt(vrm) {
     if (!/skirt/i.test(j.bone.name)) continue;
     // Мягче и живее: меньше жёсткости — дольше и шире колышется за движением,
     // умеренное затухание — плавно, без дрожи; лёгкий вес — ложится, не взлетает.
-    j.settings.dragForce = 0.2;
-    j.settings.stiffness = 0.42;
+    j.settings.dragForce = 0.16;
+    j.settings.stiffness = 0.36;
     j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.2);
     j.settings.gravityDir.set(0, -1, 0);
     j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.05); // юбка держится чуть дальше от ног
