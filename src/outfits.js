@@ -114,12 +114,26 @@ export class PieceWardrobe {
     onSkin?.(map);
   }
 
+  // Высоты бедра/колена и вершин — в исходной (bind) позе меша, а не в текущей:
+  // иначе, если она сидит/лежит, зона ног на текстуре считается неправильно.
+  bindLegY(mesh) {
+    const hum = this.base.vrm.humanoid;
+    const boneY = (name, fb) => {
+      const node = hum.getRawBoneNode(name);
+      const bones = mesh.skeleton?.bones ?? [];
+      let i = bones.indexOf(node);
+      if (i < 0 && node) i = bones.findIndex((b) => b.name === node.name);
+      if (i >= 0 && mesh.skeleton.boneInverses[i]) return new THREE.Matrix4().copy(mesh.skeleton.boneInverses[i]).invert().elements[13];
+      return fb;
+    };
+    const hip = boneY('leftUpperLeg', 0.9), knee = boneY('leftLowerLeg', 0.5);
+    const bm = mesh.isSkinnedMesh ? mesh.bindMatrix : mesh.matrixWorld;
+    return { hip, knee, vy: (pos, q, v) => v.fromBufferAttribute(pos, q).applyMatrix4(bm).y };
+  }
+
   ensureLegTris() {
     // Ноги — всё ниже линии бёдер (по высоте вершин тела в исходной позе).
     if (!this.legTris) {
-      const hip = this.base.vrm.humanoid.getRawBoneNode('leftUpperLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.9;
-      const knee = this.base.vrm.humanoid.getRawBoneNode('leftLowerLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.5;
-      const cut = hip + (hip - knee) * 0.12;
       this.legTris = [];
       const allSkins = [...this.base.skins, ...[...this.sources.values()].flatMap((s) => s.skins)];
       for (const mesh of allSkins) {
@@ -127,17 +141,15 @@ export class PieceWardrobe {
         const pos = g.attributes.position;
         const uv = g.attributes.uv;
         if (!uv) continue;
-        mesh.updateMatrixWorld(true);
+        const { hip, knee, vy } = this.bindLegY(mesh);
+        const cut = hip + (hip - knee) * 0.12;
         const v = new THREE.Vector3();
         const idx = g.index;
         const n = idx ? idx.count : pos.count;
         const id = (k) => (idx ? idx.getX(k) : k);
         for (let t = 0; t < n; t += 3) {
           const a = id(t), b = id(t + 1), c = id(t + 2);
-          const maxY = Math.max(v.fromBufferAttribute(pos, a).applyMatrix4(mesh.matrixWorld).y,
-            v.fromBufferAttribute(pos, b).applyMatrix4(mesh.matrixWorld).y,
-            v.fromBufferAttribute(pos, c).applyMatrix4(mesh.matrixWorld).y);
-          if (maxY > cut) continue;
+          if (Math.max(vy(pos, a, v), vy(pos, b, v), vy(pos, c, v)) > cut) continue;
           this.legTris.push(uv.getX(a), uv.getY(a), uv.getX(b), uv.getY(b), uv.getX(c), uv.getY(c));
         }
       }
@@ -152,21 +164,18 @@ export class PieceWardrobe {
     const sKey = `${map.uuid}|${hex}`;
     if (this.shortsCache.has(sKey)) return this.shortsCache.get(sKey);
     if (!this.shortsTris) {
-      const hum = this.base.vrm.humanoid;
-      const hipY = hum.getRawBoneNode('leftUpperLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.9;
-      const kneeY = hum.getRawBoneNode('leftLowerLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.5;
-      const top = hipY + (hipY - kneeY) * 0.35;
-      const bot = kneeY + (hipY - kneeY) * 0.45;
       this.shortsTris = [];
       for (const mesh of this.base.skins) {
         const g = mesh.geometry, pos = g.attributes.position, uv = g.attributes.uv;
         if (!uv) continue;
-        mesh.updateMatrixWorld(true);
+        const { hip: hipY, knee: kneeY, vy } = this.bindLegY(mesh);
+        const top = hipY + (hipY - kneeY) * 0.35;
+        const bot = kneeY + (hipY - kneeY) * 0.45;
         const v = new THREE.Vector3(), idx = g.index, n = idx ? idx.count : pos.count;
         const id = (k) => (idx ? idx.getX(k) : k);
         for (let t = 0; t < n; t += 3) {
           const a = id(t), b = id(t + 1), c = id(t + 2);
-          const ys = [a, b, c].map((q) => v.fromBufferAttribute(pos, q).applyMatrix4(mesh.matrixWorld).y);
+          const ys = [a, b, c].map((q) => vy(pos, q, v));
           if (Math.max(...ys) > top || Math.min(...ys) < bot) continue;
           this.shortsTris.push(uv.getX(a), uv.getY(a), uv.getX(b), uv.getY(b), uv.getX(c), uv.getY(c));
         }
