@@ -129,7 +129,7 @@ export class PieceWardrobe {
         mat.needsUpdate = true;
       }
     };
-    for (const [, s] of this.sources) for (const m of s.pieces.bottoms ?? []) inflate(m);
+    // (надув отключён: у плиссе раздвигал складки и давал светлые полосы)
     // Светлые «острова» на тёмных юбках — это граница мультяшного света/тени
     // на неровных нормалях складок. Юбки из шкафа красим ровно (вся ткань в тени —
     // её основной тон), без пятен.
@@ -297,9 +297,9 @@ export class PieceWardrobe {
     sk.v.lerp(vel.add(tv.multiplyScalar(1.2)), 1 - Math.exp(-dt * 8));
     sk.t += dt;
     const breeze = new THREE.Vector3(Math.sin(sk.t * 0.9) * 0.045 + Math.sin(sk.t * 2.3) * 0.02, 0, Math.cos(sk.t * 0.7) * 0.03);
-    const hz = new THREE.Vector3(-sk.v.x * 9, 0, -sk.v.z * 9).add(breeze);
-    if (hz.length() > 0.35) hz.setLength(0.35);
-    const down = -0.16 + THREE.MathUtils.clamp(-sk.v.y * 0.6, -0.25, 0.04); // вниз всегда
+    const hz = new THREE.Vector3(-sk.v.x * 6, 0, -sk.v.z * 6).add(breeze);
+    if (hz.length() > 0.3) hz.setLength(0.3);
+    const down = -0.22 + THREE.MathUtils.clamp(-sk.v.y * 0.6, -0.25, 0.04); // вниз всегда
     const g = new THREE.Vector3(hz.x, down, hz.z);
     const power = g.length();
     g.normalize();
@@ -348,9 +348,9 @@ export function tuneSkirt(vrm) {
     if (!/skirt/i.test(j.bone.name)) continue;
     // Мягче и живее: меньше жёсткости — дольше и шире колышется за движением,
     // умеренное затухание — плавно, без дрожи; лёгкий вес — ложится, не взлетает.
-    j.settings.dragForce = 0.09;
-    j.settings.stiffness = 0.2;
-    j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.14);
+    j.settings.dragForce = 0.2;
+    j.settings.stiffness = 0.42;
+    j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.2);
     j.settings.gravityDir.set(0, -1, 0);
     j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.05); // юбка держится чуть дальше от ног
   }
