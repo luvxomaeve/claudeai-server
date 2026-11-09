@@ -732,8 +732,8 @@ export class Character {
       // корпус наклоняется вперёд примерно параллельно голени (угол голени
       // берём с прошлого кадра). Наклон делят таз (больше) и поясница (с прогибом).
       const lean = THREE.MathUtils.clamp(this.shinLean, 0, 1.0);
-      pose.hipsRotX += (0.85 * lean + 0.08) * squat + 0.18 * p2;
-      pose.spineX += (0.15 * lean - 0.14) * squat - 0.1 * p2; // прогиб поясницы
+      pose.hipsRotX += (0.68 * lean + 0.06) * squat + 0.18 * p2;
+      pose.spineX += (0.3 * lean - 0.14) * squat - 0.1 * p2; // прогиб поясницы; часть наклона — спиной
       pose.headX -= 0.25 * squat + 0.05 * p2;
       pose.hipsZ *= Math.max(0, 1 - s);
       pose.hipsX *= Math.max(0, 1 - s);
@@ -870,14 +870,18 @@ export class Character {
     // Мягкий предел наклона таза (в приседе/на коленях наклон складывается с посадкой):
     // излишек уходит в спину — полоса отзывается, но она не переворачивается.
     {
-      const lim = 1.25;
+      // В приседе и на коленях бедро не складываем к животу слишком сильно
+      // (кожа сзади модели на сильном сгибе сминается в плоскость): таз наклоняется
+      // меньше, остальное берёт спина — наклон такой же глубокий, но дугой.
+      const sitK = this.sitPhases().p1;
+      const lim = 1.25 - 0.5 * sitK;
       const gate = this.bendW * (1 - this.sitPhases().b3); // не трогаем «лечь на живот»
       if (pose.hipsRotX > lim && gate > 0) {
         const ex = pose.hipsRotX - lim;
         const soft = 0.35 * Math.tanh(ex / 0.35);
-        const cut = (ex - soft * 0.5) * gate;
+        const cut = (ex - soft * 0.4) * gate;
         pose.hipsRotX -= cut;
-        pose.spineX += cut * 0.55;
+        pose.spineX += cut * (0.55 + 0.25 * sitK);
       }
     }
     {
