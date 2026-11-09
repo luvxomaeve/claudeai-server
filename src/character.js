@@ -1165,9 +1165,22 @@ export class Character {
       if (this.motions.length === 0 && this.patAmount < 0.1) {
         const r = Math.random();
         const busyArms = this.poseName !== 'stand';
-        if (this.dancing || this.loop || this.sitS > 0.2 || (this.upper && !this.upper.stopping)) { /* она и так занята */ }
-        else if (busyArms) this.playMotion(pick(['shift', 'lookAround', 'tiltHead', 'sigh']));
-        else this.playMotion(pick([
+        // Без одинаковых движений подряд — разнообразнее и живее.
+        const pickFresh = (list) => {
+          const opts = list.filter((n) => n !== this.lastIdleMotion);
+          this.lastIdleMotion = pick(opts.length ? opts : list);
+          return this.lastIdleMotion;
+        };
+        const lying = this.sitS > 1.05;
+        if (this.dancing || this.loop || (this.upper && !this.upper.stopping && this.sitS < 0.2) || (this.sleep ?? 0) > 0.3) { /* занята или спит */ }
+        else if (lying) {
+          // Лёжа: изредка поворачивает голову, вздыхает, потягивается корпусом.
+          if (r < 0.6) this.playMotion(pickFresh(['lookAround', 'sigh', 'tiltHead', 'lieTurn']));
+        } else if (this.sitS > 0.2) {
+          // Сидя / на коленях: голова, вздох, иногда поправляет волосы.
+          this.playMotion(pickFresh(['lookAround', 'tiltHead', 'sigh', 'tiltHead', 'touchHair']));
+        } else if (busyArms) this.playMotion(pickFresh(['shift', 'lookAround', 'tiltHead', 'sigh']));
+        else this.playMotion(pickFresh([
           'shift', 'lookAround', 'tiltHead', 'sigh',
           'touchHair', 'clasp', 'handOnHip', 'nails', 'stretch',
         ]));
@@ -1512,6 +1525,20 @@ export class Character {
       const lieK = Math.max(ph.c4, ph.p4, ph.b4);
       behindK = 1 - THREE.MathUtils.smoothstep(ang, 1.45 + 0.6 * lieK, 1.95 + 0.6 * lieK);
     }
+    // Камера за её спиной по горизонтали (куда развёрнуто тело) — тоже не тянемся,
+    // даже в наклоне, когда грудь смотрит в пол.
+    {
+      const hq = b.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
+      const bf = new THREE.Vector3(0, 0, 1).applyQuaternion(hq); bf.y = 0;
+      const toCam = this.gazeTarget ? this.gazeTarget.clone().sub(P(head)) : new THREE.Vector3(0, 0, 1);
+      toCam.y = 0;
+      if (bf.lengthSq() > 1e-4 && toCam.lengthSq() > 1e-4) {
+        const ph2 = this.sitPhases();
+        const lieK2 = Math.max(ph2.c4, ph2.p4, ph2.b4);
+        const d = bf.normalize().dot(toCam.normalize());
+        behindK = Math.min(behindK, Math.max(lieK2, THREE.MathUtils.smoothstep(d, -0.35, 0.05)));
+      }
+    }
     want *= behindK;
     this.aimW = (this.aimW ?? 0) + (want - (this.aimW ?? 0)) * (1 - Math.exp(-(dt || 0.016) * 2.2)); // мягко включается/выключается
     const w = this.aimW;
@@ -1533,6 +1560,22 @@ export class Character {
     if (neck) rotateToward(neck, 0.5, 0.6);
     rotateToward(head, 1.0, 0.9);
     rotateToward(head, 1.0, 0.25); // второй проход — точнее в центр
+    // Жёсткий предел: лицо не уходит больше ~85° от направления груди (без выворота шеи).
+    {
+      const chest = this.chestNode() ?? b.hips;
+      const cq = chest.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
+      const cf = new THREE.Vector3(0, 0, 1).applyQuaternion(cq);
+      const face = this.faceDir(new THREE.Vector3());
+      const ang = Math.acos(THREE.MathUtils.clamp(face.dot(cf), -1, 1));
+      const maxA = 1.5;
+      if (ang > maxA) {
+        const back = new THREE.Quaternion().setFromUnitVectors(face, cf);
+        const part = new THREE.Quaternion().slerp(back, (ang - maxA) / ang);
+        const parentQ = head.parent.getWorldQuaternion(new THREE.Quaternion());
+        head.quaternion.copy(parentQ.invert().multiply(part.multiply(head.getWorldQuaternion(new THREE.Quaternion()))));
+        head.updateWorldMatrix(false, true);
+      }
+    }
     // Голова ровно по экрану: «верх» лица совпадает с верхом кадра (без завала набок).
     if (this.gazeUp) {
       const qh = head.getWorldQuaternion(new THREE.Quaternion()).multiply(this.headRestInv);
