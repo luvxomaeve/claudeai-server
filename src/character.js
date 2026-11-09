@@ -536,6 +536,7 @@ export class Character {
   // ---------- Кадр ----------
 
   update(dt) {
+    this.lastDt = Math.min(dt, 0.05);
     this.time += dt;
     const t = this.time;
     const b = this.bones;
@@ -1206,9 +1207,16 @@ export class Character {
     // Изгиб корпуса распределён по позвоночнику плавной дугой (поясница, грудь,
     // верх груди) — пластичнее, без «перелома» в одной точке.
     if (b.chest && b.upperChest) {
-      this.rot(b.spine, pose.spineX * 0.38, pose.spineY * 0.3, pose.spineZ * 0.38);
-      this.rot(b.chest, pose.spineX * 0.34, pose.spineY * 0.35, pose.spineZ * 0.34);
-      this.rot(b.upperChest, pose.spineX * 0.28, pose.spineY * 0.35, pose.spineZ * 0.28);
+      // Пластичная «волна» по позвоночнику: поясница ведёт, грудь и верх груди
+      // догоняют с мягким запаздыванием — тело гнётся дугой, как живое.
+      const wv = this.spineWave ??= { c: { x: pose.spineX, y: pose.spineY, z: pose.spineZ }, u: { x: pose.spineX, y: pose.spineY, z: pose.spineZ } };
+      const kc = 1 - Math.exp(-(this.lastDt ?? 0.016) * 9);
+      const ku = 1 - Math.exp(-(this.lastDt ?? 0.016) * 6.5);
+      wv.c.x += (pose.spineX - wv.c.x) * kc; wv.c.y += (pose.spineY - wv.c.y) * kc; wv.c.z += (pose.spineZ - wv.c.z) * kc;
+      wv.u.x += (wv.c.x - wv.u.x) * ku; wv.u.y += (wv.c.y - wv.u.y) * ku; wv.u.z += (wv.c.z - wv.u.z) * ku;
+      this.rot(b.spine, pose.spineX * 0.36, pose.spineY * 0.3, pose.spineZ * 0.36);
+      this.rot(b.chest, wv.c.x * 0.34, wv.c.y * 0.35, wv.c.z * 0.34);
+      this.rot(b.upperChest, wv.u.x * 0.3, wv.u.y * 0.35, wv.u.z * 0.3);
     } else {
       const spineBone = b.chest ?? b.spine;
       this.rot(b.spine, pose.spineX * 0.5, pose.spineY * 0.5, pose.spineZ * 0.5);
@@ -2675,17 +2683,17 @@ export class Character {
     for (const key in target) {
       let w = 8;
       if (key.startsWith('hips')) w = 4.5;
-      else if (key.startsWith('spine')) w = 6;
-      else if (key.startsWith('head')) w = 6.5;
-      else if (/Shoulder/.test(key)) w = 10;
+      else if (key.startsWith('spine')) w = 5.2;
+      else if (key.startsWith('head')) w = 5;
+      else if (/Shoulder/.test(key)) w = 8;
       else if (/Leg|Knee/.test(key)) w = 7;
-      else if (/Upper|Lower/.test(key)) w = fast ? 12 : 9;
+      else if (/Upper|Lower/.test(key)) w = fast ? 12 : 7.5;
       if (this.dancing) w *= 2.2;
       let x = this.sp[key] ?? target[key];
       let v = this.spv[key] ?? 0;
       // Бёдра — упругие: чуть «пружинят» после движения (сочнее, пластичнее);
       // корпус — мягче; остальное — без перелёта.
-      const zeta = key.startsWith('hips') ? 0.55 : key.startsWith('spine') ? 0.78 : 1;
+      const zeta = key.startsWith('hips') ? 0.55 : key.startsWith('spine') ? 0.72 : key.startsWith('head') ? 0.82 : /Shoulder|Upper|Lower/.test(key) ? 0.85 : 1;
       // Критически демпфированная пружина, с подшагами для устойчивости.
       const steps = Math.max(1, Math.ceil((w * dt) / 0.25));
       const h = dt / steps;
