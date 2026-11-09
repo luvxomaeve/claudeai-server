@@ -71,6 +71,9 @@ export class PieceWardrobe {
     vrm.scene.visible = false;
     this.scene.add(vrm.scene);
     this.sources.set(id, { vrm, ...idx, active: false });
+    // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
+    this.legTris = null;
+    this.skinCache?.clear();
   }
 
   // wear: { tops: 'base' | 'o1' | ... | 'none', ... }
@@ -128,7 +131,8 @@ export class PieceWardrobe {
       const knee = this.base.vrm.humanoid.getRawBoneNode('leftLowerLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.5;
       const cut = hip + (hip - knee) * 0.12;
       this.legTris = [];
-      for (const mesh of this.base.skins) {
+      const allSkins = [...this.base.skins, ...[...this.sources.values()].flatMap((s) => s.skins)];
+      for (const mesh of allSkins) {
         const g = mesh.geometry;
         const pos = g.attributes.position;
         const uv = g.attributes.uv;

@@ -2470,7 +2470,7 @@ let suggestTimer = 300 + Math.random() * 240;
 let suggestion = null;
 window.__suggestNow = () => { suggestTimer = 0; };
 // ---------- Сама переодевается (иногда): одну вещь или целый наряд ----------
-let selfDressTimer = 360 + Math.random() * 240;
+let selfDressTimer = 600 + Math.random() * 480;
 let selfDressing = false;
 const SELF_DRESS_LINES = {
   legs: ['Решила сменить чулочки~ Как тебе?', 'Новые на ножках ♥ Заметил?', 'Захотелось других чулок~'],
@@ -2486,14 +2486,14 @@ async function updateSelfDress(dt) {
   if (!unlocked('wardrobe') || pointerActive || poseMode || character.sleep > 0.3 || !$('wardrobe').classList.contains('hidden')) return;
   selfDressTimer -= dt;
   if (selfDressTimer > 0) return;
-  selfDressTimer = 420 + Math.random() * 360; // раз в 7–13 минут
+  selfDressTimer = 600 + Math.random() * 480; // раз в 10–18 минут
   suggestTimer = Math.max(suggestTimer, 180); // не вместе с предложением
   selfDressing = true;
   try {
     const r = Math.random();
     let kind;
-    if (r < 0.55) {
-      // Одна вещь.
+    if (r < 0.85) {
+      // Одна вещь (чаще всего).
       const opts = [];
       for (const c of PIECE_CATS) {
         for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && (wear[c.id] ?? 'base') !== src.id) opts.push({ cat: c.id, id: src.id });
@@ -2503,8 +2503,8 @@ async function updateSelfDress(dt) {
       const o = opts[Math.floor(Math.random() * opts.length)];
       kind = o.cat;
       await pickPiece(o.cat, o.id, true);
-    } else if (r < 0.85) {
-      // Целый наряд из одного комплекта.
+    } else if (r < 0.95) {
+      // Целый наряд (редко) из одного комплекта.
       const src = PIECE_SOURCES[Math.floor(Math.random() * PIECE_SOURCES.length)];
       kind = 'outfit';
       for (const c of PIECE_CATS) {
@@ -2614,7 +2614,7 @@ function applyLook() {
   applyClothColor();
   tintMaterials(/HAIR/i, HAIR_COLORS.find((c) => c.id === look.hair)?.color ?? null, 0.6);
   stockings?.apply(look.stockings);
-  const bg = look.bg ?? (look.dark ? 'night' : 'day');
+  const bg = look.bg ?? 'stars';
   document.body.classList.toggle('dark', BG_DARK.has(bg));
   for (const b of BACKGROUNDS) document.body.classList.toggle(`bg-${b.id}`, b.id === bg);
   applyLight(bg);
@@ -2640,7 +2640,7 @@ function renderBackgrounds() {
   const box = $('bg-list');
   if (!box) return;
   box.innerHTML = '';
-  const cur = look.bg ?? (look.dark ? 'night' : 'day');
+  const cur = look.bg ?? 'stars';
   for (const b of BACKGROUNDS) {
     const el = document.createElement('button');
     el.className = 'chip' + (b.id === cur ? ' active' : '');
@@ -2733,12 +2733,16 @@ function renderWardrobe() {
 }
 
 
-$('goth-preset').addEventListener('click', () => {
-  clothColor = 'black';
-  saveLook();
-  Object.assign(look, { hair: 'black', stockings: 'off', dark: true, bg: 'night' });
-  saveLook();
-  applyLook();
+$('goth-preset').addEventListener('click', async () => {
+  // Готик-образ: чёрный свитер-кроп, тёмная юбка с сакурой, чёрные колготки, чёрные платформы.
+  const src = PIECE_SOURCES.find((s) => s.id === 'o5' && s.cats.includes('bottoms'));
+  wearTint['bottoms:o5'] = TINTS.findIndex((t) => t.name === 'Чёрный');
+  try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
+  await pickPiece('tops', 'base', true);
+  await pickPiece('bottoms', src ? 'o5' : 'base', true);
+  await pickPiece('shoes', 'base', true);
+  await pickPiece('legs', 'base', true);
+  await pickPiece('acc', 'base', true);
   renderWardrobe();
   character?.react({ expression: 'relaxed', motion: 'tiltHead' });
   say('Тьма мне к лицу, не находишь? ♥');
