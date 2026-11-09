@@ -1340,7 +1340,10 @@ export class Character {
   // перед собой, одна на бедре — другая на талии, за спиной. Место меняется само раз в 9–16 с,
   // кисти плавно переезжают и чуть скользят. Жесты, позы и магниты имеют приоритет.
   pickRestSpot() {
-    const spots = ['thighs', 'hips', 'clasp', 'hipThigh', 'thighHip', 'thighs'];
+    // Стоя прямо — иногда за голову (одну или обе руки), потом опускает на талию/бёдра.
+    const upright = this.sitS < 0.1 && Math.abs(this.bodyOffset.hipsRotX) < 0.3;
+    const spots = ['thighs', 'hips', 'clasp', 'hipThigh', 'thighHip', 'thighs', 'hips',
+      ...(upright && !this.posing ? ['headL', 'headR', 'headBoth', 'headThigh'] : [])];
     let n;
     do { n = spots[Math.floor(Math.random() * spots.length)]; } while (n === this.restSpot && spots.length > 1);
     return n;
@@ -1365,13 +1368,16 @@ export class Character {
         case 'hip': return at(b.hips, [0.15, 0.07, 0.03], sx);
         case 'front': return at(b.hips, [0.025, -0.07, 0.14], sx);
         case 'back': return at(b.hips, [0.05, 0.0, -0.13], sx);
+        case 'head': return at(b.head, [0.075, 0.05, -0.06], sx); // ладонь за голову
         default: return null;
       }
     };
     const map = {
       thighs: ['thigh', 'thigh'], hips: ['hip', 'hip'], clasp: ['front', 'front'],
       hipThigh: ['hip', 'thigh'], thighHip: ['thigh', 'hip'], behind: ['back', 'back'],
+      headL: ['head', 'hip'], headR: ['hip', 'head'], headBoth: ['head', 'head'], headThigh: ['thigh', 'head'],
     }[spot] ?? ['thigh', 'thigh'];
+    this.restKinds = map;
     return { left: one(map[0], 'left'), right: one(map[1], 'right') };
   }
 
@@ -1389,7 +1395,7 @@ export class Character {
     if (!this.restSpot || this.restTimer <= 0) {
       this.prevSpot = this.restSpot ?? 'thighs';
       this.restSpot = this.pickRestSpot();
-      this.restTimer = 9 + Math.random() * 7;
+      this.restTimer = this.restSpot.startsWith("head") ? 5 + Math.random() * 3 : 9 + Math.random() * 7;
       this.restMix = 0;
     }
     this.restMix = Math.min(1, (this.restMix ?? 1) + dt / 1.6);
@@ -1431,9 +1437,19 @@ export class Character {
           target.lerp(kt, slide);
         }
       }
+      // Прогиб назад — ладони плавно на талию.
+      const arch = THREE.MathUtils.smoothstep(-this.bodyOffset.hipsRotX, 0.1, 0.45);
+      if (arch > 0.001) {
+        const waist = this.restTargets('hips', this.time)[side];
+        if (waist) target.lerp(waist, arch);
+      }
+      const kinds = this.restTargets(this.restSpot, this.time) && this.restKinds;
+      const onHead = kinds && kinds[side === 'left' ? 0 : 1] === 'head' ? k * (1 - slide) * (1 - arch) : 0;
       const behind = (side === 'left' ? [a, c] : [a, c]) && (this.restSpot === 'behind') && slide < 0.5;
       // Локти — назад и вдоль тела, а не в стороны (рука лежит естественно, не «растопыркой»).
       const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.18, -0.25, behind ? 0.1 : -0.6));
+      // Рука за головой — локоть в сторону и вверх (красивый изгиб, не сквозь голову).
+      if (onHead > 0) pole.lerp(lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(sx * 0.6, 0.35, -0.05)), onHead);
       this.twoBoneIK(upper, lower, hand, target, pole);
       const w = this.restW * (1 - (this.patAmount ?? 0) * 0.7) * (1 - yieldK);
       upper.quaternion.copy(q1.clone().slerp(upper.quaternion, w));
