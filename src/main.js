@@ -576,9 +576,9 @@ const FEATURES = [
   { id: 'dance', lvl: 4, name: 'Танцы и анимации', ids: ['btn-anims'] },
   { id: 'flow', lvl: 5, name: '«Повтор движения»', ids: ['cam-auto'] },
 ];
-// За рекламу фича открывается на 30 минут (навсегда — только уровнем симпатии).
+// Фича открывается навсегда: уровнем симпатии или сразу — за рекламу.
 const UNLOCK_KEY = 'waifu-unlocked2';
-const AD_UNLOCK_MS = 30 * 60000;
+const AD_UNLOCK_FOREVER = 8.64e15; // «навсегда» (максимальная дата)
 let adUnlocked = {}; // id → до какого времени открыто
 try { adUnlocked = JSON.parse(localStorage.getItem(UNLOCK_KEY) || '{}') || {}; } catch { /* ignore */ }
 const adOpen = (id) => (adUnlocked[id] ?? 0) > Date.now();
@@ -614,18 +614,18 @@ function showLock(f) {
     lockPop.querySelector('.lp-ok').addEventListener('click', () => { lockPop.hidden = true; });
   }
   lockPop.querySelector('.lp-title').textContent = `🔒 ${f.name}`;
-  lockPop.querySelector('.lp-text').textContent = `Откроется навсегда на уровне ${f.lvl + 1} — «${LEVELS[f.lvl].label}». Общайся с ней, чтобы симпатия росла 💗`;
+  lockPop.querySelector('.lp-text').textContent = `Откроется на уровне ${f.lvl + 1} — «${LEVELS[f.lvl].label}». Общайся с ней, чтобы симпатия росла 💗`;
   const ad = lockPop.querySelector('.lp-ad');
-  ad.textContent = '▶ Открыть на 30 минут (реклама)';
+  ad.textContent = '▶ Открыть сейчас (реклама)';
   ad.hidden = !hasAds(); // без рекламы (нет SDK) — только по уровню
   ad.onclick = () => {
     lockPop.hidden = true;
     adsRewarded(() => {
-      adUnlocked[f.id] = Date.now() + AD_UNLOCK_MS;
+      adUnlocked[f.id] = AD_UNLOCK_FOREVER;
       try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(adUnlocked)); } catch { /* ignore */ }
       lockSig = FEATURES.map((x) => (unlocked(x.id) ? 1 : 0)).join('');
       renderLocks();
-      showToast(`🔓 Открыто на 30 минут: ${f.name}`);
+      showToast(`🔓 Открыто: ${f.name}`);
     }, () => showToast('Реклама не досмотрена — ничего страшного'));
   };
   lockPop.hidden = false;
