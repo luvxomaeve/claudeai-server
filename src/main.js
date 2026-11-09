@@ -2608,7 +2608,36 @@ async function addOutfit(file) {
   await wearOutfit(record.id);
 }
 
-$('btn-wardrobe').addEventListener('click', () => { if ($('wardrobe').classList.contains('hidden')) interstitial(); togglePanel('wardrobe', renderWardrobe); });
+// Шкаф: камера отъезжает — она видна целиком над панелью, сразу видно, что надето.
+// Закрыл шкаф — камера возвращается как была.
+let wardrobeCam = null;
+function wardrobeView() {
+  wardrobeCam = camState();
+  exitManualCam();
+  exitFreeCam();
+  setFaceCam(false);
+  camPanH.set(0, 0, 0);
+  camYaw = 0;
+  camPitch = 0.08;
+  camZoom = 2.9;
+  camLift = -1.2 * camBase.S;
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+}
+function updateWardrobeCam() {
+  if (wardrobeCam && $('wardrobe').classList.contains('hidden')) {
+    const v = wardrobeCam;
+    wardrobeCam = null;
+    applyCamState(v);
+  }
+}
+$('btn-wardrobe').addEventListener('click', () => {
+  const opening = $('wardrobe').classList.contains('hidden');
+  if (opening) interstitial();
+  togglePanel('wardrobe', renderWardrobe);
+  if (opening && !$('wardrobe').classList.contains('hidden')) wardrobeView();
+});
 $('outfit-input').addEventListener('change', (e) => {
   if (e.target.files[0]) addOutfit(e.target.files[0]);
   e.target.value = '';
@@ -3394,6 +3423,7 @@ function tick() {
   updateLiveIdle();
   updateAuto(dt);
   updateLoop(dt);
+  updateWardrobeCam();
   // Пока ты с ней — симпатия понемногу растёт и сама (раз в 20 с).
   if (!document.hidden) {
     playGain += dt;

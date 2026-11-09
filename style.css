@@ -1371,3 +1371,5 @@ body.clean #clean-exit { display: grid; place-items: center; position: fixed; z-
   top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px));
   width: 34px; height: 34px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.25); color: rgba(255, 255, 255, 0.8);
   font-size: 16px; backdrop-filter: blur(6px); }
+/* Шкаф пониже — над ним она видна целиком. */
+@media (max-width: 700px) { #wardrobe.panel { max-height: 40%; } }
