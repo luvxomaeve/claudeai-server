@@ -772,29 +772,32 @@ export class Character {
       }
       // Сидит — не замирает: мягко покачивается, наклоняет голову.
       // Бёдра живые и в приседе (на пятках), и на коленях, и сидя/лёжа.
-      const hipLife = p1 * (1 - 0.6 * (this.sleep ?? 0)); // во сне — тише
+      // Свои «часы» бёдер: на полу и лёжа покачивание живее (быстрее), во сне — тише, но не замирает.
+      this.hipClock = (this.hipClock ?? t) + (this.lastDt ?? 0.016) * (1 + 0.7 * p2);
+      const tt = this.hipClock;
+      const hipLife = p1 * (1 - 0.35 * (this.sleep ?? 0)) * (1 + 0.25 * p2);
       if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
-        const hw = Math.tanh(1.8 * Math.sin(t * 0.6)) / Math.tanh(1.8);
+        const hw = Math.tanh(1.8 * Math.sin(tt * 0.6)) / Math.tanh(1.8);
         const squatK = p1 * (1 - p2);
         // На полу (колени, сидя, лёжа) — шире и пластичнее: бёдра плавно переносят вес
         // из стороны в сторону с поворотом — мягкая «восьмёрка», а не мелкое дрожание.
         const floorK = p2;
-        const fig = Math.sin(t * 0.6 * 2 + 0.7); // второй такт восьмёрки
+        const fig = Math.sin(tt * 0.6 * 2 + 0.7); // второй такт восьмёрки
         pose.hipsZ += hw * (0.15 + 0.16 * floorK + 0.12 * Math.max(ph2.p4, ph2.c4)) * hipLife;
         pose.hipsX += hw * (0.035 * squatK + 0.045 * floorK * (1 - lieAll)) * this.scale;
-        pose.hipsRotY += (Math.sin(t * 0.6 + 1.3) * (0.11 * floorK + 0.12 * lieAll) + Math.sin(t * 0.42 + 1.1) * 0.1) * hipLife;
+        pose.hipsRotY += (Math.sin(tt * 0.6 + 1.3) * (0.11 * floorK + 0.12 * lieAll) + Math.sin(tt * 0.42 + 1.1) * 0.1) * hipLife;
         // Сидя и лёжа ёрзает: плечи и голова тоже плавно перекатываются.
-        pose.spineZ += Math.sin(t * 0.6 + 2.0) * (0.06 * floorK + 0.1 * lieAll) * hipLife;
-        pose.headY += Math.sin(t * 0.5 + 0.4) * (0.08 * floorK + 0.2 * lieAll) * hipLife;
-        pose.headZ += Math.sin(t * 0.43 + 1.7) * (0.06 * floorK + 0.08 * lieAll) * hipLife;
+        pose.spineZ += Math.sin(tt * 0.6 + 2.0) * (0.06 * floorK + 0.1 * lieAll) * hipLife;
+        pose.headY += Math.sin(tt * 0.5 + 0.4) * (0.08 * floorK + 0.2 * lieAll) * hipLife;
+        pose.headZ += Math.sin(tt * 0.43 + 1.7) * (0.06 * floorK + 0.08 * lieAll) * hipLife;
         pose.hipsY += fig * 0.012 * floorK * (1 - lieAll) * this.scale * hipLife;
         // Корпус уравновешивает — плечи плывут в противофазе, шея держит голову ровно.
-        pose.spineY -= Math.sin(t * 0.6 + 1.3) * 0.05 * floorK * hipLife;
+        pose.spineY -= Math.sin(tt * 0.6 + 1.3) * 0.05 * floorK * hipLife;
         pose.headZ += hw * 0.05 * floorK * hipLife;
         // Таз мягко покачивается вперёд-назад — «волна» бёдрами.
-        pose.hipsRotX += Math.sin(t * 0.5 + 0.4) * 0.06 * (1 - lieAll * 0.5) * hipLife;
+        pose.hipsRotX += Math.sin(tt * 0.5 + 0.4) * 0.06 * (1 - lieAll * 0.5) * hipLife;
         pose.spineX -= Math.sin(t * 0.5 + 0.4) * 0.04 * (1 - lieAll * 0.5) * hipLife;
         pose.spineZ -= hw * 0.06 * (1 - lieAll) * hipLife;
       }
