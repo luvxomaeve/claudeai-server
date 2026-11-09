@@ -252,8 +252,8 @@ export function tuneSkirt(vrm) {
     if (!/skirt/i.test(j.bone.name)) continue;
     // Мягче и живее: меньше жёсткости — дольше и шире колышется за движением,
     // умеренное затухание — плавно, без дрожи; лёгкий вес — ложится, не взлетает.
-    j.settings.dragForce = 0.14;
-    j.settings.stiffness = 0.38;
+    j.settings.dragForce = 0.12;
+    j.settings.stiffness = 0.3;
     j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.14);
     j.settings.gravityDir.set(0, -1, 0);
     j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.03);

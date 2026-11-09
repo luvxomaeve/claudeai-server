@@ -575,7 +575,7 @@ export class Character {
     const relaxL = Math.max(0, -w); // левая нога расслаблена
     const relaxR = Math.max(0, w); // правая нога расслаблена
     pose.hipsX += w * 0.055 * this.scale;
-    pose.hipsZ += w * 0.14;
+    pose.hipsZ += w * 0.17;
     pose.hipsY -= Math.abs(w) * 0.016 * this.scale;
     // Плавная «восьмёрка» бёдрами в покое: таз чуть поворачивается и покачивается,
     // плечи и голова уравновешивают — живая, женственная стойка.
@@ -583,8 +583,8 @@ export class Character {
       const st = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.1, 0.4);
       const f = Math.sin(t * 0.55);
       const g = Math.sin(t * 1.1 + 0.6);
-      pose.hipsRotY += f * 0.1 * st;
-      pose.hipsZ += g * 0.05 * st;
+      pose.hipsRotY += f * 0.13 * st;
+      pose.hipsZ += g * 0.065 * st;
       pose.spineY -= f * 0.07 * st;
       pose.spineZ -= g * 0.045 * st;
     }
@@ -749,7 +749,7 @@ export class Character {
         // из стороны в сторону с поворотом — мягкая «восьмёрка», а не мелкое дрожание.
         const floorK = p2;
         const fig = Math.sin(t * 0.6 * 2 + 0.7); // второй такт восьмёрки
-        pose.hipsZ += hw * (0.13 + 0.13 * floorK + 0.12 * lieAll) * hipLife;
+        pose.hipsZ += hw * (0.15 + 0.16 * floorK + 0.12 * Math.max(ph2.p4, ph2.c4)) * hipLife;
         pose.hipsX += hw * (0.035 * squatK + 0.045 * floorK * (1 - lieAll)) * this.scale;
         pose.hipsRotY += (Math.sin(t * 0.6 + 1.3) * (0.11 * floorK + 0.12 * lieAll) + Math.sin(t * 0.42 + 1.1) * 0.1) * hipLife;
         // Сидя и лёжа ёрзает: плечи и голова тоже плавно перекатываются.
