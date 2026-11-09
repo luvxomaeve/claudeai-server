@@ -2370,7 +2370,7 @@ function cycleTint(cat, id) {
   showToast(`🎨 ${TINTS[wearTint[key]].name}`);
 }
 const isDress = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.dress;
-async function pickPiece(cat, id) {
+async function pickPiece(cat, id, quiet = false) {
   if (cat === 'tops') {
     // Платье — низ не нужен; обычный верх — вернуть низ, если его не было.
     if (isDress(id)) wear.bottoms = 'none';
@@ -2387,6 +2387,7 @@ async function pickPiece(cat, id) {
     $('flash').classList.remove('on');
   }
   applyWear();
+  if (quiet) return;
   character?.react({ expression: 'happy', motion: 'sway' });
   if (cat === 'legs' && legwear() !== 'tights') say(pick(LEGS_LINES[legwear()]));
   else if (cat === 'legs') say(pick(['Колготки — классика~', 'Так уютнее ♥', 'Нравятся мои колготки?']));
@@ -2414,6 +2415,60 @@ const SUGGEST_LINES = [
 let suggestTimer = 300 + Math.random() * 240;
 let suggestion = null;
 window.__suggestNow = () => { suggestTimer = 0; };
+// ---------- Сама переодевается (иногда): одну вещь или целый наряд ----------
+let selfDressTimer = 360 + Math.random() * 240;
+let selfDressing = false;
+const SELF_DRESS_LINES = {
+  legs: ['Решила сменить чулочки~ Как тебе?', 'Новые на ножках ♥ Заметил?', 'Захотелось других чулок~'],
+  shoes: ['Переобулась~ Идёт?', 'Новые туфельки ♥ Нравятся?', 'Захотелось сменить обувь~'],
+  tops: ['Сменила верх~ Как тебе?', 'Решила примерить другое ♥', 'Так мне больше нравится~ А тебе?'],
+  bottoms: ['Сменила юбочку~ Нравится?', 'Решила переодеться ♥', 'Как тебе так?'],
+  acc: ['Добавила украшение~', 'Маленькая деталь ♥ Заметил?'],
+  outfit: ['Я решила сменить наряд~ Специально для тебя ♥', 'Переоделась для тебя~ Как тебе?', 'Новый образ! Нравится? ♥', 'Хи, сюрприз — новый прикид~'],
+  base: ['Вернула свой любимый образ~', 'Снова в своём ♥ Скучал по нему?'],
+};
+async function updateSelfDress(dt) {
+  if (!character || !PIECE_SOURCES.length || selfDressing || suggestion) return;
+  if (!unlocked('wardrobe') || pointerActive || poseMode || character.sleep > 0.3 || !$('wardrobe').classList.contains('hidden')) return;
+  selfDressTimer -= dt;
+  if (selfDressTimer > 0) return;
+  selfDressTimer = 420 + Math.random() * 360; // раз в 7–13 минут
+  suggestTimer = Math.max(suggestTimer, 180); // не вместе с предложением
+  selfDressing = true;
+  try {
+    const r = Math.random();
+    let kind;
+    if (r < 0.55) {
+      // Одна вещь.
+      const opts = [];
+      for (const c of PIECE_CATS) {
+        for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && (wear[c.id] ?? 'base') !== src.id) opts.push({ cat: c.id, id: src.id });
+        if ((wear[c.id] ?? 'base') !== 'base' && c.id !== 'acc') opts.push({ cat: c.id, id: 'base' });
+      }
+      if (!opts.length) return;
+      const o = opts[Math.floor(Math.random() * opts.length)];
+      kind = o.cat;
+      await pickPiece(o.cat, o.id, true);
+    } else if (r < 0.85) {
+      // Целый наряд из одного комплекта.
+      const src = PIECE_SOURCES[Math.floor(Math.random() * PIECE_SOURCES.length)];
+      kind = 'outfit';
+      for (const c of PIECE_CATS) {
+        if (src.cats.includes(c.id)) await pickPiece(c.id, src.id, true);
+        else if (c.id === 'acc') await pickPiece('acc', 'none', true);
+      }
+    } else {
+      // Обратно в свой базовый образ.
+      kind = 'base';
+      for (const c of PIECE_CATS) await pickPiece(c.id, 'base', true);
+    }
+    character.react({ expression: 'happy', motion: 'sway' });
+    say(pick(SELF_DRESS_LINES[kind] ?? SELF_DRESS_LINES.outfit), 'happy');
+  } finally {
+    selfDressing = false;
+  }
+}
+window.__selfDressNow = () => { selfDressTimer = 0; };
 function updateSuggest(dt) {
   if (!character || !PIECE_SOURCES.length) return;
   if (suggestion) return;
@@ -3474,6 +3529,7 @@ function tick() {
     if (playGain > 20) { playGain = 0; setLove(love + 1); }
   }
   updateSuggest(dt);
+  updateSelfDress(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
