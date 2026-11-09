@@ -224,7 +224,42 @@ export class PieceWardrobe {
       }
       s.vrm.scene.position.copy(this.base.vrm.scene.position);
       s.vrm.scene.quaternion.copy(this.base.vrm.scene.quaternion);
+      this.skirtInertia(s, h, dt);
       s.vrm.update(dt);
+    }
+  }
+
+  // Юбка по инерции: бёдра двигаются — подол запаздывает и тянется в обратную
+  // сторону, потом догоняет; плюс еле заметный «ветерок». Сила всегда направлена
+  // в основном вниз — юбка колышется, но не задирается.
+  skirtInertia(s, h, dt) {
+    s.skirtJoints ??= (s.vrm.springBoneManager?.joints ? [...s.vrm.springBoneManager.joints].filter((j) => /skirt/i.test(j.bone.name)) : []);
+    if (!s.skirtJoints.length || !(dt > 0)) return;
+    // Точка между бёдрами (подол качается за ними — и при сдвиге, и при повороте таза).
+    const l = h.getNormalizedBoneNode('leftUpperLeg');
+    const r = h.getNormalizedBoneNode('rightUpperLeg');
+    if (!l || !r) return;
+    s.vrm.scene.updateMatrixWorld(true);
+    const p = l.getWorldPosition(new THREE.Vector3()).add(r.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+    const twist = r.getWorldPosition(new THREE.Vector3()).sub(l.getWorldPosition(new THREE.Vector3()));
+    if (!s.sk) s.sk = { p: p.clone(), v: new THREE.Vector3(), tw: twist.clone(), w: new THREE.Vector3(), t: 0 };
+    const sk = s.sk;
+    const vel = p.clone().sub(sk.p).divideScalar(dt);
+    const tv = twist.clone().sub(sk.tw).divideScalar(dt); // поворот таза — края подола движутся
+    sk.p.copy(p);
+    sk.tw.copy(twist);
+    sk.v.lerp(vel.add(tv.multiplyScalar(1.2)), 1 - Math.exp(-dt * 8));
+    sk.t += dt;
+    const breeze = new THREE.Vector3(Math.sin(sk.t * 0.9) * 0.03 + Math.sin(sk.t * 2.3) * 0.015, 0, Math.cos(sk.t * 0.7) * 0.02);
+    const hz = new THREE.Vector3(-sk.v.x * 4, 0, -sk.v.z * 4).add(breeze);
+    if (hz.length() > 0.25) hz.setLength(0.25);
+    const down = -0.16 + THREE.MathUtils.clamp(-sk.v.y * 0.6, -0.25, 0.04); // вниз всегда
+    const g = new THREE.Vector3(hz.x, down, hz.z);
+    const power = g.length();
+    g.normalize();
+    for (const j of s.skirtJoints) {
+      j.settings.gravityDir.copy(g);
+      j.settings.gravityPower = power;
     }
   }
 

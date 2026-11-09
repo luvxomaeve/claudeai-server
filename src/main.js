@@ -2262,6 +2262,7 @@ function tintMaterials(test, colorHex, shadeK) {
 // (window.WAIFU_OUTFITS), модели лежат только там. cats — какие вещи есть; dress — верх это платье.
 const PIECE_SOURCES = window.WAIFU_OUTFITS ?? [];
 const pieceWardrobe = new PieceWardrobe(scene);
+window.__pw = pieceWardrobe; // для отладки
 const WEAR_KEY = 'waifu-wear';
 let wear = {};
 try { wear = JSON.parse(localStorage.getItem(WEAR_KEY) || '{}'); } catch { wear = {}; }
