@@ -587,6 +587,23 @@ export class Character {
       pose.spineY -= f * 0.07 * st;
       pose.spineZ -= g * 0.045 * st;
     }
+    // Иногда игриво пружинит на месте: мягко подгибает колени в ритм,
+    // бёдра покачиваются, голова в такт — живая, «прыгучая», но без подскоков.
+    {
+      const st = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.1, 0.4);
+      const calm = 1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.15, 0.5);
+      const env = THREE.MathUtils.smoothstep(Math.sin(t * 0.11 + 0.5), 0.3, 0.85) * st * calm * (1 - (this.sleep ?? 0));
+      if (env > 0.001) {
+        const bb = 0.5 + 0.5 * Math.sin(t * 4.0);
+        const sw = Math.sin(t * 2.0);
+        pose.hipsY -= bb * 0.014 * this.scale * env;
+        pose.lKneeX += bb * 0.13 * env;
+        pose.rKneeX += bb * 0.13 * env;
+        pose.hipsZ += sw * 0.06 * env;
+        pose.spineZ -= sw * 0.03 * env;
+        pose.headZ += sw * 0.04 * env;
+      }
+    }
     pose.lLegZ -= w * 0.075; // ноги остаются вертикальными, бёдра наклоняются
     pose.rLegZ -= w * 0.075;
     pose.spineZ -= w * 0.12;
@@ -2177,10 +2194,25 @@ export class Character {
   setArmPreset(side, preset) {
     this.armPreset[side] = preset;
     this.handTargets[side] = null;
+    if (this.handAnchor) this.handAnchor[side] = null;
+  }
+
+  // Точка крепления руки на теле: кость + смещение в осях тела (как магниты в позах).
+  anchorPoint(a) {
+    const node = this.vrm.humanoid.getNormalizedBoneNode(a.bone);
+    if (!node) return null;
+    const p = node.getWorldPosition(new THREE.Vector3());
+    const q = this.bones.hips.getWorldQuaternion(new THREE.Quaternion());
+    return p.add(new THREE.Vector3(a.off[0] * this.flip, a.off[1], a.off[2] * this.flip).multiplyScalar(this.scale).applyQuaternion(q));
+  }
+
+  setHandAnchor(side, a) {
+    (this.handAnchor ??= { left: null, right: null })[side] = a ? { bone: a.bone, off: [...a.off] } : null;
   }
 
   setHandTarget(side, worldPoint) {
     this.armPreset[side] = null;
+    if (this.handAnchor) this.handAnchor[side] = null;
     const chest = this.chestNode();
     chest.updateWorldMatrix(true, false);
     this.handTargets[side] = chest.worldToLocal(worldPoint.clone());
@@ -2229,6 +2261,7 @@ export class Character {
     this.armPreset = { left: null, right: null };
     this.footSetSit = {};
     this.hipsSetSit = null;
+    this.handAnchor = { left: null, right: null };
   }
 
   exportTouchPose() {
@@ -2245,6 +2278,7 @@ export class Character {
         right: this.footOffset.right?.toArray() ?? null,
       },
       footSit: { ...(this.footSetSit ?? {}) },
+      anchors: { left: this.handAnchor?.left ?? null, right: this.handAnchor?.right ?? null },
       hipsSit: this.hipsSetSit ?? null,
     };
   }
@@ -2271,6 +2305,7 @@ export class Character {
       if (data.feet?.[side]) this.footOffset[side] = new THREE.Vector3().fromArray(data.feet[side]);
     }
     this.footSetSit = { ...(data.footSit ?? {}) };
+    this.handAnchor = { left: data.anchors?.left ?? null, right: data.anchors?.right ?? null };
     this.hipsSetSit = data.hipsSit ?? null;
   }
 
@@ -2281,7 +2316,11 @@ export class Character {
     let leanX = 0;
     let leanZ = 0;
     for (const side of ['left', 'right']) {
-      const local = this.handTargets[side] ? this.dragPhys.hand[side]?.x : null;
+      // Рука прикреплена к телу (бедро, колено, щека) — цель считаем от этой части тела
+      // прямо сейчас: рука едет вместе с ней и не отлипает при наклоне/посадке/повторе.
+      const anc = this.handAnchor?.[side];
+      const ap = anc && this.handTargets[side] ? this.anchorPoint(anc) : null;
+      const local = ap ? chest.worldToLocal(ap) : this.handTargets[side] ? this.dragPhys.hand[side]?.x : null;
       if (!local) {
         this.handsOnKnees(side);
         continue;
@@ -2609,11 +2648,14 @@ export class Character {
       if (this.dancing) w *= 2.2;
       let x = this.sp[key] ?? target[key];
       let v = this.spv[key] ?? 0;
+      // Бёдра — упругие: чуть «пружинят» после движения (сочнее, пластичнее);
+      // корпус — мягче; остальное — без перелёта.
+      const zeta = key.startsWith('hips') ? 0.55 : key.startsWith('spine') ? 0.78 : 1;
       // Критически демпфированная пружина, с подшагами для устойчивости.
       const steps = Math.max(1, Math.ceil((w * dt) / 0.25));
       const h = dt / steps;
       for (let i = 0; i < steps; i++) {
-        const a = w * w * (target[key] - x) - 2 * w * v;
+        const a = w * w * (target[key] - x) - 2 * zeta * w * v;
         v += a * h;
         x += v * h;
       }

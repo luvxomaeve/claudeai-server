@@ -2000,7 +2000,11 @@ function poseDragMove(e) {
         if (near && snapAnchor?.a !== near.a) showLabel(`${HANDLE_LABELS[activeHandle] ?? 'Рука'} ${near.a.label}`);
         snapAnchor = near;
         if (near?.a.preset) character.setArmPreset(poseDrag.side, near.a.preset);
-        else character.setHandTarget(poseDrag.side, near ? near.p : dragPoint);
+        else {
+          character.setHandTarget(poseDrag.side, near ? near.p : dragPoint);
+          // Магнит на теле — рука держится за эту часть тела и едет вместе с ней.
+          if (near) character.setHandAnchor(poseDrag.side, near.a);
+        }
       }
       else character.setFootTarget(poseDrag.side, dragPoint);
     }
@@ -3040,7 +3044,7 @@ function nowPose() {
   const c = character;
   return {
     bend: c.bodyOffset.hipsRotX, spine: c.bodyOffset.spineX, sit: c.sit,
-    hL: vArr(c.handTargets.left), hR: vArr(c.handTargets.right),
+    hL: c.handAnchor?.left ? null : vArr(c.handTargets.left), hR: c.handAnchor?.right ? null : vArr(c.handTargets.right),
     fL: vArr(c.footOffset.left), fR: vArr(c.footOffset.right),
   };
 }
@@ -3053,40 +3057,14 @@ function applyPoints(p) {
     if (obj[side]) obj[side].set(arr[0], arr[1], arr[2]);
     else obj[side] = new THREE.Vector3(arr[0], arr[1], arr[2]);
   };
-  set(c.handTargets, 'left', p.hL);
-  set(c.handTargets, 'right', p.hR);
+  if (!c.handAnchor?.left) set(c.handTargets, 'left', p.hL);
+  if (!c.handAnchor?.right) set(c.handTargets, 'right', p.hR);
   set(c.footOffset, 'left', p.fL);
   set(c.footOffset, 'right', p.fR);
   if (p.hL) c.armPreset.left = null;
   if (p.hR) c.armPreset.right = null;
 }
 // Включить конкретное движение (из памяти или избранного) — плавно перетекая в него.
-// Готовые движения: ключевые точки (время, наклон, посадка) → плавная запись.
-const REP_PRESETS = {
-  home: [
-    { icon: '🧎', name: 'Присесть и встать', keys: [[0, 0, 0], [1.6, 0, 0.45]] },
-    { icon: '🙏', name: 'На коленки и обратно', keys: [[0, 0, 0.45], [2.2, 0, 0.8]] },
-    { icon: '🪑', name: 'С колен — на пол', keys: [[0, 0, 0.75], [2.4, 0, 1.0]] },
-  ],
-  pose: [
-    { icon: '🙇', name: 'Наклон', keys: [[0, 0, null], [1.8, 1.25, null]] },
-    { icon: '🌙', name: 'Прогиб', keys: [[0, 0, null], [1.6, -0.6, null]] },
-    { icon: '🌊', name: 'Волна: прогиб ↔ наклон', keys: [[0, -0.5, null], [2.8, 1.1, null]] },
-  ],
-};
-function presetMove(pr) {
-  const samples = [];
-  const [k0, k1] = pr.keys;
-  const n = 24;
-  for (let i = 0; i <= n; i++) {
-    const t = (k1[0] * i) / n;
-    const e = 0.5 - 0.5 * Math.cos((Math.PI * i) / n);
-    const bend = k0[1] + (k1[1] - k0[1]) * e;
-    const sit = k0[2] == null ? character.sit : k0[2] + (k1[2] - k0[2]) * e;
-    samples.push({ t, bend, spine: bendSpine(bend), sit, hL: null, hR: null, fL: null, fR: null });
-  }
-  return { dur: k1[0], samples };
-}
 function playMove(r, mv) {
   r.samples = mv.samples;
   r.dur = mv.dur;
@@ -3138,15 +3116,6 @@ function renderRep() {
     renderRep();
   });
   repFavsEl.appendChild(add);
-  // Готовые движения (не удаляются) — сверху над твоими.
-  for (const pr of REP_PRESETS[r.tab]) {
-    const c = document.createElement('button');
-    c.className = 'rf-chip rf-preset';
-    c.textContent = pr.icon;
-    c.title = pr.name;
-    c.addEventListener('click', () => { playMove(r, presetMove(pr)); showToast(`${pr.icon} ${pr.name}`); renderRep(); });
-    repFavsEl.appendChild(c);
-  }
   favs.forEach((mv, i) => {
     const c = document.createElement('button');
     c.className = 'rf-chip';
