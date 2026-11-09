@@ -8,6 +8,7 @@ import { parseMixamo, mixamoClip } from './mixamo.js';
 import { MOCAP, loadMocap, mocapClip, mocapUpperClip } from './mocap.js';
 import { PieceWardrobe, PIECE_CATS } from './outfits.js';
 import { Character, POSES, LOOPS } from './character.js';
+import { initPlatform, gameReady, rewarded as adsRewarded, interstitial, onAdPause } from './ads.js';
 import { REACTIONS, STROKES, IDLE_LINES, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
@@ -485,6 +486,7 @@ async function loadModel(source) {
     frameCamera();
     $('loading').classList.add('done');
     if (firstLoad) {
+      gameReady();
       greetOnLoad();
       // По умолчанию — живое ожидание на записях живых людей.
       setTimeout(() => { if (!currentAnim && !currentMocap && !character.loop && !character.dancing) { liveIdle = true; playMocap(nextIdle()); } }, 300);
@@ -538,14 +540,78 @@ function setLove(v, silent = false) {
   try { localStorage.setItem(STORAGE_KEY, String(love)); } catch { /* ignore */ }
   renderAffection();
   const after = levelOf(love);
+  renderLocks();
   if (!silent && after > before) {
     say(LEVEL_UP_LINES[after], 'happy');
+    const opened = FEATURES.filter((f) => f.lvl === after && !adUnlocked.has(f.id));
+    if (opened.length) setTimeout(() => showToast(`🔓 Открыто: ${opened.map((f) => f.name).join(', ')}`), 2200);
     $('affection').classList.remove('levelup');
     void $('affection').offsetWidth;
     $('affection').classList.add('levelup');
   }
 }
 // Шкала стала в 10 раз длиннее, а прирост — только вдвое: прокачка идёт примерно в 5 раз дольше.
+// ---------- Прогресс: возможности открываются с ростом симпатии ----------
+// Можно открыть раньше — за рекламу (в Яндекс Играх); без рекламы (артефакт) открывается сразу.
+const FEATURES = [
+  { id: 'floor', lvl: 1, name: 'Сесть на пол и лечь', ids: [] },
+  { id: 'wardrobe', lvl: 1, name: 'Гардероб', ids: ['btn-wardrobe'] },
+  { id: 'poses', lvl: 2, name: 'Вкладка «Позы»', ids: ['btn-tab-pose', 'poses-toggle'] },
+  { id: 'photo', lvl: 2, name: 'Фото', ids: ['cam-photo'] },
+  { id: 'lieStyles', lvl: 3, name: 'Лечь на живот и на спину', ids: ['lie-toggle', 'lie-toggle2'] },
+  { id: 'handles', lvl: 3, name: 'Точки поз (всё тело)', ids: ['btn-handles'] },
+  { id: 'dance', lvl: 4, name: 'Танцы и анимации', ids: ['btn-anims'] },
+  { id: 'flow', lvl: 5, name: '«Сама двигается»', ids: ['cam-auto'] },
+];
+const UNLOCK_KEY = 'waifu-unlocked';
+let adUnlocked = new Set();
+try { adUnlocked = new Set(JSON.parse(localStorage.getItem(UNLOCK_KEY) || '[]')); } catch { /* ignore */ }
+function unlocked(id) {
+  const f = FEATURES.find((x) => x.id === id);
+  if (!f) return true;
+  return levelOf(love) >= f.lvl || adUnlocked.has(id);
+}
+function renderLocks() {
+  for (const f of FEATURES) {
+    const on = unlocked(f.id);
+    for (const id of f.ids) $(id)?.classList.toggle('locked', !on);
+  }
+}
+let lockPop = null;
+function showLock(f) {
+  if (!lockPop) {
+    lockPop = document.createElement('div');
+    lockPop.id = 'lock-pop';
+    lockPop.innerHTML = '<div class="lp-title"></div><div class="lp-text"></div><div class="lp-btns"><button class="lp-ad primary"></button><button class="lp-ok">Ок</button></div>';
+    document.body.appendChild(lockPop);
+    lockPop.querySelector('.lp-ok').addEventListener('click', () => { lockPop.hidden = true; });
+  }
+  lockPop.querySelector('.lp-title').textContent = `🔒 ${f.name}`;
+  lockPop.querySelector('.lp-text').textContent = `Откроется на уровне ${f.lvl + 1} — «${LEVELS[f.lvl].label}». Общайся с ней, чтобы симпатия росла 💗`;
+  const ad = lockPop.querySelector('.lp-ad');
+  ad.textContent = '▶ Открыть сейчас (реклама)';
+  ad.onclick = () => {
+    lockPop.hidden = true;
+    adsRewarded(() => {
+      adUnlocked.add(f.id);
+      try { localStorage.setItem(UNLOCK_KEY, JSON.stringify([...adUnlocked])); } catch { /* ignore */ }
+      renderLocks();
+      showToast(`🔓 Открыто: ${f.name}`);
+    }, () => showToast('Реклама не досмотрена — ничего страшного'));
+  };
+  lockPop.hidden = false;
+}
+// Нажатие на закрытую кнопку — вместо действия показываем, когда откроется.
+document.addEventListener('click', (e) => {
+  const el = e.target.closest?.('.locked');
+  if (!el) return;
+  const f = FEATURES.find((x) => x.ids.includes(el.id));
+  if (!f) return;
+  e.stopPropagation();
+  e.preventDefault();
+  showLock(f);
+}, true);
+
 function changeAffection(delta) {
   setLove(love + delta * 2);
 }
@@ -559,6 +625,7 @@ function renderAffection() {
   $('affection-label').textContent = LEVELS[l].label;
   $('affection-lvl').textContent = String(l + 1);
   $('affection').title = `${Math.round(love)} / ${LOVE_MAX}`;
+  renderLocks();
 }
 // Тап по шкале — маленькое меню: макс / сброс.
 $('affection').addEventListener('click', (e) => {
@@ -569,6 +636,9 @@ $('love-max').addEventListener('click', (e) => { e.stopPropagation(); setLove(LO
 $('love-reset').addEventListener('click', (e) => { e.stopPropagation(); setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#affection, #love-menu')) $('love-menu').hidden = true; });
 renderAffection();
+// В релизе (Яндекс Игры) кнопки «Макс» нет — симпатию надо заработать.
+if (window.WAIFU_RELEASE) $('love-max').hidden = true;
+initPlatform();
 
 // ---------- Реплики и озвучка ----------
 
@@ -1631,8 +1701,9 @@ try {
   if (v === 'side' || v === 'belly' || v === 'back' || v === 'off') lieMode = v;
   else if (localStorage.getItem('waifu-allow-lie') === '0') lieMode = 'off';
 } catch { /* ignore */ }
+if (!unlocked('lieStyles') && lieMode !== 'side') lieMode = 'side'; // пока не открыто — только на бок
 let allowLie = lieMode !== 'off';
-const sitMax = () => (allowLie ? 1.3 : 1.0);
+const sitMax = () => (!unlocked('floor') ? 0.8 : allowLie ? 1.3 : 1.0);
 const LIE_ICONS = {
   side: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11.5" r="1.8"/>',
   belly: '<path d="M14.5 4.5a6.5 6.5 0 1 0 5 10.5A7.5 7.5 0 0 1 14.5 4.5z"/><path d="M17 4h3l-3 3h3"/>',
@@ -2490,7 +2561,7 @@ async function addOutfit(file) {
   await wearOutfit(record.id);
 }
 
-$('btn-wardrobe').addEventListener('click', () => togglePanel('wardrobe', renderWardrobe));
+$('btn-wardrobe').addEventListener('click', () => { if ($('wardrobe').classList.contains('hidden')) interstitial(); togglePanel('wardrobe', renderWardrobe); });
 $('outfit-input').addEventListener('change', (e) => {
   if (e.target.files[0]) addOutfit(e.target.files[0]);
   e.target.value = '';
@@ -2958,8 +3029,18 @@ $('btn-auto').addEventListener('click', () => {
 });
 renderAutoBtn();
 
+// Пауза на время рекламы: картинка и звук стоят.
+let adPaused = false;
+let playGain = 0;
+onAdPause((on) => {
+  adPaused = on;
+  try { if (on) window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+  for (const a of document.querySelectorAll('audio')) { if (on) a.pause(); }
+  try { if (on) window.__waifuAudio?.suspend?.(); else window.__waifuAudio?.resume?.(); } catch { /* ignore */ }
+});
 function tick() {
   requestAnimationFrame(tick);
+  if (adPaused) { clock.getDelta(); return; }
   const dt = Math.min(clock.getDelta(), 0.05);
 
   updateCamera(dt);
@@ -2969,6 +3050,11 @@ function tick() {
   updateLiveIdle();
   updateAuto(dt);
   updateFlow(dt);
+  // Пока ты с ней — симпатия понемногу растёт и сама (раз в 20 с).
+  if (!document.hidden) {
+    playGain += dt;
+    if (playGain > 20) { playGain = 0; setLove(love + 1); }
+  }
   updateSuggest(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
