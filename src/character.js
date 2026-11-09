@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { tuneSkirt } from './outfits.js';
 
 const EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
 
@@ -884,11 +885,13 @@ export class Character {
         // он перекатывается вбок и поворачивается; на боку и сидя — наклоняется.
         const flat = Math.max(ph.b4, ph.c4);
         pose.hipsRotX += bend * (0.3 * (1 - lieAll2) + 0.3 * ph.p4) * (1 - 0.85 * flat) * lie;
-        pose.hipsZ += bend * 0.4 * lie;
-        pose.hipsRotY -= bend * 0.3 * lie;
-        pose.spineZ -= bend * 0.2 * lie;
-        pose.headZ -= bend * 0.3 * lie;
-        pose.headY += bend * 0.15 * lie;
+        // Перекат вбок — только сидя на полу и на боку; на животе/спине — без скручивания.
+        const roll = bend * lie * (1 - flat);
+        pose.hipsZ += roll * 0.4;
+        pose.hipsRotY -= roll * 0.3;
+        pose.spineZ -= roll * 0.2;
+        pose.headZ -= roll * 0.3;
+        pose.headY += roll * 0.15;
         pose.headX -= bend * 0.2 * lie * (bend >= 0 ? fwdLie : 1);
       }
     }
@@ -2770,6 +2773,7 @@ export class Character {
   // Физика груди в моделях VRoid часто почти без демпфирования — из-за этого
   // её выгибает при движениях. Оставляем мягкое естественное движение без выворотов.
   stabilizeSprings() {
+    tuneSkirt(this.vrm);
     const joints = this.vrm.springBoneManager?.joints;
     if (!joints) return;
     for (const j of joints) {

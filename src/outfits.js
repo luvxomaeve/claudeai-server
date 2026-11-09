@@ -58,6 +58,7 @@ export class PieceWardrobe {
   }
 
   addSource(id, vrm) {
+    tuneSkirt(vrm);
     VRMUtils.removeUnnecessaryVertices(vrm.scene);
     VRMUtils.rotateVRM0(vrm);
     vrm.scene.traverse((o) => {
@@ -238,5 +239,21 @@ export class PieceWardrobe {
       VRMUtils.deepDispose(s.vrm.scene);
     }
     this.sources.clear();
+  }
+}
+
+// Юбка: мягко колышется и ложится по бёдрам. В VRoid у юбки почти нет затухания
+// (дрожит и взлетает) и нет силы тяжести (не ложится по форме) — подправляем:
+// больше плавности, лёгкий вес вниз (не задирается), чуть толще «касание» о ноги.
+export function tuneSkirt(vrm) {
+  const joints = vrm?.springBoneManager?.joints;
+  if (!joints) return;
+  for (const j of joints) {
+    if (!/skirt/i.test(j.bone.name)) continue;
+    j.settings.dragForce = Math.max(j.settings.dragForce, 0.22);
+    j.settings.stiffness = Math.min(Math.max(j.settings.stiffness, 0.55), 0.8);
+    j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.18);
+    j.settings.gravityDir.set(0, -1, 0);
+    j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.03);
   }
 }
