@@ -59,6 +59,7 @@ export class PieceWardrobe {
 
   addSource(id, vrm) {
     tuneSkirt(vrm);
+    shapeHips(vrm);
     VRMUtils.removeUnnecessaryVertices(vrm.scene);
     VRMUtils.rotateVRM0(vrm);
     vrm.scene.traverse((o) => {
@@ -354,4 +355,59 @@ export function tuneSkirt(vrm) {
     j.settings.gravityDir.set(0, -1, 0);
     j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.05); // юбка держится чуть дальше от ног
   }
+}
+
+// Форма бёдер: немного объёма сзади (ягодицы) и сбоку, мягким «холмом» —
+// чтобы на изгибах и в приседе не было плоскостей. Меняем вершины тела один раз
+// при загрузке (в позе привязки), вдоль нормали — кожа и чулки едут вместе.
+export function shapeHips(vrm, amount = 0.022) {
+  vrm?.scene?.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    // Тело и низ одежды (юбка/шорты) — вместе, чтобы ткань облегала новый объём.
+    if (!mats.some((m) => SKIN_RE.test(m?.name ?? '') || /_Bottoms_/i.test(m?.name ?? ''))) return;
+    const g = o.geometry;
+    if (!g || g.userData.hipsShaped) return;
+    // Кости в позе покоя → в координаты сетки (до любых поз).
+    vrm.scene.updateMatrixWorld(true);
+    const inv = o.matrixWorld.clone().invert();
+    const bindPos = (name) => {
+      const b = vrm.humanoid?.getRawBoneNode(name);
+      return b ? b.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv) : null;
+    };
+    const L = bindPos('leftUpperLeg');
+    const R = bindPos('rightUpperLeg');
+    const H = bindPos('hips');
+    const foot = bindPos('leftFoot');
+    const toe = bindPos('leftToes');
+    if (!L || !R || !H || !foot || !toe) return;
+    // «Назад» — противоположно носку стопы.
+    const back = new THREE.Vector3(0, 0, Math.sign(foot.z - toe.z) || 1);
+    const pos = g.attributes.position;
+    const nor = g.attributes.normal;
+    if (!pos || !nor) return;
+    const v = new THREE.Vector3();
+    const n = new THREE.Vector3();
+    const legLen = Math.max(0.3, H.y - foot.y);
+    const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * legLen / 0.8).add(new THREE.Vector3(0, -0.02, 0)));
+    const sigma = 0.085 * legLen / 0.8;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      n.fromBufferAttribute(nor, i);
+      let w = 0;
+      for (const c of centers) {
+        const d = v.distanceTo(c) / sigma;
+        w = Math.max(w, Math.exp(-d * d));
+      }
+      if (w < 0.01) continue;
+      // Только наружу назад/вбок (не спереди, не внутрь между ног).
+      const facing = Math.max(0, n.dot(back) * 0.8 + 0.35);
+      const k = amount * w * Math.min(1, facing);
+      if (k <= 0) continue;
+      pos.setXYZ(i, v.x + n.x * k, v.y + n.y * k, v.z + n.z * k);
+    }
+    pos.needsUpdate = true;
+    g.computeBoundingSphere();
+    g.userData.hipsShaped = true;
+  });
 }
