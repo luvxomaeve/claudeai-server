@@ -921,7 +921,7 @@ export class Character {
       pose.lUpperX -= hang;
       pose.rUpperX -= hang;
       // Руки чуть отводятся от тела в наклоне/прогибе и сидя — не проходят сквозь бёдра и бока.
-      const away = 0.12 * Math.min(1, Math.abs(pitch)) + 0.08 * THREE.MathUtils.smoothstep(this.sitS, 0.2, 0.6);
+      const away = 0.05 * Math.min(1, Math.abs(pitch)) + 0.04 * THREE.MathUtils.smoothstep(this.sitS, 0.2, 0.6); // ближе к телу
       pose.lUpperZ += away;
       pose.rUpperZ -= away;
       this.armHang = hang;
@@ -1359,9 +1359,10 @@ export class Character {
   }
 
   applyHandRest(dt) {
-    const free = !this.posing && this.poseName === 'stand' && !this.dancing && !this.loop && !this.mixer
-      && this.sitS < 0.15 && Math.abs(this.bodyOffset.hipsRotX) < 0.25;
-    const want = free ? 1 : 0;
+    // Свободные руки лежат на теле и в режиме поз; в приседе их берут колени,
+    // в глубоком наклоне — опора о пол (плавно уступают).
+    const free = this.poseName === 'stand' && !this.dancing && !this.loop && !this.mixer;
+    const want = free ? (1 - THREE.MathUtils.smoothstep(this.sitS, 0.08, 0.3)) * (1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.5, 1.0)) : 0;
     this.restW = (this.restW ?? 0) + (want - (this.restW ?? 0)) * (1 - Math.exp(-dt * 2));
     if (this.restW < 0.01) return;
     this.restTimer = (this.restTimer ?? 0) - dt;
