@@ -250,9 +250,11 @@ export function tuneSkirt(vrm) {
   if (!joints) return;
   for (const j of joints) {
     if (!/skirt/i.test(j.bone.name)) continue;
-    j.settings.dragForce = Math.max(j.settings.dragForce, 0.22);
-    j.settings.stiffness = Math.min(Math.max(j.settings.stiffness, 0.55), 0.8);
-    j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.18);
+    // Мягче и живее: меньше жёсткости — дольше и шире колышется за движением,
+    // умеренное затухание — плавно, без дрожи; лёгкий вес — ложится, не взлетает.
+    j.settings.dragForce = 0.14;
+    j.settings.stiffness = 0.38;
+    j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.14);
     j.settings.gravityDir.set(0, -1, 0);
     j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.03);
   }
