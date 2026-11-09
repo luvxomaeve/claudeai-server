@@ -740,7 +740,7 @@ export class Character {
           this.sitDirPrev = Math.sign(vs);
           if (vs > 0) this.sitSideSign = -(this.sitSideSign ?? 1);
         }
-        const near = 1 - p2 * 0.45; // на полу — чуть мягче
+        const near = 1 + 0.35 * p2; // ниже (колени, пол) — движение даже шире
         // Сила движения: быстро — сильнее, но и медленное приседание заметно (не «столбиком»).
         const mag = Math.min(1, Math.abs(vs) * 1.6);
         const down = vs > 0 ? mag : 0, up = vs < 0 ? mag : 0;
