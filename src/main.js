@@ -3029,17 +3029,8 @@ function setRepeat(on) {
   r.samples = [];
   if (on) stopAuto(true);
   renderRep();
-  if (on) {
-    try {
-      const saved = JSON.parse(localStorage.getItem(repKey(r)) || 'null');
-      if (saved?.samples?.length > 3) {
-        playMove(r, saved);
-        showToast('Повторяю прошлое движение — подвигай, запомню новое');
-        renderRep();
-        return;
-      }
-    } catch { /* ignore */ }
-  }
+  // Включил — всегда с чистого листа: ждёт твоё новое движение.
+  // Сохранённые движения — только из избранного (номерки рядом с кнопкой).
   showToast(on ? 'Подвигай ползунком — я повторю 💗' : 'Стоп');
 }
 // Кнопка повтора — над левым ползунком; рядом — избранные движения.
