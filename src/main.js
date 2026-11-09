@@ -1813,6 +1813,7 @@ sitSlider.addEventListener('pointermove', (e) => {
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
   character.slideHold = 3;
+  character.dragBoostT = 0.5; // палец на полосе — тело отзывается в его темпе
   loopNoteMove();
   if (poseMode) {
     // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
@@ -1852,6 +1853,7 @@ sitSlider2.addEventListener('pointermove', (e) => {
   slider2Drag.y = e.clientY;
   slider2Drag.t = now;
   character.slideHold = 3;
+  character.dragBoostT = 0.5;
   loopNoteMove();
   sitBy(dv / 0.004);
 });
@@ -1986,7 +1988,6 @@ const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
   if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
-    loopNoteMove(); // повтор: точки рук и ног тоже запоминаются
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
@@ -3217,7 +3218,7 @@ function updateLoop(dt) {
   const now = performance.now();
   if (r.state === 'rec') {
     r.samples.push({ t: (now - r.recStart) / 1000, ...nowPose() });
-    const dragging = !!(sliderDrag || slider2Drag || (poseDrag && /hand|foot|knee/.test(poseDrag.kind)));
+    const dragging = !!(sliderDrag || slider2Drag);
     if (!dragging && now - r.lastMove > 250) {
       const endT = (r.lastMove - r.recStart) / 1000;
       r.samples = r.samples.filter((x) => x.t <= endT + 0.05);
@@ -3267,18 +3268,12 @@ function updateLoop(dt) {
     pts = { hL: lerpArr(bf.hL, pts.hL, e), hR: lerpArr(bf.hR, pts.hR, e), fL: lerpArr(bf.fL, pts.fL, e), fR: lerpArr(bf.fR, pts.fR, e) };
     if (r.blendK >= 1) r.blendFrom = null;
   }
-  applyPoints(pts);
+  // (точки рук/ног повтором не двигаем — только ползунок)
   const o = character.bodyOffset;
   o.hipsRotX = bend;
   o.spineX = spine;
   character.sit = sit;
-  // Темп записи: где ты вёл быстро — она двигается быстро, где медленно — плавно.
-  {
-    const span = Math.max(0.016, b.t - a.t);
-    const du = Math.PI * 0.5 * Math.sin(Math.PI * tri) * tempo; // скорость по кривой туда-обратно
-    const speed = (Math.abs(b.sit - a.sit) + Math.abs(b.bend - a.bend) * 0.6) / span * Math.max(0.3, du);
-    character.sitRate = THREE.MathUtils.clamp(speed, 0.25, 3);
-  }
+  character.sitRate = 1.2;
   character.slideHold = 3; // ножками не болтает
   character.hipsSetSit = character.sitS;
   // Лицо живёт: улыбается, подмигивает, смущается.
