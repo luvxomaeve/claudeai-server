@@ -378,7 +378,7 @@ function patchBulge(mat) {
   mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge`;
   mat.needsUpdate = true;
 }
-export function shapeHips(vrm, amount = 0.026) {
+export function shapeHips(vrm, amount = 0.036) {
   vrm?.scene?.traverse((o) => {
     if (!o.isSkinnedMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -408,10 +408,10 @@ export function shapeHips(vrm, amount = 0.026) {
     const legLen = Math.max(0.3, H.y - foot.y);
     const k0 = legLen / 0.8;
     // Центр выпуклости — ягодица (сзади от тазобедренного сустава, чуть ниже).
-    const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.035 * k0, 0)));
+    const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.015 * k0, 0))); // повыше — подтянуто
     // Ткань — шире и чуть сильнее тела: всегда накрывает выпуклость, не прорезается.
     const cloth = mats.some((m) => /_Bottoms_/i.test(m?.name ?? ''));
-    const sigma = 0.09 * k0 * (cloth ? 1.4 : 1);
+    const sigma = 0.1 * k0 * (cloth ? 1.4 : 1); // шире — плавная круглая форма
     const gain = cloth ? 1.25 : 1;
     const bulge = new Float32Array(pos.count * 2);
     for (let i = 0; i < pos.count; i++) {
