@@ -106,6 +106,7 @@ export class PieceWardrobe {
     const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : this.sources.get(id))?.skinMap ?? this.base.skinMap;
     const topId = wear.tops ?? 'base';
     let map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
+    map = this.recolorShorts(map);
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     this.setSkin(map);
     onSkin?.(map);
@@ -139,6 +140,69 @@ export class PieceWardrobe {
         }
       }
     }
+  }
+
+  // Нарисованные на коже серые шортики — перекрашиваем в чёрный (подходит к любому наряду).
+  // Меняем только серые (ненасыщенные) пиксели в зоне бёдер — кожу не трогаем.
+  recolorShorts(map) {
+    if (!map?.image || !this.base) return map;
+    this.shortsCache ??= new Map();
+    if (this.shortsCache.has(map.uuid)) return this.shortsCache.get(map.uuid);
+    if (!this.shortsTris) {
+      const hum = this.base.vrm.humanoid;
+      const hipY = hum.getRawBoneNode('leftUpperLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.9;
+      const kneeY = hum.getRawBoneNode('leftLowerLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.5;
+      const top = hipY + (hipY - kneeY) * 0.35;
+      const bot = kneeY + (hipY - kneeY) * 0.45;
+      this.shortsTris = [];
+      for (const mesh of this.base.skins) {
+        const g = mesh.geometry, pos = g.attributes.position, uv = g.attributes.uv;
+        if (!uv) continue;
+        mesh.updateMatrixWorld(true);
+        const v = new THREE.Vector3(), idx = g.index, n = idx ? idx.count : pos.count;
+        const id = (k) => (idx ? idx.getX(k) : k);
+        for (let t = 0; t < n; t += 3) {
+          const a = id(t), b = id(t + 1), c = id(t + 2);
+          const ys = [a, b, c].map((q) => v.fromBufferAttribute(pos, q).applyMatrix4(mesh.matrixWorld).y);
+          if (Math.max(...ys) > top || Math.min(...ys) < bot) continue;
+          this.shortsTris.push(uv.getX(a), uv.getY(a), uv.getX(b), uv.getY(b), uv.getX(c), uv.getY(c));
+        }
+      }
+    }
+    const img = map.image, w = img.width, h = img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    // Маска зоны шортиков.
+    const mask = document.createElement('canvas');
+    mask.width = w; mask.height = h;
+    const mc = mask.getContext('2d', { willReadFrequently: true });
+    mc.fillStyle = '#fff';
+    mc.beginPath();
+    const T = this.shortsTris;
+    for (let i = 0; i < T.length; i += 6) {
+      mc.moveTo(T[i] * w, T[i + 1] * h); mc.lineTo(T[i + 2] * w, T[i + 3] * h); mc.lineTo(T[i + 4] * w, T[i + 5] * h); mc.closePath();
+    }
+    mc.fill();
+    const m = mc.getImageData(0, 0, w, h).data;
+    const id = ctx.getImageData(0, 0, w, h);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      if (!m[i]) continue;
+      const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
+      const mx = Math.max(r0, g0, b0), mn = Math.min(r0, g0, b0);
+      if (mx - mn > 22 || mx > 200) continue; // кожа и светлое — не трогаем
+      const l = (r0 + g0 + b0) / 3;
+      const k = 0.32; // темнее: серый → почти чёрный, складки остаются видны
+      d[i] = l * k + 6; d[i + 1] = l * k + 3; d[i + 2] = l * k + 10;
+    }
+    ctx.putImageData(id, 0, 0);
+    const tex = new THREE.CanvasTexture(canvas);
+    for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
+    tex.needsUpdate = true;
+    this.shortsCache.set(map.uuid, tex);
+    return tex;
   }
 
   // Колготки темнее (полупрозрачный чёрный): ноги на текстуре кожи затемняются «умножением».
