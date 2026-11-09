@@ -1087,7 +1087,7 @@ function setView(v) {
   showToast(`🎥 ${v.name}`);
 }
 $('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
-$('cam-auto').addEventListener('click', () => setRepeat(!rep.on));
+$('cam-auto').addEventListener('click', () => setRepeat(!curRep().on));
 // 🕹 Шарик-джойстик: держишь и ведёшь — камера плавно облетает её (вбок)
 // и опускается/поднимается (вверх-вниз). Отпустил — стоит на месте.
 // Два шарика: 🕹 «облёт» — вбок облететь, вверх/вниз опустить/поднять камеру;
@@ -2969,7 +2969,7 @@ function updateAuto(dt) {
     return;
   }
   autoCooldown -= dt;
-  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0 && !rep.on
+  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0 && !reps.home.on
     && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
@@ -2994,41 +2994,112 @@ window.addEventListener('pointerdown', (e) => {
   if (!zoneAt(e)) return;
   autoIdle = 0;
   stopAuto();
-  if (rep.on) setRepeat(false);
+  if (curRep().on) setRepeat(false);
 }, { capture: true, passive: true });
 // ---------- «Повтор»: она повторяет твоё движение ползунком по кругу ----------
-// Нажал 〰 → двигаешь ползунком (наклон, прогиб, присесть, лечь) → отпустил —
-// через секунду она повторяет ровно это движение туда-обратно, плавно, без рывка.
-// Снова подвигал — запомнит новое. Ещё раз 〰 (или тронул её) — стоп.
-const rep = { on: false, state: 'off', samples: [], t: 0, lastMove: 0, recStart: 0, faceT: 2 };
-const REP_KEY = 'waifu-repeat-move';
+// Нажал кнопку над ползунком → двигаешь (наклон, прогиб, присесть, лечь) → отпустил —
+// она повторяет это движение туда-обратно, плавно. Подвигал по-новому — подхватит на ходу.
+// На главной и во вкладке «Позы» повторы РАЗНЫЕ и не мешают друг другу:
+// перешёл во вкладку — повтор главной на паузе, вернулся — продолжает.
+// Избранное: ＋ сохраняет движение, номерок — включить, удержание номерка — удалить.
+const newRep = (tab) => ({ tab, on: false, state: 'off', samples: [], t: 0, lastMove: 0, recStart: 0, faceT: 2, life: 0 });
+const reps = { home: newRep('home'), pose: newRep('pose') };
+const curRep = () => (poseMode ? reps.pose : reps.home);
+const repKey = (r) => (r.tab === 'pose' ? 'waifu-repeat-move-pose' : 'waifu-repeat-move');
+const favKey = (r) => (r.tab === 'pose' ? 'waifu-repeat-favs-pose' : 'waifu-repeat-favs');
 const repBtns = () => [$('cam-auto'), $('rep-btn')].filter(Boolean);
+function loadFavs(r) { try { return JSON.parse(localStorage.getItem(favKey(r)) || '[]'); } catch { return []; } }
+function saveFavs(r, list) { try { localStorage.setItem(favKey(r), JSON.stringify(list)); } catch { /* ignore */ } }
+function nowPose() { return { bend: character.bodyOffset.hipsRotX, spine: character.bodyOffset.spineX, sit: character.sit }; }
+// Включить конкретное движение (из памяти или избранного) — плавно перетекая в него.
+function playMove(r, mv) {
+  r.samples = mv.samples;
+  r.dur = mv.dur;
+  r.t = 0;
+  r.blendFrom = nowPose();
+  r.blendK = 0;
+  r.state = 'play';
+  r.midFor = null;
+}
 function setRepeat(on) {
   if (!character) return;
-  rep.on = on;
-  rep.state = on ? 'wait' : 'off';
-  rep.samples = [];
+  const r = curRep();
+  r.on = on;
+  r.state = on ? 'wait' : 'off';
+  r.samples = [];
   if (on) stopAuto(true);
-  for (const b of repBtns()) { b.classList.toggle('active', on); b.classList.remove('rec'); }
-  // Последнее движение помним: включил — сразу повторяет его.
+  renderRep();
   if (on) {
     try {
-      const saved = JSON.parse(localStorage.getItem(REP_KEY) || 'null');
+      const saved = JSON.parse(localStorage.getItem(repKey(r)) || 'null');
       if (saved?.samples?.length > 3) {
-        rep.samples = saved.samples;
-        rep.dur = saved.dur;
-        rep.t = 0;
-        rep.blendFrom = { bend: character.bodyOffset.hipsRotX, spine: character.bodyOffset.spineX, sit: character.sit };
-        rep.blendK = 0;
-        rep.state = 'play';
-        showToast('〰 Повторяю прошлое движение — подвигай, запомню новое');
+        playMove(r, saved);
+        showToast('Повторяю прошлое движение — подвигай, запомню новое');
+        renderRep();
         return;
       }
     } catch { /* ignore */ }
   }
-  showToast(on ? '〰 Подвигай ползунком — я повторю 💗' : 'Стоп');
+  showToast(on ? 'Подвигай ползунком — я повторю 💗' : 'Стоп');
 }
-// Кнопка повтора — над левым ползунком (всегда под рукой).
+// Кнопка повтора — над левым ползунком; рядом — избранные движения.
+const repFavsEl = document.createElement('div');
+repFavsEl.id = 'rep-favs';
+repFavsEl.hidden = true;
+$('sit-slider').appendChild(repFavsEl);
+for (const ev of ['pointerdown', 'touchstart']) repFavsEl.addEventListener(ev, (e) => e.stopPropagation());
+function renderRep() {
+  const r = curRep();
+  for (const b of repBtns()) {
+    b.classList.toggle('active', r.on);
+    b.classList.toggle('rec', r.on && r.state === 'rec');
+  }
+  repFavsEl.hidden = !r.on;
+  if (!r.on) return;
+  const favs = loadFavs(r);
+  repFavsEl.innerHTML = '';
+  const add = document.createElement('button');
+  add.className = 'rf-add';
+  add.textContent = '＋';
+  add.title = 'Сохранить это движение';
+  add.disabled = r.state !== 'play' || favs.length >= 6;
+  add.addEventListener('click', () => {
+    if (r.state !== 'play' || !r.samples.length) return;
+    const list = loadFavs(r);
+    list.push({ dur: r.dur, samples: r.samples.filter((_, i) => i % 2 === 0 || i === r.samples.length - 1) });
+    saveFavs(r, list.slice(-6));
+    showToast(`★ Движение ${list.length} сохранено`);
+    renderRep();
+  });
+  repFavsEl.appendChild(add);
+  favs.forEach((mv, i) => {
+    const c = document.createElement('button');
+    c.className = 'rf-chip';
+    c.textContent = String(i + 1);
+    c.title = 'Тап — повторять · удержать — удалить';
+    let hold = null;
+    let held = false;
+    c.addEventListener('pointerdown', () => {
+      held = false;
+      hold = setTimeout(() => {
+        held = true;
+        const list = loadFavs(r);
+        list.splice(i, 1);
+        saveFavs(r, list);
+        showToast(`Движение ${i + 1} удалено`);
+        renderRep();
+      }, 600);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) c.addEventListener(ev, () => clearTimeout(hold));
+    c.addEventListener('click', () => {
+      if (held) return;
+      playMove(r, mv);
+      showToast(`Повторяю движение ${i + 1} ♥`);
+      renderRep();
+    });
+    repFavsEl.appendChild(c);
+  });
+}
 {
   const b = document.createElement('button');
   b.id = 'rep-btn';
@@ -3036,85 +3107,88 @@ function setRepeat(on) {
   b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a6 6 0 0 1 10.5-4M20 12a6 6 0 0 1-10.5 4"/><path d="M14 4.5l.8 3.6-3.6.6M10 19.5l-.8-3.6 3.6-.6"/></svg>';
   $('sit-slider').prepend(b);
   b.addEventListener('pointerdown', (e) => e.stopPropagation());
-  b.addEventListener('click', (e) => { e.stopPropagation(); setRepeat(!rep.on); });
+  b.addEventListener('click', (e) => { e.stopPropagation(); setRepeat(!curRep().on); });
   const f = FEATURES.find((x) => x.id === 'flow');
   if (f && !f.ids.includes('rep-btn')) f.ids.push('rep-btn');
   renderLocks();
 }
-// Ползунок двинули: в режиме повтора — начинаем (или продолжаем) запись.
+// Ползунок двинули: в режиме повтора этой вкладки — начинаем (или продолжаем) запись.
 function loopNoteMove() {
-  if (!rep.on) return;
+  const r = curRep();
+  if (!r.on) return;
   const now = performance.now();
-  if (rep.state !== 'rec') {
-    rep.state = 'rec';
-    rep.samples = [];
-    rep.recStart = now;
-    for (const b of repBtns()) b.classList.add('rec');
+  if (r.state !== 'rec') {
+    r.state = 'rec';
+    r.samples = [];
+    r.recStart = now;
+    r.blendFrom = null;
+    renderRep();
   }
-  rep.lastMove = now;
+  r.lastMove = now;
 }
-function loopSample() {
-  const o = character.bodyOffset;
-  return { t: (performance.now() - rep.recStart) / 1000, bend: o.hipsRotX, spine: o.spineX, sit: character.sit };
-}
+// Сменили вкладку: повтор другой вкладки на паузе, этой — плавно продолжает.
+let repTabSeen = null;
 function updateLoop(dt) {
-  if (!rep.on || !character) return;
+  if (!character) return;
+  const r = curRep();
+  if (repTabSeen !== r.tab) {
+    repTabSeen = r.tab;
+    if (r.on && r.state === 'play') { r.blendFrom = nowPose(); r.blendK = 0; }
+    if (r.on && r.state === 'rec') r.state = 'wait';
+    renderRep();
+  }
+  if (!r.on) return;
   const now = performance.now();
-  if (rep.state === 'rec') {
-    rep.samples.push(loopSample());
+  if (r.state === 'rec') {
+    r.samples.push({ t: (now - r.recStart) / 1000, ...nowPose() });
     const dragging = !!(sliderDrag || slider2Drag);
-    if (!dragging && now - rep.lastMove > 250) {
-      // Хвост без движения отрезаем, слишком короткое — ждём дальше.
-      const s0 = rep.samples;
-      const endT = (rep.lastMove - rep.recStart) / 1000;
-      rep.samples = s0.filter((x) => x.t <= endT + 0.05);
-      for (const b of repBtns()) b.classList.remove('rec');
-      if (endT < 0.4 || rep.samples.length < 4) { rep.state = 'wait'; return; }
-      rep.dur = endT;
-      // Начинаем с того места, где ты отпустил (конец записи), и идём обратно —
-      // без скачка в начало и без паузы.
-      rep.t = rep.dur;
-      rep.blendFrom = null;
-      rep.state = 'play';
-      try { localStorage.setItem(REP_KEY, JSON.stringify({ dur: rep.dur, samples: rep.samples.filter((_, i) => i % 2 === 0 || i === rep.samples.length - 1) })); } catch { /* ignore */ }
-      if (!rep.toldOnce) { rep.toldOnce = true; showToast('Повторяю~ ♥ Подвигай ещё — запомню новое'); }
+    if (!dragging && now - r.lastMove > 250) {
+      const endT = (r.lastMove - r.recStart) / 1000;
+      r.samples = r.samples.filter((x) => x.t <= endT + 0.05);
+      if (endT < 0.4 || r.samples.length < 4) { r.state = 'wait'; renderRep(); return; }
+      r.dur = endT;
+      // С того места, где отпустил (конец записи), и обратно — без скачка и паузы.
+      r.t = r.dur;
+      r.blendFrom = null;
+      r.state = 'play';
+      r.midFor = null;
+      try { localStorage.setItem(repKey(r), JSON.stringify({ dur: r.dur, samples: r.samples.filter((_, i) => i % 2 === 0 || i === r.samples.length - 1) })); } catch { /* ignore */ }
+      if (!r.toldOnce) { r.toldOnce = true; showToast('Повторяю~ ♥ ＋ — в избранное, подвигай — запомню новое'); }
+      renderRep();
     }
     return;
   }
-  if (rep.state !== 'play') return;
-  // Туда-обратно: стык всегда плавный, разворот мягкий.
+  if (r.state !== 'play') return;
   // Живее: темп и размах чуть «дышат» — каждый повтор немного другой.
-  rep.life = (rep.life ?? 0) + dt;
-  const tempo = 1 + 0.08 * Math.sin(rep.life * 0.23) + 0.04 * Math.sin(rep.life * 0.61 + 1);
-  const amp = 1 + 0.1 * Math.sin(rep.life * 0.17 + 2) + 0.05 * Math.sin(rep.life * 0.47);
-  rep.t = (rep.t + dt * tempo) % (rep.dur * 2);
-  const tri = rep.t < rep.dur ? rep.t / rep.dur : 2 - rep.t / rep.dur;
-  const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * rep.dur;
-  const S = rep.samples;
+  r.life += dt;
+  const tempo = 1 + 0.08 * Math.sin(r.life * 0.23) + 0.04 * Math.sin(r.life * 0.61 + 1);
+  const amp = 1 + 0.1 * Math.sin(r.life * 0.17 + 2) + 0.05 * Math.sin(r.life * 0.47);
+  r.t = (r.t + dt * tempo) % (r.dur * 2);
+  const tri = r.t < r.dur ? r.t / r.dur : 2 - r.t / r.dur;
+  const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * r.dur;
+  const S = r.samples;
   let i = 0;
   while (i < S.length - 2 && S[i + 1].t < u) i++;
   const a = S[i];
   const b = S[Math.min(i + 1, S.length - 1)];
   const k = b.t > a.t ? THREE.MathUtils.clamp((u - a.t) / (b.t - a.t), 0, 1) : 0;
   const L = (x, y) => x + (y - x) * k;
-  const o = character.bodyOffset;
-  // Размах — вокруг середины движения (наклон/прогиб), посадку не трогаем.
-  if (rep.midBend == null || rep.midFor !== rep.samples) {
-    rep.midFor = rep.samples;
-    rep.midBend = rep.samples.reduce((m, x) => m + x.bend, 0) / rep.samples.length;
+  if (r.midFor !== r.samples) {
+    r.midFor = r.samples;
+    r.midBend = S.reduce((m, x) => m + x.bend, 0) / S.length;
   }
-  let bend = rep.midBend + (L(a.bend, b.bend) - rep.midBend) * amp;
+  let bend = r.midBend + (L(a.bend, b.bend) - r.midBend) * amp;
   let spine = bendSpine(bend);
   let sit = L(a.sit, b.sit);
-  // Включил сохранённое движение — плавно перетекаем в него из текущей позы.
-  if (rep.blendFrom) {
-    rep.blendK = Math.min(1, rep.blendK + dt / 1.2);
-    const e = rep.blendK * rep.blendK * (3 - 2 * rep.blendK);
-    bend = rep.blendFrom.bend + (bend - rep.blendFrom.bend) * e;
-    spine = rep.blendFrom.spine + (spine - rep.blendFrom.spine) * e;
-    sit = rep.blendFrom.sit + (sit - rep.blendFrom.sit) * e;
-    if (rep.blendK >= 1) rep.blendFrom = null;
+  if (r.blendFrom) {
+    r.blendK = Math.min(1, r.blendK + dt / 1.2);
+    const e = r.blendK * r.blendK * (3 - 2 * r.blendK);
+    bend = r.blendFrom.bend + (bend - r.blendFrom.bend) * e;
+    spine = r.blendFrom.spine + (spine - r.blendFrom.spine) * e;
+    sit = r.blendFrom.sit + (sit - r.blendFrom.sit) * e;
+    if (r.blendK >= 1) r.blendFrom = null;
   }
+  const o = character.bodyOffset;
   o.hipsRotX = bend;
   o.spineX = spine;
   character.sit = sit;
@@ -3122,9 +3196,9 @@ function updateLoop(dt) {
   character.slideHold = 3; // ножками не болтает
   character.hipsSetSit = character.sitS;
   // Лицо живёт: улыбается, подмигивает, смущается.
-  rep.faceT -= dt;
-  if (rep.faceT <= 0 && character.sleep < 0.3) {
-    rep.faceT = 3.5 + Math.random() * 3;
+  r.faceT -= dt;
+  if (r.faceT <= 0 && character.sleep < 0.3) {
+    r.faceT = 3.5 + Math.random() * 3;
     const f = FLOW_FACES[Math.floor(Math.random() * FLOW_FACES.length)];
     if (f === 'smile') character.setExpression('happy', 0.55 + Math.random() * 0.25, 1.6);
     else if (f === 'wink') { character.setExpression('happy', 0.35, 1.0); character.wink(); }

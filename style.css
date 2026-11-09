@@ -1350,3 +1350,13 @@ body.ui-hidden #flow-panel { opacity: 0.35; }
 #rep-btn.rec { background: #e8455f; color: #fff; animation: recPulse 1s ease-in-out infinite; }
 #cam-controls #cam-auto { display: none; }
 body.ui-hidden #rep-btn:not(.active) { opacity: 0.35; }
+
+/* Избранные движения повтора — столбик справа от кнопки повтора. */
+#sit-slider { position: fixed; }
+#rep-favs { position: absolute; left: 52px; top: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 6; }
+#rep-favs[hidden] { display: none; }
+#rep-favs button { width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%; background: var(--panel);
+  color: var(--pink); font: inherit; font-weight: 700; font-size: 14px; box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15); cursor: pointer; touch-action: none; }
+#rep-favs .rf-add { font-size: 18px; }
+#rep-favs .rf-add:disabled { opacity: 0.35; }
+body.ui-hidden #rep-favs { opacity: 0.4; }
