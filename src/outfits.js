@@ -90,14 +90,27 @@ export class PieceWardrobe {
         if (!mat || mat.userData.clothOffset) continue;
         mat.userData.clothOffset = true;
         mat.polygonOffset = true;
-        mat.polygonOffsetFactor = -1;
-        mat.polygonOffsetUnits = -4;
+        mat.polygonOffsetFactor = -2;
+        mat.polygonOffsetUnits = -10;
       }
     };
     for (const id of ['tops', 'bottoms']) {
       for (const m of this.base.pieces[id] ?? []) clothOffset(m);
       for (const [, s] of this.sources) for (const m of s.pieces[id] ?? []) clothOffset(m);
     }
+    // Светлые пятна на юбке — это блик (matcap), который на изнанке складок
+    // вспыхивает светлым. Для низа отключаем его — ткань ровная, без «просветов».
+    const noMatcap = (m) => {
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+        if (!mat || mat.userData.noMatcap) continue;
+        mat.userData.noMatcap = true;
+        if (mat.matcapFactor?.setScalar) mat.matcapFactor.setScalar(0);
+        if ('matcapTexture' in mat) mat.matcapTexture = null;
+        mat.needsUpdate = true;
+      }
+    };
+    for (const m of this.base.pieces.bottoms ?? []) noMatcap(m);
+    for (const [, s] of this.sources) for (const m of s.pieces.bottoms ?? []) noMatcap(m);
     for (const [, s] of this.sources) {
       s.active = PIECE_CATS.some((c) => !c.skin && (s.pieces[c.id] ?? []).some((m) => m.visible));
       s.vrm.scene.visible = s.active;
@@ -250,9 +263,9 @@ export class PieceWardrobe {
     sk.tw.copy(twist);
     sk.v.lerp(vel.add(tv.multiplyScalar(1.2)), 1 - Math.exp(-dt * 8));
     sk.t += dt;
-    const breeze = new THREE.Vector3(Math.sin(sk.t * 0.9) * 0.03 + Math.sin(sk.t * 2.3) * 0.015, 0, Math.cos(sk.t * 0.7) * 0.02);
-    const hz = new THREE.Vector3(-sk.v.x * 4, 0, -sk.v.z * 4).add(breeze);
-    if (hz.length() > 0.25) hz.setLength(0.25);
+    const breeze = new THREE.Vector3(Math.sin(sk.t * 0.9) * 0.045 + Math.sin(sk.t * 2.3) * 0.02, 0, Math.cos(sk.t * 0.7) * 0.03);
+    const hz = new THREE.Vector3(-sk.v.x * 6, 0, -sk.v.z * 6).add(breeze);
+    if (hz.length() > 0.3) hz.setLength(0.3);
     const down = -0.16 + THREE.MathUtils.clamp(-sk.v.y * 0.6, -0.25, 0.04); // вниз всегда
     const g = new THREE.Vector3(hz.x, down, hz.z);
     const power = g.length();
@@ -302,8 +315,8 @@ export function tuneSkirt(vrm) {
     if (!/skirt/i.test(j.bone.name)) continue;
     // Мягче и живее: меньше жёсткости — дольше и шире колышется за движением,
     // умеренное затухание — плавно, без дрожи; лёгкий вес — ложится, не взлетает.
-    j.settings.dragForce = 0.12;
-    j.settings.stiffness = 0.3;
+    j.settings.dragForce = 0.1;
+    j.settings.stiffness = 0.25;
     j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.14);
     j.settings.gravityDir.set(0, -1, 0);
     j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.05); // юбка держится чуть дальше от ног
