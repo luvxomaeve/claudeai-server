@@ -1387,7 +1387,8 @@ export class Character {
     const free = this.poseName === 'stand' && !this.dancing && !this.loop && !this.mixer;
     // Без «перескоков»: руки на бёдрах держатся во всём наклоне и неглубоком приседе,
     // а колени забирают их плавно и внахлёст (руки не повисают между).
-    const want = free ? (1 - THREE.MathUtils.smoothstep(this.sitS, 0.35, 0.55)) * (1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 1.2, 1.6)) : 0;
+    // В сильном наклоне ладони остаются на коленях (надолго); в пол — только на самом краю.
+    const want = free ? (1 - THREE.MathUtils.smoothstep(this.sitS, 0.35, 0.55)) * (1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 1.75, 2.1)) : 0;
     this.restW = (this.restW ?? 0) + (want - (this.restW ?? 0)) * (1 - Math.exp(-dt * 1.4));
     if (this.restW < 0.01) return;
     // Пока ведёшь полосу/идёт повтор — руки не перекладывает (без рывков).
@@ -1490,7 +1491,8 @@ export class Character {
       const own = Math.max(ph.p4, ph.b3, ph.c3, side === 'right' ? ph.p3 : 0);
       const busy = this.handTargets[side] || this.armPreset[side] ? 1 : this.gestureYield(side);
       const low = THREE.MathUtils.smoothstep(len * 1.12 - (shoulder.y - palmY), 0, len * 0.3);
-      const want = low * (1 - own) * (1 - busy);
+      // Руки лежат на коленях (наклон стоя) — опора о пол не перехватывает.
+      const want = low * (1 - own) * (1 - busy) * (1 - 0.9 * (this.restW ?? 0));
       if (dt > 0) this.supW[side] += (want - this.supW[side]) * (1 - Math.exp(-dt * 3.5));
       const w = this.supW[side];
       const below = handPos.y < palmY * 0.9;
