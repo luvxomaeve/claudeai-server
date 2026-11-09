@@ -2389,7 +2389,7 @@ function applyWear() {
   }
   // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
   const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
-  if (lt?.hex != null && lt.name.includes('чёрн')) w.legsDark = 0.6;
+  if (lt?.hex != null && lt.name.includes('чёрн')) w.legsDark = 0.8;
   else if (lt?.name === 'Чёрный') w.legsDark = 0.5;
   pieceWardrobe.apply(w, (map) => {
     stockings?.setBase(map);
@@ -2416,7 +2416,7 @@ const TINTS = [
   { name: 'Фиалка', hex: 0x6b45a0 },
   { name: 'Небо', hex: 0x8fc4ee },
   { name: 'Мята', hex: 0x9fdcc4 },
-  { name: 'Глубокий чёрный', hex: 0x16121a },
+  { name: 'Глубокий чёрный', hex: 0x0b090d },
 ];
 const TINT_KEY = 'waifu-wear-tint';
 let wearTint = {};
@@ -2441,7 +2441,7 @@ async function pickPiece(cat, id, quiet = false) {
   try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
   renderPieces();
   if (id !== 'base' && id !== 'none' && !pieceWardrobe.hasSource(id)) {
-    showToast('Загружаю наряд…');
+    showToast('Загружаю вещь… (первый раз — пару секунд)');
     $('flash').classList.add('on');
     try { await loadPieceSource(id); } catch (e) { console.error(e); say('Не получилось загрузить вещь…', 'sad'); }
     $('flash').classList.remove('on');
