@@ -360,7 +360,7 @@ export function tuneSkirt(vrm) {
 // Форма бёдер: немного объёма сзади (ягодицы) и сбоку, мягким «холмом» —
 // чтобы на изгибах и в приседе не было плоскостей. Меняем вершины тела один раз
 // при загрузке (в позе привязки), вдоль нормали — кожа и чулки едут вместе.
-export function shapeHips(vrm, amount = 0.022) {
+export function shapeHips(vrm, amount = 0.032) {
   vrm?.scene?.traverse((o) => {
     if (!o.isSkinnedMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
