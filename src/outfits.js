@@ -378,7 +378,7 @@ function patchBulge(mat) {
   mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge`;
   mat.needsUpdate = true;
 }
-export function shapeHips(vrm, amount = 0.02) {
+export function shapeHips(vrm, amount = 0.026) {
   vrm?.scene?.traverse((o) => {
     if (!o.isSkinnedMesh) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];

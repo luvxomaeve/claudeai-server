@@ -1284,7 +1284,7 @@ export class Character {
         const d = lo.getWorldPosition(new THREE.Vector3()).sub(up.getWorldPosition(new THREE.Vector3())).normalize();
         return THREE.MathUtils.smoothstep(Math.acos(THREE.MathUtils.clamp(d.dot(down), -1, 1)), 0.3, 1.75);
       };
-      const amt = 0.045;
+      const amt = 0.05;
       HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
     }
 
