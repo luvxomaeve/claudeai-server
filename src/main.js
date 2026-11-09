@@ -1986,7 +1986,16 @@ function showLabel(text) {
 }
 function poseDragStart(e) {
   snapPose();
-  const hit = performance.now() - lastCamMove < 450 ? null : (nearestHandle(e) ?? zoneAt(e, true));
+  const camBusy = performance.now() - lastCamMove < 450;
+  const handleHit = camBusy ? null : nearestHandle(e);
+  const hit = camBusy ? null : (handleHit ?? zoneAt(e, true));
+  // Водишь по ней (мимо точек) вверх-вниз — как правая полоса: сесть/лечь/встать.
+  if (hit && !handleHit && !['hand', 'arm', 'knee'].includes(hit.zone)) {
+    poseDrag = { kind: 'sitdrag', y: e.clientY, t: performance.now() };
+    activeHandle = null;
+    showLabel('Ниже — сесть / лечь, выше — встать');
+    return;
+  }
   activeHandle = handleKeyFor(hit);
   snapAnchor = null;
   if (activeHandle) showLabel(HANDLE_LABELS[activeHandle]);
@@ -2030,6 +2039,21 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
+  if (poseDrag.kind === 'sitdrag') {
+    character.effortT = 0.35;
+    const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || window.innerHeight * 0.5;
+    const dv = ((e.clientY - poseDrag.y) / h) * sitMax();
+    const now = performance.now();
+    const rate = Math.abs(dv) / Math.max(0.008, (now - poseDrag.t) / 1000);
+    character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
+    poseDrag.y = e.clientY;
+    poseDrag.t = now;
+    character.slideHold = 3;
+    character.dragBoostT = 0.5;
+    loopNoteMove();
+    sitBy(dv / 0.004);
+    return;
+  }
   if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
@@ -3316,7 +3340,7 @@ function updateLoop(dt) {
   const now = performance.now();
   if (r.state === 'rec') {
     r.samples.push({ t: (now - r.recStart) / 1000, ...nowPose() });
-    const dragging = !!(sliderDrag || slider2Drag);
+    const dragging = !!(sliderDrag || slider2Drag || poseDrag?.kind === 'sitdrag');
     if (!dragging && now - r.lastMove > 250) {
       const endT = (r.lastMove - r.recStart) / 1000;
       r.samples = r.samples.filter((x) => x.t <= endT + 0.05);
