@@ -75,6 +75,7 @@ export class PieceWardrobe {
     this.legTris = null;
     this.skinCache?.clear();
     this.darkCache?.clear();
+    this.legTintCache?.clear();
   }
 
   // wear: { tops: 'base' | 'o1' | ... | 'none', ... }
@@ -108,6 +109,7 @@ export class PieceWardrobe {
     let map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
     map = this.recolorShorts(map);
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
+    else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     this.setSkin(map);
     onSkin?.(map);
   }
@@ -192,7 +194,7 @@ export class PieceWardrobe {
       if (!m[i]) continue;
       const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
       const mx = Math.max(r0, g0, b0), mn = Math.min(r0, g0, b0);
-      if (mx - mn > 22 || mx > 200) continue; // кожа и светлое — не трогаем
+      if (mx - mn > 26 || mx > 242) continue; // кожа и белое — не трогаем
       const l = (r0 + g0 + b0) / 3;
       const k = 0.32; // темнее: серый → почти чёрный, складки остаются видны
       d[i] = l * k + 6; d[i + 1] = l * k + 3; d[i + 2] = l * k + 10;
@@ -202,6 +204,60 @@ export class PieceWardrobe {
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
     tex.needsUpdate = true;
     this.shortsCache.set(map.uuid, tex);
+    return tex;
+  }
+
+  // Цвет чулок/колготок: красим только ткань (ненасыщенные пиксели ног), кожу не трогаем.
+  tintLegs(map, hex) {
+    if (!map?.image || !this.base || hex == null) return map;
+    this.legTintCache ??= new Map();
+    const key = `${map.uuid}|${hex}`;
+    if (this.legTintCache.has(key)) return this.legTintCache.get(key);
+    this.ensureLegTris();
+    const img = map.image, w = img.width, h = img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    const mask = document.createElement('canvas');
+    mask.width = w; mask.height = h;
+    const mc = mask.getContext('2d', { willReadFrequently: true });
+    mc.fillStyle = '#fff';
+    mc.beginPath();
+    const T = this.legTris;
+    for (let i = 0; i < T.length; i += 6) {
+      mc.moveTo(T[i] * w, T[i + 1] * h); mc.lineTo(T[i + 2] * w, T[i + 3] * h); mc.lineTo(T[i + 4] * w, T[i + 5] * h); mc.closePath();
+    }
+    mc.fill();
+    // Шортики не красим (они в зоне бёдер): вырезаем их из маски.
+    if (this.shortsTris) {
+      mc.globalCompositeOperation = 'destination-out';
+      mc.beginPath();
+      const Q = this.shortsTris;
+      for (let i = 0; i < Q.length; i += 6) {
+        mc.moveTo(Q[i] * w, Q[i + 1] * h); mc.lineTo(Q[i + 2] * w, Q[i + 3] * h); mc.lineTo(Q[i + 4] * w, Q[i + 5] * h); mc.closePath();
+      }
+      mc.fill();
+      mc.globalCompositeOperation = 'source-over';
+    }
+    const m = mc.getImageData(0, 0, w, h).data;
+    const id = ctx.getImageData(0, 0, w, h);
+    const d = id.data;
+    const cr = (hex >> 16) & 255, cg = (hex >> 8) & 255, cb = hex & 255;
+    for (let i = 0; i < d.length; i += 4) {
+      if (m[i + 3] < 128) continue;
+      const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
+      const mx = Math.max(r0, g0, b0), mn = Math.min(r0, g0, b0);
+      if (mx - mn > 26) continue; // кожа (розовая) — не трогаем
+      const l = (r0 + g0 + b0) / 765;
+      const k = 0.35 + 0.9 * l; // тёмные колготки — насыщенный цвет, белые чулки — светлый
+      d[i] = Math.min(255, cr * k); d[i + 1] = Math.min(255, cg * k); d[i + 2] = Math.min(255, cb * k);
+    }
+    ctx.putImageData(id, 0, 0);
+    const tex = new THREE.CanvasTexture(canvas);
+    for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
+    tex.needsUpdate = true;
+    this.legTintCache.set(key, tex);
     return tex;
   }
 

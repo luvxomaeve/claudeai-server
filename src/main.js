@@ -2389,8 +2389,8 @@ function applyWear() {
   }
   // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
   const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
-  if (lt?.hex != null && lt.name.includes('чёрн')) w.legsDark = 0.8;
-  else if (lt?.name === 'Чёрный') w.legsDark = 0.5;
+  if (lt?.name === 'Глубокий чёрный') w.legsDark = 0.8;
+  else if (lt?.hex != null) w.legsTint = lt.hex;
   pieceWardrobe.apply(w, (map) => {
     stockings?.setBase(map);
     stockings?.apply(look.stockings);
@@ -2417,6 +2417,10 @@ const TINTS = [
   { name: 'Небо', hex: 0x8fc4ee },
   { name: 'Мята', hex: 0x9fdcc4 },
   { name: 'Глубокий чёрный', hex: 0x0b090d },
+  { name: 'Лаванда', hex: 0xc9b3f5 },
+  { name: 'Персик', hex: 0xffc2a8 },
+  { name: 'Изумруд', hex: 0x2f9e7a },
+  { name: 'Шоколад', hex: 0x6b4434 },
 ];
 const TINT_KEY = 'waifu-wear-tint';
 let wearTint = {};
@@ -2595,18 +2599,18 @@ function renderPieces() {
     b.className = 'closet-item' + (id === cur ? ' active' : '');
     b.innerHTML = `<span class="ci-icon">${id === 'none' ? '✕' : PIECE_ICONS[c.id]}</span><span class="ci-name">${pieceName(id, c.id)}</span>`;
     const tint = TINTS[wearTint[`${c.id}:${id}`] ?? 0];
-    if (id !== 'none' && !c.skin) {
+    if (id !== 'none') {
       const dot = document.createElement('span');
       dot.className = 'ci-tint';
       dot.style.background = tint.hex == null ? 'conic-gradient(#f2a7c3, #8fc4ee, #9fdcc4, #c8283c, #f2a7c3)' : `#${tint.hex.toString(16).padStart(6, '0')}`;
       b.appendChild(dot);
     }
     // Тап по надетой вещи — сменить её цвет.
-    b.addEventListener('click', () => (id === cur && id !== 'none' && !c.skin ? cycleTint(c.id, id) : pickPiece(c.id, id)));
+    b.addEventListener('click', () => (id === cur && id !== 'none' ? cycleTint(c.id, id) : pickPiece(c.id, id)));
     grid.appendChild(b);
   }
   box.appendChild(grid);
-  if (!c.skin) {
+  {
     const hint = document.createElement('p');
     hint.className = 'panel-note';
     hint.textContent = 'Тапни надетую вещь ещё раз — сменится цвет 🎨';
