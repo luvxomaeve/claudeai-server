@@ -625,8 +625,31 @@ document.addEventListener('click', (e) => {
   showLock(f);
 }, true);
 
+// Темп симпатии: касания тратят «запас» (до 30 очков, +4 в минуту). Пока запас есть —
+// растёт как обычно, кончился — почти не растёт (натыкать всё сразу нельзя).
+// Полностью открыть всё — несколько часов игры (растягивается на дни);
+// не хочешь ждать — фичу можно открыть за рекламу.
+const GAIN_CAP = 30, GAIN_PER_MIN = 4, GAIN_KEY = 'waifu-gain';
+let gainBudget = GAIN_CAP, gainAt = Date.now();
+try {
+  const g = JSON.parse(localStorage.getItem(GAIN_KEY) || 'null');
+  if (g && Number.isFinite(g.b) && Number.isFinite(g.t)) { gainBudget = g.b; gainAt = g.t; }
+} catch { /* ignore */ }
+function refillGain() {
+  const now = Date.now();
+  gainBudget = Math.min(GAIN_CAP, gainBudget + ((now - gainAt) / 60000) * GAIN_PER_MIN);
+  gainAt = now;
+}
 function changeAffection(delta) {
-  setLove(love + delta * 2);
+  let d = delta * 2;
+  if (d > 0) {
+    refillGain();
+    const full = Math.min(d, Math.max(0, gainBudget));
+    gainBudget -= full;
+    d = full + (d - full) * 0.05;
+    try { localStorage.setItem(GAIN_KEY, JSON.stringify({ b: gainBudget, t: gainAt })); } catch { /* ignore */ }
+  }
+  setLove(love + d);
 }
 
 function renderAffection() {
@@ -3628,10 +3651,10 @@ function tick() {
   updateAuto(dt);
   updateLoop(dt);
   updateWardrobeCam();
-  // Пока ты с ней — симпатия понемногу растёт и сама (раз в 20 с).
+  // Пока ты с ней — симпатия понемногу растёт и сама (раз в минуту).
   if (!document.hidden) {
     playGain += dt;
-    if (playGain > 20) { playGain = 0; setLove(love + 1); }
+    if (playGain > 60) { playGain = 0; setLove(love + 1); }
   }
   updateSuggest(dt);
   updateSelfDress(dt);
