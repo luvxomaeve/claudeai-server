@@ -1360,3 +1360,14 @@ body.ui-hidden #rep-btn:not(.active) { opacity: 0.35; }
 #rep-favs .rf-add { font-size: 18px; }
 #rep-favs .rf-add:disabled { opacity: 0.35; }
 body.ui-hidden #rep-favs { opacity: 0.4; }
+
+/* Готовые движения повтора. */
+#rep-favs .rf-preset { font-size: 15px; background: rgba(255, 255, 255, 0.55); }
+/* Чистый вид: только она. */
+#clean-exit { display: none; }
+body.clean #hud, body.clean #buttons, body.clean #cam-controls, body.clean #sit-slider, body.clean #sit-slider2,
+body.clean #handles, body.clean #poses, body.clean #rep-favs, body.clean #toast, body.clean .pose-label, body.clean #pose-label { display: none !important; }
+body.clean #clean-exit { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px));
+  width: 34px; height: 34px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.25); color: rgba(255, 255, 255, 0.8);
+  font-size: 16px; backdrop-filter: blur(6px); }

@@ -1268,6 +1268,27 @@ function resetView() {
   animateCamera = false;
 }
 $('cam-reset').addEventListener('click', resetView);
+// «Чистый вид»: весь интерфейс прячется — только она. Вернуть — кнопкой в углу.
+{
+  const cleanBtn = document.createElement('button');
+  cleanBtn.id = 'cam-clean';
+  cleanBtn.className = 'icon-btn';
+  cleanBtn.title = 'Чистый вид';
+  cleanBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/></svg>';
+  $('cam-reset').before(cleanBtn);
+  const back = document.createElement('button');
+  back.id = 'clean-exit';
+  back.title = 'Вернуть кнопки';
+  back.textContent = '◉';
+  document.body.appendChild(back);
+  const setClean = (on) => {
+    document.body.classList.toggle('clean', on);
+    if (on) showToast('Чистый вид — ◉ в углу вернёт кнопки');
+  };
+  cleanBtn.addEventListener('click', (e) => { e.stopPropagation(); setClean(true); });
+  back.addEventListener('pointerdown', (e) => e.stopPropagation());
+  back.addEventListener('click', (e) => { e.stopPropagation(); setClean(false); });
+}
 // ⌂ на главном экране: камера спереди, она лицом к тебе и сразу встаёт.
 // Нижние вкладки: ⌂ «Домой» и ✏️ «Позы».
 $('btn-tab-pose').addEventListener('click', () => { if (!poseMode) setPoseMode(true); });
@@ -2997,8 +3018,7 @@ window.addEventListener('pointerdown', (e) => {
   if (!zoneAt(e)) return;
   autoIdle = 0;
   stopAuto();
-  // Во вкладке «Позы» касания — это точки (управление), повтор не выключаем.
-  if (curRep().on && !poseMode) setRepeat(false);
+  // Повтор касанием не выключаем: её можно трогать и гладить, пока она двигается.
 }, { capture: true, passive: true });
 // ---------- «Повтор»: она повторяет твоё движение ползунком по кругу ----------
 // Нажал кнопку над ползунком → двигаешь (наклон, прогиб, присесть, лечь) → отпустил —
@@ -3041,6 +3061,32 @@ function applyPoints(p) {
   if (p.hR) c.armPreset.right = null;
 }
 // Включить конкретное движение (из памяти или избранного) — плавно перетекая в него.
+// Готовые движения: ключевые точки (время, наклон, посадка) → плавная запись.
+const REP_PRESETS = {
+  home: [
+    { icon: '🧎', name: 'Присесть и встать', keys: [[0, 0, 0], [1.6, 0, 0.45]] },
+    { icon: '🙏', name: 'На коленки и обратно', keys: [[0, 0, 0.45], [2.2, 0, 0.8]] },
+    { icon: '🪑', name: 'С колен — на пол', keys: [[0, 0, 0.75], [2.4, 0, 1.0]] },
+  ],
+  pose: [
+    { icon: '🙇', name: 'Наклон', keys: [[0, 0, null], [1.8, 1.25, null]] },
+    { icon: '🌙', name: 'Прогиб', keys: [[0, 0, null], [1.6, -0.6, null]] },
+    { icon: '🌊', name: 'Волна: прогиб ↔ наклон', keys: [[0, -0.5, null], [2.8, 1.1, null]] },
+  ],
+};
+function presetMove(pr) {
+  const samples = [];
+  const [k0, k1] = pr.keys;
+  const n = 24;
+  for (let i = 0; i <= n; i++) {
+    const t = (k1[0] * i) / n;
+    const e = 0.5 - 0.5 * Math.cos((Math.PI * i) / n);
+    const bend = k0[1] + (k1[1] - k0[1]) * e;
+    const sit = k0[2] == null ? character.sit : k0[2] + (k1[2] - k0[2]) * e;
+    samples.push({ t, bend, spine: bendSpine(bend), sit, hL: null, hR: null, fL: null, fR: null });
+  }
+  return { dur: k1[0], samples };
+}
 function playMove(r, mv) {
   r.samples = mv.samples;
   r.dur = mv.dur;
@@ -3092,6 +3138,15 @@ function renderRep() {
     renderRep();
   });
   repFavsEl.appendChild(add);
+  // Готовые движения (не удаляются) — сверху над твоими.
+  for (const pr of REP_PRESETS[r.tab]) {
+    const c = document.createElement('button');
+    c.className = 'rf-chip rf-preset';
+    c.textContent = pr.icon;
+    c.title = pr.name;
+    c.addEventListener('click', () => { playMove(r, presetMove(pr)); showToast(`${pr.icon} ${pr.name}`); renderRep(); });
+    repFavsEl.appendChild(c);
+  }
   favs.forEach((mv, i) => {
     const c = document.createElement('button');
     c.className = 'rf-chip';
