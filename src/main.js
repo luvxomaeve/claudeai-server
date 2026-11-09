@@ -801,8 +801,9 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (touches.size > 2) return;
 
-  // Режим позы: хватаем руку или голову.
-  if (poseMode) {
+  // Режим позы: хватаем руку или голову. Точки спрятаны (⁘) или «чистый вид» —
+  // касания как на главной: гладь и тапай её, поза и повтор остаются.
+  if (poseMode && !petInPose()) {
     poseDragStart(e);
     return;
   }
@@ -1682,6 +1683,7 @@ let activeHandle = null; // какая точка сейчас в руке — �
 const HANDLE_LABELS = { kneeL: 'Левое колено', kneeR: 'Правое колено', handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра', footL: 'Левая нога', footR: 'Правая нога' };
 // 👁 в режиме позы: спрятать точки — смотреть на позу чисто, полоса слева всё так же наклоняет.
 let handlesHidden = false;
+const petInPose = () => handlesHidden || document.body.classList.contains('clean');
 try { handlesHidden = localStorage.getItem('waifu-handles-hidden') === '1'; } catch { /* ignore */ }
 function renderHandlesBtn() {
   $('btn-handles').classList.toggle('active', !handlesHidden);
@@ -1691,7 +1693,7 @@ $('btn-handles').addEventListener('click', () => {
   handlesHidden = !handlesHidden;
   try { localStorage.setItem('waifu-handles-hidden', handlesHidden ? '1' : '0'); } catch { /* ignore */ }
   renderHandlesBtn();
-  showToast(handlesHidden ? 'Точки спрятаны — тянуть за тело и полоса работают' : 'Точки видны');
+  showToast(handlesHidden ? 'Точки спрятаны — гладь и тапай её 💗 (полоса работает)' : 'Точки видны — ставь позу');
 });
 renderHandlesBtn();
 $('btn-handles').hidden = true;
