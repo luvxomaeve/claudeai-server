@@ -399,8 +399,11 @@ async function loadPackedModel(url) {
     const all = new Uint8Array(got);
     let o = 0;
     for (const c of chunks) { all.set(c, o); o += c.length; }
+    // Бинарная модель (.glb/.vrm) — сразу готова, без распаковки.
+    if (!/\.json($|\?)/.test(url)) { storeModel(url, all.buffer.slice(0)); return all.buffer; }
     text = new TextDecoder().decode(all);
   } else {
+    if (!/\.json($|\?)/.test(url)) { const buf = await res.arrayBuffer(); storeModel(url, buf.slice(0)); return buf; }
     text = await res.text();
   }
   $('loading-text').textContent = 'Загрузка… распаковка';
@@ -422,7 +425,14 @@ async function loadPackedModel(url) {
 
 // source: { url } — ссылка на .vrm (или упакованный .json), { buffer } — содержимое файла.
 async function parseModel(source) {
-  if (source.buffer) return loader.parseAsync(source.buffer.slice(0), '');
+  if (/\.glb$/.test(source.url)) {
+    // Облегчённая бинарная модель; если хостинг её не отдал — запасная упакованная (.json).
+    try { return await loader.parseAsync(await loadPackedModel(source.url), ''); } catch (err) {
+      console.warn('glb failed, fallback to json', err);
+      return loader.parseAsync(await loadPackedModel(source.url.replace(/\.glb$/, '.json')), '');
+    }
+  }
+  if (/\.json$/.test(source.url)) return loader.parseAsync(await loadPackedModel(source.url), ''); // с кэшем и прогрессом
   if (source.url.endsWith('.json')) return loader.parseAsync(await loadPackedModel(source.url), '');
   return loader.loadAsync(source.url, (e) => {
     if (e.total) $('loading-text').textContent = `Загрузка… ${Math.round((e.loaded / e.total) * 100)}%`;
@@ -2993,30 +3003,160 @@ function setFlow(on) {
   $('cam-auto').classList.toggle('active', on);
   showToast(on ? '🌸 Сама двигается — трогай камеру сколько хочешь' : 'Остановилась');
 }
+// ---------- Встроенная музыка (генерируется в браузере, без файлов) ----------
+// Спокойный бит ~96 BPM: бочка, хлопок, хэт, мягкие аккорды Am–F–C–G и бас.
+const music = { ctx: null, on: false, bpm: 96, start: 0, step: 0, timer: null, out: null };
+function musicBeat() {
+  if (!music.on || !music.ctx) return null;
+  return Math.max(0, (music.ctx.currentTime - music.start) * music.bpm / 60);
+}
+function noiseBuf(ctx) {
+  const b = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+function playMusic(on) {
+  if (on && !music.ctx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) { showToast('Музыка не поддерживается в этом браузере'); return; }
+    music.ctx = new Ctx();
+    window.__waifuAudio = music.ctx;
+    music.out = music.ctx.createGain();
+    music.out.gain.value = 0.32;
+    music.out.connect(music.ctx.destination);
+    music.noise = noiseBuf(music.ctx);
+  }
+  if (!music.ctx) return;
+  if (on) {
+    music.ctx.resume();
+    music.on = true;
+    music.start = music.ctx.currentTime + 0.1;
+    music.step = 0;
+    clearInterval(music.timer);
+    music.timer = setInterval(scheduleMusic, 25);
+  } else {
+    music.on = false;
+    clearInterval(music.timer);
+    music.timer = null;
+  }
+  $('flow-music')?.classList.toggle('active', music.on);
+}
+const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
+const hz = (m) => 440 * 2 ** ((m - 69) / 12);
+function tone(t, freq, dur, type, gain, attack = 0.01) {
+  const c = music.ctx;
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(music.out);
+  o.start(t);
+  o.stop(t + dur + 0.05);
+}
+function hit(t, dur, gain, filter, freq) {
+  const c = music.ctx;
+  const src = c.createBufferSource();
+  src.buffer = music.noise;
+  const f = c.createBiquadFilter();
+  f.type = filter;
+  f.frequency.value = freq;
+  const g = c.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f).connect(g).connect(music.out);
+  src.start(t);
+  src.stop(t + dur + 0.05);
+}
+function scheduleMusic() {
+  const c = music.ctx;
+  const eighth = 30 / music.bpm;
+  while (music.start + music.step * eighth < c.currentTime + 0.15) {
+    const t = music.start + music.step * eighth;
+    const st = music.step % 8;
+    const bar = Math.floor(music.step / 8) % 4;
+    if (st === 0 || st === 4) { // бочка
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.frequency.setValueAtTime(120, t);
+      o.frequency.exponentialRampToValueAtTime(45, t + 0.18);
+      g.gain.setValueAtTime(0.9, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(g).connect(music.out);
+      o.start(t); o.stop(t + 0.35);
+    }
+    if (st === 2 || st === 6) hit(t, 0.18, 0.35, 'bandpass', 1800); // хлопок
+    if (st % 2 === 1) hit(t, 0.05, 0.12, 'highpass', 7000); // хэт
+    if (st === 0) for (const n of CHORDS[bar]) tone(t, hz(n), eighth * 8, 'triangle', 0.05, 0.25); // аккорд
+    if (st === 0 || st === 3 || st === 4) tone(t, hz(CHORDS[bar][0] - 12), eighth * 1.6, 'sine', 0.22); // бас
+    if (st === 5 && Math.random() < 0.5) tone(t, hz(CHORDS[bar][2] + 12), eighth, 'sine', 0.05); // искорка
+    music.step++;
+  }
+}
+
+// Панель авто-режима: темп и музыка (видна, пока она «сама двигается»).
+const FLOW_SPEED_KEY = 'waifu-flow-speed';
+try { flow.speed = Number(localStorage.getItem(FLOW_SPEED_KEY)) || 1; } catch { flow.speed = 1; }
+const flowPanel = document.createElement('div');
+flowPanel.id = 'flow-panel';
+flowPanel.hidden = true;
+flowPanel.innerHTML = '<span>🐢</span><input id="flow-speed" type="range" min="0.4" max="2.2" step="0.05"><span>🐇</span><button id="flow-music" title="Музыка">♪</button>';
+document.body.appendChild(flowPanel);
+$('flow-speed').value = String(flow.speed);
+$('flow-speed').addEventListener('input', (e) => {
+  flow.speed = Number(e.target.value);
+  try { localStorage.setItem(FLOW_SPEED_KEY, String(flow.speed)); } catch { /* ignore */ }
+});
+$('flow-music').addEventListener('click', () => playMusic(!music.on));
+for (const ev of ['pointerdown', 'touchstart']) flowPanel.addEventListener(ev, (e) => e.stopPropagation());
+
+const FLOW_FACES = ['smile', 'smile', 'wink', 'shy', 'smile', 'wink', 'surprised'];
 function updateFlow(dt) {
+  flowPanel.hidden = !flow.on;
   if (!character || !flow.base) return;
   flow.k += ((flow.on ? 1 : 0) - flow.k) * (1 - Math.exp(-dt * 1.2));
   if (!flow.on && flow.k < 0.002) { Object.assign(character.bodyOffset, flow.base); flow.base = null; flow.k = 0; return; }
-  flow.t += dt;
-  const t = flow.t;
-  // Плавная «живая» волна: длинная основная + две короче, без повторов.
-  const w = 0.55 * Math.sin(t * 0.42) + 0.3 * Math.sin(t * 0.77 + 1.1) + 0.15 * Math.sin(t * 1.31 + 2.3);
-  const bend = w >= 0 ? w * 1.45 : w * 0.75; // вперёд глубже, назад — прогиб
-  const sway = Math.sin(t * 0.33 + 0.6) * 0.9 + Math.sin(t * 0.71) * 0.25;
-  const twist = Math.sin(t * 0.27 + 2.0) * 0.35;
+  // Фаза в «долях такта»: под музыку — ровно по битам, без музыки — свой темп (ползунок).
+  const mb = musicBeat();
+  const per = flow.speed < 0.7 ? 2 : flow.speed > 1.5 ? 0.5 : 1; // под музыку темп ступенями
+  if (mb != null) flow.beat = mb / per;
+  else flow.beat = (flow.beat ?? Math.random() * 16) + dt * flow.speed * (16 / 15);
+  const B = flow.beat;
+  const P = Math.PI * 2;
+  // Длинная волна наклон↔прогиб (16 долей) + две короче — живая, без повторов.
+  const w = 0.55 * Math.sin(P * B / 16) + 0.3 * Math.sin(P * B / 8 + 1.1) + 0.15 * Math.sin(P * B / 4 + 2.3);
+  const bend = w >= 0 ? w * 1.45 : w * 0.75;
+  const sway = Math.sin(P * B / 16 * 0.8 + 0.6) * 0.9 + Math.sin(P * B / 8 * 0.85) * 0.25;
+  const twist = Math.sin(P * B / 32 + 2.0) * 0.35;
   const S = character.scale;
   const o = character.bodyOffset;
   const b = flow.base;
   const k = flow.k;
   const L = (a, v) => a + (v - a) * k;
+  // Под музыку — лёгкая пружинка на каждую долю.
+  const bounce = mb != null ? (1 - Math.cos(P * mb)) * 0.5 : 0;
   o.hipsRotX = L(b.hipsRotX, bend);
-  o.spineX = L(b.spineX, bendSpine(bend));
+  o.spineX = L(b.spineX, bendSpine(bend) + bounce * 0.04);
   o.hipsX = L(b.hipsX, sway * 0.08 * S);
   o.hipsZ = L(b.hipsZ, THREE.MathUtils.clamp(sway * 0.13, -0.16, 0.16));
+  o.hipsY = L(b.hipsY ?? 0, -bounce * 0.012 * S);
   o.spineZ = L(b.spineZ, -sway * 0.14);
   o.spineY = L(b.spineY, twist);
   character.hipsSetSit = character.sitS; // на полу таз тоже двигается
   character.slideHold = 3; // ножками не болтает, пока «танцует»
+  // Лицо живёт: улыбается, подмигивает, смущается.
+  flow.faceT = (flow.faceT ?? 2) - dt * Math.max(0.6, flow.speed);
+  if (flow.on && flow.faceT <= 0 && character.sleep < 0.3) {
+    flow.faceT = 3.5 + Math.random() * 3;
+    const f = FLOW_FACES[Math.floor(Math.random() * FLOW_FACES.length)];
+    if (f === 'smile') character.setExpression('happy', 0.55 + Math.random() * 0.25, 1.6);
+    else if (f === 'wink') { character.setExpression('happy', 0.35, 1.0); character.wink(); }
+    else if (f === 'shy') { character.setExpression('relaxed', 0.55, 2.0); character.playMotion('tiltHead'); }
+    else if (f === 'surprised') character.setExpression('surprised', 0.35, 0.8);
+  }
 }
 function renderAutoBtn() {
   $('btn-auto').textContent = autoMoves ? '🌸 Сама двигается: вкл' : '🌸 Сама двигается: выкл';

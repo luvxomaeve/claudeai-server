@@ -275,6 +275,11 @@ export class Character {
     if (motion) this.playMotion(motion, side);
   }
 
+  wink(side = Math.random() < 0.5 ? 'left' : 'right') {
+    this.winkSide = side;
+    this.winkT = 0.45;
+  }
+
   setExpression(name, weight = 1, hold = 2.2) {
     for (const e of EXPRESSIONS) this.exprTarget[e] = 0;
     this.exprTarget[name] = weight;
@@ -2816,6 +2821,14 @@ export class Character {
     const eyesBusy = Math.max(this.exprCurrent.happy, this.exprCurrent.relaxed);
     this.eyesShutS = (this.eyesShutS ?? 0) + ((this.eyesShut ?? 0) - (this.eyesShutS ?? 0)) * (1 - Math.exp(-dt * 5));
     em.setValue('blink', Math.max(blink * (1 - eyesBusy), this.sleep, this.eyesShutS)); // спит / закрыла глаза
+    // Подмигивание: один глаз плавно закрывается и открывается (~0.45 с).
+    if (this.winkT > 0) {
+      this.winkT = Math.max(0, this.winkT - dt);
+      const k = Math.sin((1 - this.winkT / 0.45) * Math.PI);
+      const name = this.winkSide === 'left' ? 'blinkLeft' : 'blinkRight';
+      try { em.setValue(name, k); } catch { /* у модели нет отдельного глаза */ }
+      if (this.winkT === 0) { try { em.setValue(name, 0); } catch { /* ignore */ } }
+    }
 
     // Рот шевелится, пока она «говорит».
     this.talkTime -= dt;
