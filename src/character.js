@@ -734,19 +734,27 @@ export class Character {
       // в сторону (каждый раз в другую); поднимаясь — грудь раскрывается, лёгкая пружинка.
       {
         const v = THREE.MathUtils.clamp(this.sitV ?? 0, -2, 2);
-        this.sitVS = (this.sitVS ?? 0) + (v - (this.sitVS ?? 0)) * Math.min(1, (this.lastDt ?? 0.016) * 6);
+        this.sitVS = (this.sitVS ?? 0) + (v - (this.sitVS ?? 0)) * Math.min(1, (this.lastDt ?? 0.016) * 4); // плавно нарастает и уходит
         const vs = this.sitVS;
         if (Math.sign(vs) !== Math.sign(this.sitDirPrev ?? 0) && Math.abs(vs) > 0.15) {
           this.sitDirPrev = Math.sign(vs);
           if (vs > 0) this.sitSideSign = -(this.sitSideSign ?? 1);
         }
-        const near = 1 - p2 * 0.6; // на полу — мягче
-        const down = Math.max(0, vs), up = Math.max(0, -vs);
-        pose.spineX += (down * 0.16 - up * 0.12) * near;
-        pose.headX -= down * 0.06 * near;
-        pose.hipsZ += (this.sitSideSign ?? 1) * Math.min(1, Math.abs(vs)) * 0.1 * near;
-        pose.spineZ -= (this.sitSideSign ?? 1) * Math.min(1, Math.abs(vs)) * 0.06 * near;
-        pose.hipsRotY += (this.sitSideSign ?? 1) * Math.min(1, Math.abs(vs)) * 0.07 * near;
+        const near = 1 - p2 * 0.45; // на полу — чуть мягче
+        // Сила движения: быстро — сильнее, но и медленное приседание заметно (не «столбиком»).
+        const mag = Math.min(1, Math.abs(vs) * 1.6);
+        const down = vs > 0 ? mag : 0, up = vs < 0 ? mag : 0;
+        const side = (this.sitSideSign ?? 1) * mag;
+        pose.spineX += (down * 0.3 - up * 0.24) * near;
+        pose.hipsRotX += (down * 0.12 - up * 0.08) * near;
+        pose.headX -= (down * 0.1 - up * 0.06) * near;
+        pose.hipsZ += side * 0.2 * near;
+        pose.hipsX += side * 0.03 * this.scale * near;
+        pose.hipsRotY += side * 0.14 * near;
+        pose.spineZ -= side * 0.12 * near;
+        pose.spineY -= side * 0.08 * near;
+        pose.headZ += side * 0.08 * near;
+        pose.lShoulderZ += side * 0.05; pose.rShoulderZ += side * 0.05;
       }
       // Баланс как у человека: центр тяжести над стопами, поэтому в приседе
       // корпус наклоняется вперёд примерно параллельно голени (угол голени
