@@ -2815,7 +2815,6 @@ export class Character {
   // Физика груди в моделях VRoid часто почти без демпфирования — из-за этого
   // её выгибает при движениях. Оставляем мягкое естественное движение без выворотов.
   stabilizeSprings() {
-    tuneSkirt(this.vrm);
     const joints = this.vrm.springBoneManager?.joints;
     if (!joints) return;
     for (const j of joints) {

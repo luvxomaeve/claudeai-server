@@ -58,7 +58,6 @@ export class PieceWardrobe {
   }
 
   addSource(id, vrm) {
-    tuneSkirt(vrm);
     VRMUtils.removeUnnecessaryVertices(vrm.scene);
     VRMUtils.rotateVRM0(vrm);
     vrm.scene.traverse((o) => {
@@ -84,34 +83,6 @@ export class PieceWardrobe {
       for (const m of this.base.pieces[cat.id] ?? []) m.visible = choice === 'base' || (choice !== 'none' && !this.sources.has(choice));
       for (const [id, s] of this.sources) for (const m of s.pieces[cat.id] ?? []) m.visible = choice === id;
     }
-    // Одежда чуть «впереди» тела по глубине: там, где кожа почти касается ткани
-    // (бёдра под юбкой в наклоне), она не просвечивает сквозь одежду.
-    const clothOffset = (m) => {
-      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
-        if (!mat || mat.userData.clothOffset) continue;
-        mat.userData.clothOffset = true;
-        mat.polygonOffset = true;
-        mat.polygonOffsetFactor = -1;
-        mat.polygonOffsetUnits = -4;
-      }
-    };
-    for (const id of ['tops', 'bottoms']) {
-      for (const m of this.base.pieces[id] ?? []) clothOffset(m);
-      for (const [, s] of this.sources) for (const m of s.pieces[id] ?? []) clothOffset(m);
-    }
-    // Светлые пятна на юбке — это блик (matcap), который на изнанке складок
-    // вспыхивает светлым. Для низа отключаем его — ткань ровная, без «просветов».
-    const noMatcap = (m) => {
-      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
-        if (!mat || mat.userData.noMatcap) continue;
-        mat.userData.noMatcap = true;
-        if (mat.matcapFactor?.setScalar) mat.matcapFactor.setScalar(0);
-        if ('matcapTexture' in mat) mat.matcapTexture = null;
-        mat.needsUpdate = true;
-      }
-    };
-    for (const m of this.base.pieces.bottoms ?? []) noMatcap(m);
-    for (const [, s] of this.sources) for (const m of s.pieces.bottoms ?? []) noMatcap(m);
     for (const [, s] of this.sources) {
       s.active = PIECE_CATS.some((c) => !c.skin && (s.pieces[c.id] ?? []).some((m) => m.visible));
       s.vrm.scene.visible = s.active;
@@ -238,7 +209,6 @@ export class PieceWardrobe {
       }
       s.vrm.scene.position.copy(this.base.vrm.scene.position);
       s.vrm.scene.quaternion.copy(this.base.vrm.scene.quaternion);
-      this.skirtInertia(s, h, dt);
       s.vrm.update(dt);
     }
   }
