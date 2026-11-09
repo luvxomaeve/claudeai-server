@@ -788,7 +788,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!$('pose-list').hidden && !poseMode) { setPoseListOpen(false); return; }
   canvas.setPointerCapture(e.pointerId);
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (touches.size === 1) flickStart = { x: e.clientX, y: e.clientY, t: performance.now(), onHer: !!zoneAt(e) };
+  if (touches.size === 1) flickStart = { x: e.clientX, y: e.clientY, t: performance.now(), onHer: !!zoneAt(e) || nearHerOnScreen(e) };
   pointerActive = true;
   $('hint').style.opacity = 0;
 
@@ -1004,6 +1004,21 @@ canvas.addEventListener('pointermove', (e) => {
 // Два быстрых свайпа по ней подряд (на главной): вниз — на одно положение ниже
 // (стоя → присела → на коленях → села → легла), вверх — на одно выше.
 let flickStart = null;
+// Палец в пределах её силуэта на экране (по костям, с запасом) — быстро, без пересчёта сетки.
+function nearHerOnScreen(e) {
+  if (!character) return false;
+  const v = new THREE.Vector3();
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const n of ['head', 'hips', 'leftFoot', 'rightFoot', 'leftHand', 'rightHand', 'leftLowerLeg', 'rightLowerLeg']) {
+    const bn = character.bones[n] ?? character.vrm.humanoid.getNormalizedBoneNode(n);
+    if (!bn) continue;
+    bn.getWorldPosition(v).project(camera);
+    const sx = (v.x * 0.5 + 0.5) * window.innerWidth, sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+  }
+  const m = 30;
+  return e.clientX > x0 - m && e.clientX < x1 + m && e.clientY > y0 - m * 2 && e.clientY < y1 + m;
+}
 let lastFlick = null;
 const SIT_STEPS = [0, 0.45, 0.8, 1.0, 1.3];
 function checkFlick(e) {
@@ -1013,10 +1028,10 @@ function checkFlick(e) {
   const dt = performance.now() - f.t;
   const dy = e.clientY - f.y;
   const dx = e.clientX - f.x;
-  if (!f.onHer || dt > (window.__flickMaxDt ?? 300) || Math.abs(dy) < 60 || Math.abs(dx) > Math.abs(dy) * 0.7) return;
+  if (!f.onHer || dt > (window.__flickMaxDt ?? 450) || Math.abs(dy) < 45 || Math.abs(dx) > Math.abs(dy) * 0.8) return;
   const dir = Math.sign(dy);
   const now = performance.now();
-  if (lastFlick && lastFlick.dir === dir && now - lastFlick.t < (window.__flickMaxGap ?? 700)) {
+  if (lastFlick && lastFlick.dir === dir && now - lastFlick.t < (window.__flickMaxGap ?? 900)) {
     lastFlick = null;
     const cur = character.sit;
     const max = sitMax();
@@ -1716,7 +1731,7 @@ function nearestAnchor(e, side) {
 }
 
 let activeHandle = null; // какая точка сейчас в руке — она подсвечивается, остальные притухают
-const HANDLE_LABELS = { kneeL: 'Левое колено', kneeR: 'Правое колено', handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра', footL: 'Левая нога', footR: 'Правая нога' };
+const HANDLE_LABELS = { kneeL: 'Левое колено', kneeR: 'Правое колено', handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра: вниз — сесть, вбок — качнуть', footL: 'Левая нога', footR: 'Правая нога' };
 // 👁 в режиме позы: спрятать точки — смотреть на позу чисто, полоса слева всё так же наклоняет.
 let handlesHidden = false;
 const petInPose = () => handlesHidden || document.body.classList.contains('clean');
@@ -1950,11 +1965,11 @@ const HANDLE_HIT = {
   hips: { zone: 'body', bone: 'hips' }, footL: { zone: 'legs', bone: 'leftFoot' }, footR: { zone: 'legs', bone: 'rightFoot' },
   kneeL: { zone: 'knee', side: 'left' }, kneeR: { zone: 'knee', side: 'right' },
 };
-function nearestHandle(e) {
+function nearestHandle(e, radius = 40) {
   let best = null;
   // Только что крутили камеру — точки не хватаем (чтобы не зацепить случайно); радиус поменьше.
   if (performance.now() - lastCamMove < 450) return null;
-  let bestD = 40;
+  let bestD = radius;
   for (const k of HANDLE_KEYS) {
     const p = handleWorld(k);
     if (!p) continue;
@@ -1987,7 +2002,9 @@ function showLabel(text) {
 function poseDragStart(e) {
   snapPose();
   const camBusy = performance.now() - lastCamMove < 450;
-  const handleHit = camBusy ? null : nearestHandle(e);
+  // Точку берём, только если палец прямо на ней (≈ размер кружка); иначе ведёшь по ней —
+  // работает как правая полоса.
+  const handleHit = camBusy ? null : nearestHandle(e, 24);
   const hit = camBusy ? null : (handleHit ?? zoneAt(e, true));
   // Водишь по ней (мимо точек) вверх-вниз — как правая полоса: сесть/лечь/встать.
   if (hit && !handleHit && !['hand', 'arm', 'knee'].includes(hit.zone)) {
@@ -2125,7 +2142,20 @@ function poseDragMove(e) {
     const lim = floor ? 0.16 : 0.08;
     o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -lim * S, lim * S);
     o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
-    if (floor) o.hipsY = clamp(o.hipsY - (e.clientY - poseDrag.lastY) * 0.0006 * S, -0.04 * S, 0.22 * S);
+    // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
+    {
+      const dyPx = dy;
+      const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || window.innerHeight * 0.5;
+      const dv = (dyPx / h) * sitMax();
+      const now = performance.now();
+      const rate = Math.abs(dv) / Math.max(0.008, (now - (poseDrag.t ?? now - 16)) / 1000);
+      poseDrag.t = now;
+      character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
+      character.slideHold = 3;
+      character.dragBoostT = 0.5;
+      loopNoteMove();
+      sitBy(dv / 0.004);
+    }
   }
 }
 
