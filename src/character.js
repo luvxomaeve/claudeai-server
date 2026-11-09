@@ -851,10 +851,10 @@ export class Character {
         const ph = this.sitPhases();
         // Сидя на полу / лёжа наклон делает спина — с хорошей амплитудой;
         // немного помогает и таз (кроме «на боку», где он лежит).
-        const k = bend >= 0 ? 1.15 * fwdLie : 1.0 * (1 - 0.4 * ph.b4);
+        const k = bend >= 0 ? 1.35 * fwdLie : 1.2 * (1 - 0.4 * ph.b4);
         pose.spineX += bend * k * lie;
         // Общий предел изгиба спины лёжа/сидя на полу.
-        pose.spineX = THREE.MathUtils.clamp(pose.spineX, -1.0 - 0.2 * ph.b4, 1.3);
+        pose.spineX = THREE.MathUtils.clamp(pose.spineX, -1.15 - 0.2 * ph.b4, 1.5);
         // На полу полоса двигает и таз: наклон — таз подаётся вперёд, прогиб — назад,
         // и бёдра перекатываются вбок — она ёрзает по полу всем телом.
         const lieAll2 = Math.max(ph.p4, ph.b4, ph.c4);

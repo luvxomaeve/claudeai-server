@@ -1315,3 +1315,4 @@ body.ui-hidden #suggest { opacity: 1; pointer-events: auto; }
 
 /* Взгляд — в строке камеры. */
 #cam-controls #btn-gaze.active { background: var(--pink); color: #fff; }
+#cam-controls #cam-auto.active { background: var(--pink); color: #fff; }

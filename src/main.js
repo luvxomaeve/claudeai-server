@@ -1007,6 +1007,7 @@ function setView(v) {
   showToast(`🎥 ${v.name}`);
 }
 $('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
+$('cam-auto').addEventListener('click', () => setFlow(!flow.on));
 // 🕹 Шарик-джойстик: держишь и ведёшь — камера плавно облетает её (вбок)
 // и опускается/поднимается (вверх-вниз). Отпустил — стоит на месте.
 // Два шарика: 🕹 «облёт» — вбок облететь, вверх/вниз опустить/поднять камеру;
@@ -1700,6 +1701,7 @@ sitSlider.addEventListener('pointermove', (e) => {
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
   character.slideHold = 3;
+  if (flow.on) { flow.on = false; flow.base = null; flow.k = 0; $('cam-auto').classList.remove('active'); }
   if (poseMode) {
     // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
@@ -1707,7 +1709,7 @@ sitSlider.addEventListener('pointermove', (e) => {
     const bend = THREE.MathUtils.clamp(o.hipsRotX + (dv / sitMax()) * BEND_RANGE, BEND_MIN, BEND_MAX);
     o.hipsRotX = bend;
     // Назад гнётся в основном спина (S-линия), голова следует за ней.
-    o.spineX = bend >= 0 ? bend * 0.45 : bend * 1.1;
+    o.spineX = bendSpine(bend);
     showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
     return;
   }
@@ -1738,6 +1740,7 @@ sitSlider2.addEventListener('pointermove', (e) => {
   slider2Drag.y = e.clientY;
   slider2Drag.t = now;
   character.slideHold = 3;
+  if (flow.on) setFlow(false);
   sitBy(dv / 0.004);
 });
 for (const ev of ['pointerup', 'pointercancel']) {
@@ -1745,9 +1748,11 @@ for (const ev of ['pointerup', 'pointercancel']) {
 }
 
 // Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
-const BEND_MIN = -0.6; // прогиб назад — побольше
-const BEND_MAX = 1.6; // наклон вперёд поглубже
+const BEND_MIN = -0.8; // прогиб назад — побольше
+const BEND_MAX = 1.9; // наклон вперёд поглубже
 const BEND_RANGE = BEND_MAX - BEND_MIN;
+// Сколько изгиба берёт спина: вперёд — мягкая дуга, назад — глубокий прогиб (S-линия).
+function bendSpine(b) { return b >= 0 ? b * 0.55 : b * 1.25; }
 function updateSitSlider() {
   if (!character) return;
   // В режиме позы стоя — наклон; если она сидит/лежит — полоса поднимает/опускает её.
@@ -2830,7 +2835,7 @@ function applyAuto(v) {
   const o = character.bodyOffset;
   const S = character.scale;
   o.hipsRotX = v.bend;
-  o.spineX = v.bend >= 0 ? v.bend * 0.45 : v.bend * 1.1;
+  o.spineX = bendSpine(v.bend);
   o.hipsX = v.sway * 0.08 * S;
   o.hipsZ = THREE.MathUtils.clamp(o.hipsX / S * 1.6, -0.14, 0.14);
   o.spineZ = -v.sway * 0.16;
@@ -2862,7 +2867,7 @@ function updateAuto(dt) {
       const o = character.bodyOffset;
       const S = character.scale;
       o.hipsRotX = auto.last.bend;
-      o.spineX = auto.last.bend >= 0 ? auto.last.bend * 0.45 : auto.last.bend * 1.1;
+      o.spineX = bendSpine(auto.last.bend);
       o.hipsX = auto.last.sway * 0.06 * S;
       o.hipsZ = THREE.MathUtils.clamp(o.hipsX / S * 1.6, -0.14, 0.14);
       o.spineZ = -auto.last.sway * 0.12;
@@ -2875,7 +2880,7 @@ function updateAuto(dt) {
     return;
   }
   autoCooldown -= dt;
-  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0
+  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0 && !flow.base
     && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
@@ -2894,7 +2899,54 @@ function updateAuto(dt) {
   autoLastName = r.name;
   auto = { keys: r.keys, t: 0 };
 }
-window.addEventListener('pointerdown', () => { autoIdle = 0; stopAuto(); }, { capture: true, passive: true });
+// Камеру крутишь — авто не мешаем; трогаешь её саму — авто плавно останавливается.
+window.addEventListener('pointerdown', (e) => {
+  if (e.target !== canvas) return;
+  if (!zoneAt(e)) return;
+  autoIdle = 0;
+  stopAuto();
+  if (flow.on) setFlow(false);
+}, { capture: true, passive: true });
+// ---------- Авто-режим «Сама»: выставил камеру — она плавно двигается прогибами ----------
+// Непрерывная волна (несколько медленных синусов): наклон ↔ прогиб, бёдра вбок —
+// в любом положении (стоя, на коленях, на полу). Камера остаётся, где ты её поставил.
+const flow = { on: false, t: 0, k: 0, base: null };
+function setFlow(on) {
+  if (!character) return;
+  if (on) {
+    stopAuto(true);
+    flow.base = { ...character.bodyOffset };
+    flow.t = Math.random() * 20;
+  }
+  flow.on = on;
+  $('cam-auto').classList.toggle('active', on);
+  showToast(on ? '🌸 Сама двигается — трогай камеру сколько хочешь' : 'Остановилась');
+}
+function updateFlow(dt) {
+  if (!character || !flow.base) return;
+  flow.k += ((flow.on ? 1 : 0) - flow.k) * (1 - Math.exp(-dt * 1.2));
+  if (!flow.on && flow.k < 0.002) { Object.assign(character.bodyOffset, flow.base); flow.base = null; flow.k = 0; return; }
+  flow.t += dt;
+  const t = flow.t;
+  // Плавная «живая» волна: длинная основная + две короче, без повторов.
+  const w = 0.55 * Math.sin(t * 0.42) + 0.3 * Math.sin(t * 0.77 + 1.1) + 0.15 * Math.sin(t * 1.31 + 2.3);
+  const bend = w >= 0 ? w * 1.45 : w * 0.75; // вперёд глубже, назад — прогиб
+  const sway = Math.sin(t * 0.33 + 0.6) * 0.9 + Math.sin(t * 0.71) * 0.25;
+  const twist = Math.sin(t * 0.27 + 2.0) * 0.35;
+  const S = character.scale;
+  const o = character.bodyOffset;
+  const b = flow.base;
+  const k = flow.k;
+  const L = (a, v) => a + (v - a) * k;
+  o.hipsRotX = L(b.hipsRotX, bend);
+  o.spineX = L(b.spineX, bendSpine(bend));
+  o.hipsX = L(b.hipsX, sway * 0.08 * S);
+  o.hipsZ = L(b.hipsZ, THREE.MathUtils.clamp(sway * 0.13, -0.16, 0.16));
+  o.spineZ = L(b.spineZ, -sway * 0.14);
+  o.spineY = L(b.spineY, twist);
+  character.hipsSetSit = character.sitS; // на полу таз тоже двигается
+  character.slideHold = 3; // ножками не болтает, пока «танцует»
+}
 function renderAutoBtn() {
   $('btn-auto').textContent = autoMoves ? '🌸 Сама двигается: вкл' : '🌸 Сама двигается: выкл';
   $('btn-auto').classList.toggle('active', autoMoves);
@@ -2916,6 +2968,7 @@ function tick() {
   updateBlob();
   updateLiveIdle();
   updateAuto(dt);
+  updateFlow(dt);
   updateSuggest(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
