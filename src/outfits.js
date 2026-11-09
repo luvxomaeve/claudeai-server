@@ -200,18 +200,21 @@ export class PieceWardrobe {
     const m = mc.getImageData(0, 0, w, h).data;
     const id = ctx.getImageData(0, 0, w, h);
     const d = id.data;
-    // Резинка сверху: была серой полоской над юбкой (вне зоны перекраски).
-    // Включаем её в зону — она того же цвета, что и ткань, верх белья не обрезан.
+    // Резинка шортиков выглядывает над юбкой серой полоской — закрашиваем её кожей
+    // (цвет берём с кожи прямо над ней в том же столбце).
     {
       const grey = (i) => { const mx = Math.max(d[i], d[i + 1], d[i + 2]), mn = Math.min(d[i], d[i + 1], d[i + 2]); return d[i + 3] > 200 && mx - mn <= 26 && mx < 200; };
-      const y0 = Math.round(h * 0.36), y1 = Math.round(h * 0.52), band = Math.round(h * 0.05);
+      const y0 = Math.round(h * 0.36), y1 = Math.round(h * 0.52), band = Math.round(h * 0.047);
       for (let x = Math.round(w * 0.24); x < Math.round(w * 0.76); x++) {
         let r = -1;
         for (let y = y0; y < y1; y++) if (grey((y * w + x) * 4)) { r = y; break; }
         if (r < 0) continue;
-        for (let y = r; y < r + band; y++) {
+        const s = ((r - Math.round(h * 0.006)) * w + x) * 4;
+        if (grey(s) || d[s + 3] < 200) continue;
+        for (let y = r - 2; y < r + band; y++) {
           const i = (y * w + x) * 4;
-          if (grey(i)) { m[i] = 255; m[i + 3] = 255; }
+          if (y >= r && !grey(i) && y < r + band - 6) continue; // край и шов — закрашиваем всегда
+          d[i] = d[s]; d[i + 1] = d[s + 1]; d[i + 2] = d[s + 2];
         }
       }
     }
