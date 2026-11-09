@@ -1938,7 +1938,7 @@ function updateSitSlider() {
   sitSlider.classList.toggle('bend', bendMode);
   const k = bendMode
     ? (character.bodyOffset.hipsRotX - BEND_MIN) / BEND_RANGE
-    : character.sitS / sitMax();
+    : (sliderDrag ? character.sit : character.sitS) / sitMax(); // пока ведёшь — кружок под пальцем
   sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(k, 0, 1).toFixed(3));
 }
 

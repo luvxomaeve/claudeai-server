@@ -669,9 +669,12 @@ export class Character {
       // Скорость следует за пальцем: медленно ведёшь — плавно, быстро — быстрее (но без рывка).
       // Нет данных о пальце (кнопка ⌂ и т.п.) — спокойная скорость; иначе — как ведёшь.
       const base = this.sitS > 0.95 || this.sit > 1.0 ? 0.32 : 0.5;
-      const vmax = this.sitRate > 0.02 ? THREE.MathUtils.clamp(this.sitRate * 1.1, 0.22, 2.2) : base;
-      const acc = 1.2 + this.sitRate * 3;
-      const want = c((this.sit - this.sitS) * (2.6 + this.sitRate), -vmax, vmax);
+      // Палец на полосе — тело идёт за ним плотно (не медленнее спокойной скорости),
+      // иначе при медленном ведении оно отстаёт и полоса будто «залипает».
+      const held = (this.dragBoostT ?? 0) > 0;
+      const vmax = c(Math.max(held ? base * 1.6 : base, this.sitRate * 1.3), 0.22, 2.4);
+      const acc = (held ? 3 : 1.2) + this.sitRate * 3;
+      const want = c((this.sit - this.sitS) * ((held ? 6 : 2.6) + this.sitRate), -vmax, vmax);
       this.sitV += c(want - this.sitV, -acc * dt, acc * dt);
       if (Math.abs(this.sit - this.sitS) < 0.02) this.sitRate *= Math.exp(-dt * 3);
       const before = this.sit - this.sitS;
