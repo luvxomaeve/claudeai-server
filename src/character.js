@@ -1890,11 +1890,13 @@ export class Character {
       // Присед в каблуках: привстаёт на носки, ступни чуть вперёд, колени над носками.
       target.z += p1 * 0.1 * S;
       target.y += p1 * 0.025 * S;
-      target.x -= outSign * p1 * (1 - p2) * 0.015 * S; // ступни чуть ближе — аккуратнее
+      target.x += outSign * p1 * (1 - p2) * 0.02 * S; // в приседе ступни чуть шире
       // На коленях: голени лежат на полу, ступни под ягодицами, носками назад.
       if (p2 > 0) {
+        // Колени и ступни на ширине бёдер (как обычно стоят на коленях): сгиб в бедре
+        // идёт под углом, а не строго к животу — меньше «сминания» сзади.
         const kneel = new THREE.Vector3(
-          rest.pos.x + outSign * 0.01 * S,
+          rest.pos.x + outSign * 0.07 * S * (1 - p3),
           rest.pos.y - 0.05 * S,
           this.restHips.z - 0.06 * S,
         );
@@ -1982,7 +1984,7 @@ export class Character {
       const lateral = footOff ? footOff.x * 1.5 : 0;
       const kneeUp = footOff ? footOff.y * 1.2 : 0;
       const pole = new THREE.Vector3(
-        rest.pos.x + outSign * (0.03 - 0.05 * p1 * (1 - p2)) * S + lateral + 0.4 * p3, // сидя боком колени влево-вперёд
+        rest.pos.x + outSign * (0.03 + 0.06 * p1 * (1 - p3)) * S + lateral + 0.4 * p3, // колени чуть врозь; сидя боком — влево-вперёд
         // На коленях колено вниз (к полу); сидя боком таз уже у пола — колено вперёд, не под пол.
         knee.y - 0.5 * p2 * (1 - p3) + 0.2 * p3 + kneeUp * 0.5,
         knee.z + 0.6 + kneeUp,
