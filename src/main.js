@@ -571,7 +571,7 @@ const FEATURES = [
   { id: 'lieStyles', lvl: 3, name: 'Лечь на живот и на спину', ids: ['lie-toggle', 'lie-toggle2'] },
   { id: 'handles', lvl: 3, name: 'Точки поз (всё тело)', ids: ['btn-handles'] },
   { id: 'dance', lvl: 4, name: 'Танцы и анимации', ids: ['btn-anims'] },
-  { id: 'flow', lvl: 5, name: '«Сама двигается»', ids: ['cam-auto'] },
+  { id: 'flow', lvl: 5, name: '«Повтор движения»', ids: ['cam-auto'] },
 ];
 const UNLOCK_KEY = 'waifu-unlocked';
 let adUnlocked = new Set();
@@ -1087,7 +1087,7 @@ function setView(v) {
   showToast(`🎥 ${v.name}`);
 }
 $('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
-$('cam-auto').addEventListener('click', () => setFlow(!flow.on));
+$('cam-auto').addEventListener('click', () => setRepeat(!rep.on));
 // 🕹 Шарик-джойстик: держишь и ведёшь — камера плавно облетает её (вбок)
 // и опускается/поднимается (вверх-вниз). Отпустил — стоит на месте.
 // Два шарика: 🕹 «облёт» — вбок облететь, вверх/вниз опустить/поднять камеру;
@@ -1782,7 +1782,7 @@ sitSlider.addEventListener('pointermove', (e) => {
   sliderDrag.y = e.clientY;
   sliderDrag.t = now;
   character.slideHold = 3;
-  if (flow.on) { flow.on = false; flow.base = null; flow.k = 0; $('cam-auto').classList.remove('active'); }
+  loopNoteMove();
   if (poseMode) {
     // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
@@ -1821,7 +1821,7 @@ sitSlider2.addEventListener('pointermove', (e) => {
   slider2Drag.y = e.clientY;
   slider2Drag.t = now;
   character.slideHold = 3;
-  if (flow.on) setFlow(false);
+  loopNoteMove();
   sitBy(dv / 0.004);
 });
 for (const ev of ['pointerup', 'pointercancel']) {
@@ -2961,7 +2961,7 @@ function updateAuto(dt) {
     return;
   }
   autoCooldown -= dt;
-  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0 && !flow.base
+  const calm = autoMoves && !poseMode && autoIdle > 5 && autoCooldown <= 0 && !rep.on
     && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
@@ -2986,23 +2986,90 @@ window.addEventListener('pointerdown', (e) => {
   if (!zoneAt(e)) return;
   autoIdle = 0;
   stopAuto();
-  if (flow.on) setFlow(false);
+  if (rep.on) setRepeat(false);
 }, { capture: true, passive: true });
-// ---------- Авто-режим «Сама»: выставил камеру — она плавно двигается прогибами ----------
-// Непрерывная волна (несколько медленных синусов): наклон ↔ прогиб, бёдра вбок —
-// в любом положении (стоя, на коленях, на полу). Камера остаётся, где ты её поставил.
-const flow = { on: false, t: 0, k: 0, base: null };
-function setFlow(on) {
+// ---------- «Повтор»: она повторяет твоё движение ползунком по кругу ----------
+// Нажал 〰 → двигаешь ползунком (наклон, прогиб, присесть, лечь) → отпустил —
+// через секунду она повторяет ровно это движение туда-обратно, плавно, без рывка.
+// Снова подвигал — запомнит новое. Ещё раз 〰 (или тронул её) — стоп.
+const rep = { on: false, state: 'off', samples: [], t: 0, lastMove: 0, recStart: 0, faceT: 2 };
+function setRepeat(on) {
   if (!character) return;
-  if (on) {
-    stopAuto(true);
-    flow.base = { ...character.bodyOffset };
-    flow.t = Math.random() * 20;
-  }
-  flow.on = on;
+  rep.on = on;
+  rep.state = on ? 'wait' : 'off';
+  rep.samples = [];
+  if (on) stopAuto(true);
   $('cam-auto').classList.toggle('active', on);
-  showToast(on ? '🌸 Сама двигается — трогай камеру сколько хочешь' : 'Остановилась');
+  $('cam-auto').classList.remove('rec');
+  showToast(on ? '〰 Подвигай ползунком — я повторю 💗' : 'Стоп');
 }
+// Ползунок двинули: в режиме повтора — начинаем (или продолжаем) запись.
+function loopNoteMove() {
+  if (!rep.on) return;
+  const now = performance.now();
+  if (rep.state !== 'rec') {
+    rep.state = 'rec';
+    rep.samples = [];
+    rep.recStart = now;
+    $('cam-auto').classList.add('rec');
+  }
+  rep.lastMove = now;
+}
+function loopSample() {
+  const o = character.bodyOffset;
+  return { t: (performance.now() - rep.recStart) / 1000, bend: o.hipsRotX, spine: o.spineX, sit: character.sit };
+}
+function updateLoop(dt) {
+  if (!rep.on || !character) return;
+  const now = performance.now();
+  if (rep.state === 'rec') {
+    rep.samples.push(loopSample());
+    const dragging = !!(sliderDrag || slider2Drag);
+    if (!dragging && now - rep.lastMove > 900) {
+      // Хвост без движения отрезаем, слишком короткое — ждём дальше.
+      const s0 = rep.samples;
+      const endT = (rep.lastMove - rep.recStart) / 1000;
+      rep.samples = s0.filter((x) => x.t <= endT + 0.05);
+      $('cam-auto').classList.remove('rec');
+      if (endT < 0.4 || rep.samples.length < 4) { rep.state = 'wait'; return; }
+      rep.dur = endT;
+      rep.t = 0;
+      rep.state = 'play';
+      showToast('Повторяю~ ♥ Подвигай ещё — запомню новое');
+    }
+    return;
+  }
+  if (rep.state !== 'play') return;
+  // Туда-обратно: стык всегда плавный, разворот мягкий.
+  rep.t = (rep.t + dt) % (rep.dur * 2);
+  const tri = rep.t < rep.dur ? rep.t / rep.dur : 2 - rep.t / rep.dur;
+  const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * rep.dur;
+  const S = rep.samples;
+  let i = 0;
+  while (i < S.length - 2 && S[i + 1].t < u) i++;
+  const a = S[i];
+  const b = S[Math.min(i + 1, S.length - 1)];
+  const k = b.t > a.t ? THREE.MathUtils.clamp((u - a.t) / (b.t - a.t), 0, 1) : 0;
+  const L = (x, y) => x + (y - x) * k;
+  const o = character.bodyOffset;
+  o.hipsRotX = L(a.bend, b.bend);
+  o.spineX = L(a.spine, b.spine);
+  character.sit = L(a.sit, b.sit);
+  character.sitRate = 1.2;
+  character.slideHold = 3; // ножками не болтает
+  character.hipsSetSit = character.sitS;
+  // Лицо живёт: улыбается, подмигивает, смущается.
+  rep.faceT -= dt;
+  if (rep.faceT <= 0 && character.sleep < 0.3) {
+    rep.faceT = 3.5 + Math.random() * 3;
+    const f = FLOW_FACES[Math.floor(Math.random() * FLOW_FACES.length)];
+    if (f === 'smile') character.setExpression('happy', 0.55 + Math.random() * 0.25, 1.6);
+    else if (f === 'wink') { character.setExpression('happy', 0.35, 1.0); character.wink(); }
+    else if (f === 'shy') { character.setExpression('relaxed', 0.55, 2.0); character.playMotion('tiltHead'); }
+    else if (f === 'surprised') character.setExpression('surprised', 0.35, 0.8);
+  }
+}
+const FLOW_FACES = ['smile', 'smile', 'wink', 'shy', 'smile', 'wink', 'surprised'];
 // ---------- Встроенная музыка (генерируется в браузере, без файлов) ----------
 // Спокойный бит ~96 BPM: бочка, хлопок, хэт, мягкие аккорды Am–F–C–G и бас.
 const music = { ctx: null, on: false, bpm: 96, start: 0, step: 0, timer: null, out: null };
@@ -3040,7 +3107,8 @@ function playMusic(on) {
     clearInterval(music.timer);
     music.timer = null;
   }
-  $('flow-music')?.classList.toggle('active', music.on);
+  $('btn-music-toggle')?.classList.toggle('active', music.on);
+  if ($('btn-music-toggle')) $('btn-music-toggle').textContent = music.on ? '🎶 Музыка: вкл' : '🎶 Музыка';
 }
 const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
 const hz = (m) => 440 * 2 ** ((m - 69) / 12);
@@ -3097,66 +3165,14 @@ function scheduleMusic() {
   }
 }
 
-// Панель авто-режима: темп и музыка (видна, пока она «сама двигается»).
-const FLOW_SPEED_KEY = 'waifu-flow-speed';
-try { flow.speed = Number(localStorage.getItem(FLOW_SPEED_KEY)) || 1; } catch { flow.speed = 1; }
-const flowPanel = document.createElement('div');
-flowPanel.id = 'flow-panel';
-flowPanel.hidden = true;
-flowPanel.innerHTML = '<span>🐢</span><input id="flow-speed" type="range" min="0.4" max="2.2" step="0.05"><span>🐇</span><button id="flow-music" title="Музыка">♪</button>';
-document.body.appendChild(flowPanel);
-$('flow-speed').value = String(flow.speed);
-$('flow-speed').addEventListener('input', (e) => {
-  flow.speed = Number(e.target.value);
-  try { localStorage.setItem(FLOW_SPEED_KEY, String(flow.speed)); } catch { /* ignore */ }
-});
-$('flow-music').addEventListener('click', () => playMusic(!music.on));
-for (const ev of ['pointerdown', 'touchstart']) flowPanel.addEventListener(ev, (e) => e.stopPropagation());
-
-const FLOW_FACES = ['smile', 'smile', 'wink', 'shy', 'smile', 'wink', 'surprised'];
-function updateFlow(dt) {
-  flowPanel.hidden = !flow.on;
-  if (!character || !flow.base) return;
-  flow.k += ((flow.on ? 1 : 0) - flow.k) * (1 - Math.exp(-dt * 1.2));
-  if (!flow.on && flow.k < 0.002) { Object.assign(character.bodyOffset, flow.base); flow.base = null; flow.k = 0; return; }
-  // Фаза в «долях такта»: под музыку — ровно по битам, без музыки — свой темп (ползунок).
-  const mb = musicBeat();
-  const per = flow.speed < 0.7 ? 2 : flow.speed > 1.5 ? 0.5 : 1; // под музыку темп ступенями
-  if (mb != null) flow.beat = mb / per;
-  else flow.beat = (flow.beat ?? Math.random() * 16) + dt * flow.speed * (16 / 15);
-  const B = flow.beat;
-  const P = Math.PI * 2;
-  // Длинная волна наклон↔прогиб (16 долей) + две короче — живая, без повторов.
-  const w = 0.55 * Math.sin(P * B / 16) + 0.3 * Math.sin(P * B / 8 + 1.1) + 0.15 * Math.sin(P * B / 4 + 2.3);
-  const bend = w >= 0 ? w * 1.45 : w * 0.75;
-  const sway = Math.sin(P * B / 16 * 0.8 + 0.6) * 0.9 + Math.sin(P * B / 8 * 0.85) * 0.25;
-  const twist = Math.sin(P * B / 32 + 2.0) * 0.35;
-  const S = character.scale;
-  const o = character.bodyOffset;
-  const b = flow.base;
-  const k = flow.k;
-  const L = (a, v) => a + (v - a) * k;
-  // Под музыку — лёгкая пружинка на каждую долю.
-  const bounce = mb != null ? (1 - Math.cos(P * mb)) * 0.5 : 0;
-  o.hipsRotX = L(b.hipsRotX, bend);
-  o.spineX = L(b.spineX, bendSpine(bend) + bounce * 0.04);
-  o.hipsX = L(b.hipsX, sway * 0.08 * S);
-  o.hipsZ = L(b.hipsZ, THREE.MathUtils.clamp(sway * 0.13, -0.16, 0.16));
-  o.hipsY = L(b.hipsY ?? 0, -bounce * 0.012 * S);
-  o.spineZ = L(b.spineZ, -sway * 0.14);
-  o.spineY = L(b.spineY, twist);
-  character.hipsSetSit = character.sitS; // на полу таз тоже двигается
-  character.slideHold = 3; // ножками не болтает, пока «танцует»
-  // Лицо живёт: улыбается, подмигивает, смущается.
-  flow.faceT = (flow.faceT ?? 2) - dt * Math.max(0.6, flow.speed);
-  if (flow.on && flow.faceT <= 0 && character.sleep < 0.3) {
-    flow.faceT = 3.5 + Math.random() * 3;
-    const f = FLOW_FACES[Math.floor(Math.random() * FLOW_FACES.length)];
-    if (f === 'smile') character.setExpression('happy', 0.55 + Math.random() * 0.25, 1.6);
-    else if (f === 'wink') { character.setExpression('happy', 0.35, 1.0); character.wink(); }
-    else if (f === 'shy') { character.setExpression('relaxed', 0.55, 2.0); character.playMotion('tiltHead'); }
-    else if (f === 'surprised') character.setExpression('surprised', 0.35, 0.8);
-  }
+// Музыка — в панели танцев (🎵): кнопка «Музыка».
+{
+  const mb = document.createElement('button');
+  mb.id = 'btn-music-toggle';
+  mb.className = 'panel-big';
+  mb.textContent = '🎶 Музыка';
+  $('btn-dance').after(mb);
+  mb.addEventListener('click', () => playMusic(!music.on));
 }
 function renderAutoBtn() {
   $('btn-auto').textContent = autoMoves ? '🌸 Сама двигается: вкл' : '🌸 Сама двигается: выкл';
@@ -3189,7 +3205,7 @@ function tick() {
   updateBlob();
   updateLiveIdle();
   updateAuto(dt);
-  updateFlow(dt);
+  updateLoop(dt);
   // Пока ты с ней — симпатия понемногу растёт и сама (раз в 20 с).
   if (!document.hidden) {
     playGain += dt;

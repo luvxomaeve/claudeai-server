@@ -1338,3 +1338,5 @@ body.ui-hidden #suggest { opacity: 1; pointer-events: auto; }
 #flow-panel button { width: 34px; height: 34px; border-radius: 50%; border: none; background: transparent; font-size: 18px; }
 #flow-panel button.active { background: var(--pink); color: #fff; }
 body.ui-hidden #flow-panel { opacity: 0.35; }
+#cam-controls #cam-auto.rec { background: #e8455f; color: #fff; animation: recPulse 1s ease-in-out infinite; }
+@keyframes recPulse { 50% { opacity: 0.6; } }
