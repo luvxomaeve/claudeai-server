@@ -788,6 +788,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!$('pose-list').hidden && !poseMode) { setPoseListOpen(false); return; }
   canvas.setPointerCapture(e.pointerId);
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 1) flickStart = { x: e.clientX, y: e.clientY, t: performance.now(), onHer: !!zoneAt(e) };
   pointerActive = true;
   $('hint').style.opacity = 0;
 
@@ -1000,7 +1001,39 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 
+// Два быстрых свайпа по ней подряд (на главной): вниз — на одно положение ниже
+// (стоя → присела → на коленях → села → легла), вверх — на одно выше.
+let flickStart = null;
+let lastFlick = null;
+const SIT_STEPS = [0, 0.45, 0.8, 1.0, 1.3];
+function checkFlick(e) {
+  const f = flickStart;
+  flickStart = null;
+  if (!f || !character || poseMode || cameraMode || touches.size > 1) return;
+  const dt = performance.now() - f.t;
+  const dy = e.clientY - f.y;
+  const dx = e.clientX - f.x;
+  if (!f.onHer || dt > (window.__flickMaxDt ?? 300) || Math.abs(dy) < 60 || Math.abs(dx) > Math.abs(dy) * 0.7) return;
+  const dir = Math.sign(dy);
+  const now = performance.now();
+  if (lastFlick && lastFlick.dir === dir && now - lastFlick.t < (window.__flickMaxGap ?? 700)) {
+    lastFlick = null;
+    const cur = character.sit;
+    const max = sitMax();
+    let next;
+    if (dir > 0) next = SIT_STEPS.find((v) => v > cur + 0.05 && v <= max + 1e-6);
+    else next = [...SIT_STEPS].reverse().find((v) => v < cur - 0.05);
+    if (next == null) return;
+    character.sitRate = 0.9;
+    sitBy((next - cur) / 0.004);
+    showToast({ 0: '⬆ Встала', 0.45: '⬇ Присела', 0.8: '⬇ На коленях', 1: '⬇ Села', 1.3: '⬇ Легла' }[next] ?? '');
+    return;
+  }
+  lastFlick = { dir, t: now };
+}
+
 function endPointer(e) {
+  if (e.type === 'pointerup') checkFlick(e);
   activeHandle = null;
   snapAnchor = null;
   touches.delete(e.pointerId);
