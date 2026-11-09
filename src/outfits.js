@@ -411,15 +411,17 @@ export function shapeHips(vrm, amount = 0.036) {
     const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.015 * k0, 0))); // повыше — подтянуто
     // Ткань — шире и чуть сильнее тела: всегда накрывает выпуклость, не прорезается.
     const cloth = mats.some((m) => /_Bottoms_/i.test(m?.name ?? ''));
-    const sigma = 0.1 * k0 * (cloth ? 1.4 : 1); // шире — плавная круглая форма
-    const gain = cloth ? 1.25 : 1;
+    const sigma = 0.1 * k0; // одинаково для тела и ткани — ткань сидит по фигуре
+    const gain = cloth ? 1.1 : 1; // ткань чуть сильнее — кожа не прорезает
     const bulge = new Float32Array(pos.count * 2);
     for (let i = 0; i < pos.count; i++) {
       v.fromBufferAttribute(pos, i);
       n.fromBufferAttribute(nor, i);
       const facing = Math.min(1, Math.max(0, n.dot(back) * 0.85 + 0.3));
       if (facing <= 0) continue;
-      const ws = centers.map((c) => { const d = v.distanceTo(c) / sigma; return Math.min(1.3, Math.exp(-d * d) * (cloth ? Math.max(facing, 0.6) : facing) * gain); });
+      // У пояса (выше тазобедренных суставов) объём плавно сходит на нет — пояс сидит по талии.
+      const waist = 1 - THREE.MathUtils.smoothstep(v.y, L.y - 0.05 * k0, L.y + 0.04 * k0);
+      const ws = centers.map((c) => { const d = v.distanceTo(c) / sigma; return Math.exp(-d * d) * facing * gain * waist; });
       bulge[i * 2] = ws[0];
       bulge[i * 2 + 1] = ws[1];
       const w = Math.max(ws[0], ws[1]);
