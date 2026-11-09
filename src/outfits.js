@@ -59,7 +59,6 @@ export class PieceWardrobe {
 
   addSource(id, vrm) {
     tuneSkirt(vrm);
-    shapeHips(vrm);
     VRMUtils.removeUnnecessaryVertices(vrm.scene);
     VRMUtils.rotateVRM0(vrm);
     vrm.scene.traverse((o) => {
@@ -81,7 +80,8 @@ export class PieceWardrobe {
     for (const cat of PIECE_CATS) {
       if (cat.skin) continue;
       const choice = wear[cat.id] ?? 'base';
-      for (const m of this.base.pieces[cat.id] ?? []) m.visible = choice === 'base';
+      // Пока выбранная вещь грузится — остаётся базовая (не мелькает голое тело).
+      for (const m of this.base.pieces[cat.id] ?? []) m.visible = choice === 'base' || (choice !== 'none' && !this.sources.has(choice));
       for (const [id, s] of this.sources) for (const m of s.pieces[cat.id] ?? []) m.visible = choice === id;
     }
     // Одежда чуть «впереди» тела по глубине: там, где кожа почти касается ткани
@@ -91,8 +91,8 @@ export class PieceWardrobe {
         if (!mat || mat.userData.clothOffset) continue;
         mat.userData.clothOffset = true;
         mat.polygonOffset = true;
-        mat.polygonOffsetFactor = -2;
-        mat.polygonOffsetUnits = -10;
+        mat.polygonOffsetFactor = -1;
+        mat.polygonOffsetUnits = -4;
       }
     };
     for (const id of ['tops', 'bottoms']) {
@@ -112,39 +112,6 @@ export class PieceWardrobe {
     };
     for (const m of this.base.pieces.bottoms ?? []) noMatcap(m);
     for (const [, s] of this.sources) for (const m of s.pieces.bottoms ?? []) noMatcap(m);
-    // Юбки из шкафа чуть «надуваем» наружу (~2.2 см по нормали): в наклоне и
-    // приседе бёдра остаются под тканью и не прорезают её пятнами.
-    const inflate = (m) => {
-      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
-        if (!mat || mat.userData.inflated) continue;
-        mat.userData.inflated = true;
-        const prev = mat.onBeforeCompile;
-        mat.onBeforeCompile = (sh, r) => {
-          prev?.call(mat, sh, r);
-          if (sh.vertexShader.includes('#include <begin_vertex>')) {
-            sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed += normalize(objectNormal) * 0.022;');
-          }
-        };
-        const prevKey = mat.customProgramCacheKey?.bind(mat);
-        mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|inflate`;
-        mat.needsUpdate = true;
-      }
-    };
-    // (надув отключён: у плиссе раздвигал складки и давал светлые полосы)
-    // Светлые «острова» на тёмных юбках — это граница мультяшного света/тени
-    // на неровных нормалях складок. Юбки из шкафа красим ровно (вся ткань в тени —
-    // её основной тон), без пятен.
-    for (const [, s] of this.sources) {
-      for (const m of s.pieces.bottoms ?? []) {
-        for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
-          if (!mat || mat.userData.flatShade || !('shadingShiftFactor' in mat)) continue;
-          mat.userData.flatShade = true;
-          mat.shadingShiftFactor = -1;
-          mat.shadingToonyFactor = 0.95;
-          mat.needsUpdate = true;
-        }
-      }
-    }
     for (const [, s] of this.sources) {
       s.active = PIECE_CATS.some((c) => !c.skin && (s.pieces[c.id] ?? []).some((m) => m.visible));
       s.vrm.scene.visible = s.active;
@@ -298,9 +265,9 @@ export class PieceWardrobe {
     sk.v.lerp(vel.add(tv.multiplyScalar(1.2)), 1 - Math.exp(-dt * 8));
     sk.t += dt;
     const breeze = new THREE.Vector3(Math.sin(sk.t * 0.9) * 0.045 + Math.sin(sk.t * 2.3) * 0.02, 0, Math.cos(sk.t * 0.7) * 0.03);
-    const hz = new THREE.Vector3(-sk.v.x * 8.5, 0, -sk.v.z * 8.5).add(breeze);
-    if (hz.length() > 0.3) hz.setLength(0.3);
-    const down = -0.22 + THREE.MathUtils.clamp(-sk.v.y * 0.6, -0.25, 0.04); // вниз всегда
+    const hz = new THREE.Vector3(-sk.v.x * 4, 0, -sk.v.z * 4).add(breeze);
+    if (hz.length() > 0.2) hz.setLength(0.2);
+    const down = -0.14 + THREE.MathUtils.clamp(-sk.v.y * 0.6, -0.25, 0.04); // вниз всегда
     const g = new THREE.Vector3(hz.x, down, hz.z);
     const power = g.length();
     g.normalize();
@@ -349,11 +316,11 @@ export function tuneSkirt(vrm) {
     if (!/skirt/i.test(j.bone.name)) continue;
     // Мягче и живее: меньше жёсткости — дольше и шире колышется за движением,
     // умеренное затухание — плавно, без дрожи; лёгкий вес — ложится, не взлетает.
-    j.settings.dragForce = 0.16;
-    j.settings.stiffness = 0.36;
-    j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.2);
+    j.settings.dragForce = 0.2;
+    j.settings.stiffness = Math.max(j.settings.stiffness, 0.5);
+    j.settings.gravityPower = Math.max(j.settings.gravityPower, 0.12);
     j.settings.gravityDir.set(0, -1, 0);
-    j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.05); // юбка держится чуть дальше от ног
+    j.settings.hitRadius = Math.max(j.settings.hitRadius, 0.03);
   }
 }
 

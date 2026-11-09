@@ -262,7 +262,6 @@ export class Character {
     this.kneelPlantar = 1.1; // насколько вытянут носок на коленях (рад)
     this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
-    shapeHips(this.vrm);
     this.stabilizeSprings();
 
     this.zones = ZONE_DEFS
