@@ -107,7 +107,7 @@ export class PieceWardrobe {
     const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : this.sources.get(id))?.skinMap ?? this.base.skinMap;
     const topId = wear.tops ?? 'base';
     let map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
-    map = this.recolorShorts(map);
+    map = this.recolorShorts(map, wear.legsDark ? null : (wear.legsTint ?? null));
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     this.setSkin(map);
@@ -146,10 +146,11 @@ export class PieceWardrobe {
 
   // Нарисованные на коже серые шортики — перекрашиваем в чёрный (подходит к любому наряду).
   // Меняем только серые (ненасыщенные) пиксели в зоне бёдер — кожу не трогаем.
-  recolorShorts(map) {
+  recolorShorts(map, hex = null) {
     if (!map?.image || !this.base) return map;
     this.shortsCache ??= new Map();
-    if (this.shortsCache.has(map.uuid)) return this.shortsCache.get(map.uuid);
+    const sKey = `${map.uuid}|${hex}`;
+    if (this.shortsCache.has(sKey)) return this.shortsCache.get(sKey);
     if (!this.shortsTris) {
       const hum = this.base.vrm.humanoid;
       const hipY = hum.getRawBoneNode('leftUpperLeg')?.getWorldPosition(new THREE.Vector3()).y ?? 0.9;
@@ -196,14 +197,20 @@ export class PieceWardrobe {
       const mx = Math.max(r0, g0, b0), mn = Math.min(r0, g0, b0);
       if (mx - mn > 26 || mx > 242) continue; // кожа и белое — не трогаем
       const l = (r0 + g0 + b0) / 3;
-      const k = 0.32; // темнее: серый → почти чёрный, складки остаются видны
-      d[i] = l * k + 6; d[i + 1] = l * k + 3; d[i + 2] = l * k + 10;
+      if (hex == null) {
+        const k = 0.32; // темнее: серый → почти чёрный, складки остаются видны
+        d[i] = l * k + 6; d[i + 1] = l * k + 3; d[i + 2] = l * k + 10;
+      } else {
+        // В тон чулкам: тот же цвет, чуть темнее (складки видны).
+        const k = 0.3 + 0.75 * (l / 255);
+        d[i] = Math.min(255, ((hex >> 16) & 255) * k); d[i + 1] = Math.min(255, ((hex >> 8) & 255) * k); d[i + 2] = Math.min(255, (hex & 255) * k);
+      }
     }
     ctx.putImageData(id, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
     tex.needsUpdate = true;
-    this.shortsCache.set(map.uuid, tex);
+    this.shortsCache.set(sKey, tex);
     return tex;
   }
 
