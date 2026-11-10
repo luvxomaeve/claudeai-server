@@ -1940,7 +1940,7 @@ function renderPointMode() {
   pointModeBtn.textContent = pointMode === 'pin' ? '📌' : '🔁';
   pointModeBtn.title = pointMode === 'pin' ? 'Точки: ставить позу' : 'Точки: запись движения в повтор';
   pointModeBtn.classList.toggle('rec', pointMode === 'rec');
-  pointModeBtn.classList.toggle('recording', pointMode === 'rec' && curRep().on && curRep().state === 'rec');
+  pointModeBtn.classList.toggle('recording', pointMode === 'rec' && curRep().on && !!curRep().ptsRec);
 }
 pointModeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 pointModeBtn.addEventListener('click', (e) => {
@@ -1948,14 +1948,17 @@ pointModeBtn.addEventListener('click', (e) => {
   pointMode = pointMode === 'pin' ? 'rec' : 'pin';
   try { localStorage.setItem('waifu-point-mode', pointMode); } catch { /* ignore */ }
   // Обратно в 📌: точки из повтора останавливаются там, где сейчас (их можно ставить руками).
-  if (pointMode === 'pin') for (const r of Object.values(reps)) r.movedPts = {};
+  if (pointMode === 'pin') for (const r of Object.values(reps)) { r.movedPts = {}; r.ptsTrack = null; r.ptsRec = null; }
   renderPointMode();
   showToast(pointMode === 'pin' ? '📌 Точки: ставить позу (повтор не сбивается)' : '🔁 Точки: запись движения — подвигай точку и отпусти');
 });
 // Точку взяли в режиме 📌: повтор больше не управляет этой рукой/ногой.
 function pinLimb(kind, side) {
   const key = (kind === 'hand' ? 'h' : 'f') + (side === 'left' ? 'L' : 'R');
-  for (const r of Object.values(reps)) if (r.movedPts) r.movedPts[key] = false;
+  for (const r of Object.values(reps)) {
+    if (r.movedPts) r.movedPts[key] = false;
+    if (r.ptsTrack) r.ptsTrack.moved[key] = false;
+  }
 }
 const repPlaying = () => { const r = curRep(); return r.on && r.state === 'play'; };
 $('btn-home').classList.add('active');
@@ -2128,7 +2131,7 @@ sitSlider2.addEventListener('pointermove', (e) => {
   character.slideHold = 3;
   character.dragBoostT = 0.5;
   sliderTakesOver();
-  loopNoteMove();
+  loopNoteMove('sit');
   sitBy(dv / 0.004);
 });
 for (const ev of ['pointerup', 'pointercancel']) {
@@ -2283,12 +2286,12 @@ function poseDragMove(e) {
     poseDrag.t = now;
     character.slideHold = 3;
     character.dragBoostT = 0.5;
-    loopNoteMove();
+    loopNoteMove('sit');
     sitBy(dv / 0.004);
     return;
   }
   if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
-    if (pointMode === 'rec') loopNoteMove(); // 🔁 повтор запоминает движение точек рук/ног
+    if (pointMode === 'rec') ptsNoteMove(); // 🔁 движение точек — отдельный слой повтора
     else pinLimb(poseDrag.kind, poseDrag.side); // 📌 повтор идёт дальше, точка — где поставил
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
@@ -2364,7 +2367,7 @@ function poseDragMove(e) {
     o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
     // В 📌 при играющем повторе присед ведёт повтор — точкой бёдер только вбок.
-    if (pointMode === 'rec' || !repPlaying()) {
+    {
       const dyPx = dy;
       const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || window.innerHeight * 0.5;
       const dv = (dyPx / h) * sitMax();
@@ -2374,7 +2377,7 @@ function poseDragMove(e) {
       character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
       character.slideHold = 3;
       character.dragBoostT = 0.5;
-      if (pointMode === 'rec') loopNoteMove();
+      if (pointMode === 'rec') loopNoteMove('sit');
       sitBy(dv / 0.004);
     }
   }
@@ -3504,8 +3507,11 @@ function movedPoints(samples) {
   }
   return out;
 }
+const sitMovedIn = (S) => { const v = S.map((x) => x.sit); return Math.max(...v) - Math.min(...v) > 0.02; };
 function playMove(r, mv) {
   r.movedPts = movedPoints(mv.samples);
+  r.sitMoved = sitMovedIn(mv.samples);
+  r.sitFree = false;
   r.samples = mv.samples;
   r.dur = mv.dur;
   r.t = 0;
@@ -3520,6 +3526,9 @@ function setRepeat(on) {
   r.on = on;
   r.state = on ? 'wait' : 'off';
   r.samples = [];
+  r.ptsTrack = null;
+  r.ptsRec = null;
+  r.sitFree = false;
   if (on) stopAuto(true);
   renderRep();
   // Включил — всегда с чистого листа: ждёт твоё новое движение.
@@ -3597,9 +3606,59 @@ function renderRep() {
   renderLocks();
 }
 // Ползунок двинули: в режиме повтора этой вкладки — начинаем (или продолжаем) запись.
-function loopNoteMove() {
+// Слой точек (🔁): своя запись и свой повтор, наклон/посадку не останавливает.
+function ptsNoteMove() {
   const r = curRep();
   if (!r.on) return;
+  const now = performance.now();
+  if (!r.ptsRec) {
+    r.ptsRec = { samples: [], start: now };
+    r.ptsTrack = null; // новое движение точек заменяет старое
+    r.movedPts = {}; // точками теперь управляет слой точек
+  }
+  r.ptsLast = now;
+}
+function updatePtsLayer(dt) {
+  if (!character) return;
+  const r = curRep();
+  if (!r.on) return;
+  const now = performance.now();
+  if (r.ptsRec) {
+    const P = nowPose();
+    r.ptsRec.samples.push({ t: (now - r.ptsRec.start) / 1000, hL: P.hL, hR: P.hR, fL: P.fL, fR: P.fR });
+    const dragging = !!(poseDrag && /hand|foot|knee/.test(poseDrag.kind));
+    if (!dragging && now - r.ptsLast > 250) {
+      const endT = (r.ptsLast - r.ptsRec.start) / 1000;
+      const S = r.ptsRec.samples.filter((x) => x.t <= endT + 0.05);
+      r.ptsRec = null;
+      if (endT >= 0.4 && S.length >= 4) {
+        r.ptsTrack = { samples: S, dur: endT, t: endT, moved: movedPoints(S) };
+        showToast('🔁 Повторяю движение точек — и наклон тоже ♥');
+      }
+    }
+    return;
+  }
+  const T = r.ptsTrack;
+  if (!T) return;
+  T.t = (T.t + dt) % (T.dur * 2);
+  const tri = T.t < T.dur ? T.t / T.dur : 2 - T.t / T.dur;
+  const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * T.dur;
+  const S = T.samples;
+  let i = 0;
+  while (i < S.length - 2 && S[i + 1].t < u) i++;
+  const a = S[i];
+  const b = S[Math.min(i + 1, S.length - 1)];
+  const k = b.t > a.t ? THREE.MathUtils.clamp((u - a.t) / (b.t - a.t), 0, 1) : 0;
+  const m = T.moved;
+  applyPoints({ hL: m.hL ? lerpArr(a.hL, b.hL, k) : null, hR: m.hR ? lerpArr(a.hR, b.hR, k) : null,
+    fL: m.fL ? lerpArr(a.fL, b.fL, k) : null, fR: m.fR ? lerpArr(a.fR, b.fR, k) : null });
+}
+function loopNoteMove(kind = 'main') {
+  const r = curRep();
+  if (!r.on) return;
+  // Положение (сесть/встать) меняешь, пока идёт повтор, — повтор не останавливается:
+  // посадка просто становится ручной, а наклон и дальше качается.
+  if (kind === 'sit' && r.state === 'play') { r.sitFree = true; return; }
   const now = performance.now();
   if (r.state !== 'rec') {
     r.state = 'rec';
@@ -3619,6 +3678,7 @@ function updateLoop(dt) {
     repTabSeen = r.tab;
     if (r.on && r.state === 'play') { r.blendFrom = nowPose(); r.blendK = 0; }
     if (r.on && r.state === 'rec') r.state = 'wait';
+    r.ptsRec = null;
     renderRep();
   }
   if (!r.on) return;
@@ -3638,6 +3698,10 @@ function updateLoop(dt) {
       // Какие точки реально двигались в записи — только их и повторяем
       // (остальные точки остаются как поставил, их можно править на ходу).
       r.movedPts = movedPoints(r.samples);
+      // Точки, которые ведёт слой точек, основной повтор не трогает.
+      if (r.ptsTrack) for (const key of Object.keys(r.ptsTrack.moved)) if (r.ptsTrack.moved[key]) r.movedPts[key] = false;
+      r.sitMoved = sitMovedIn(r.samples);
+      r.sitFree = false;
       r.midFor = null;
       try { localStorage.setItem(repKey(r), JSON.stringify({ dur: r.dur, samples: r.samples.filter((_, i) => i % 2 === 0 || i === r.samples.length - 1) })); } catch { /* ignore */ }
       if (!r.toldOnce) { r.toldOnce = true; showToast('Повторяю~ ♥ ＋ — в избранное, подвигай — запомню новое'); }
@@ -3685,9 +3749,11 @@ function updateLoop(dt) {
   const o = character.bodyOffset;
   o.hipsRotX = bend;
   o.spineX = spine;
-  character.sit = sit;
+  // Посадку ведёт повтор, только если она менялась в записи и ты не взял её в руки.
+  const sitByRep = r.sitMoved !== false && !r.sitFree;
+  if (sitByRep) character.sit = sit;
   // Темп посадки из записи: быстро записал — быстро и на всю глубину, медленно — плавно.
-  {
+  if (sitByRep) {
     const span = Math.max(0.03, b.t - a.t);
     const du = (Math.PI / 2) * Math.abs(Math.sin(Math.PI * tri)) * tempo;
     const sp = Math.abs(b.sit - a.sit) / span * Math.max(0.4, du);
@@ -3843,6 +3909,7 @@ function tick() {
   updateLiveIdle();
   updateAuto(dt);
   updateLoop(dt);
+  updatePtsLayer(dt);
   updateWardrobeCam();
   // Пока ты с ней — симпатия понемногу растёт и сама (раз в минуту).
   if (!document.hidden) {
