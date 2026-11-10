@@ -547,9 +547,10 @@ const tier = () => (love >= 500 ? 2 : love >= 150 ? 1 : 0);
 
 const LEVEL_UP_LINES = ['', 'Мы ведь уже знакомы~', 'Слушай, а с тобой весело!', 'Ты мне нравишься, правда-правда~',
   'Кажется… ты мне правда нравишься ♥', 'Я тебя люблю… вот. Сказала ♥', 'Ты — самый родной ♥♥♥'];
-// Самый высокий достигнутый уровень: открытые на нём функции не закрываются,
-// даже если симпатия потом упала (сбрасывает только «Сброс»).
+// Самый высокий достигнутый уровень. Пока до последнего уровня не дошёл — уровень может
+// и упасть (функции снова закроются). Дошёл до последнего — всё открыто навсегда.
 let reachedLvl = 0;
+const maxedOut = () => reachedLvl >= LEVELS.length - 1;
 try { reachedLvl = Number(localStorage.getItem('waifu-reached')) || 0; } catch { /* ignore */ }
 reachedLvl = Math.max(reachedLvl, levelOf(love)); // уже набранная симпатия тоже считается
 try { localStorage.setItem('waifu-reached', String(reachedLvl)); } catch { /* ignore */ }
@@ -596,7 +597,7 @@ const adOpen = (id) => (adUnlocked[id] ?? 0) > Date.now();
 function unlocked(id) {
   const f = FEATURES.find((x) => x.id === id);
   if (!f) return true;
-  return Math.max(levelOf(love), reachedLvl) >= f.lvl || adOpen(id);
+  return levelOf(love) >= f.lvl || maxedOut() || adOpen(id);
 }
 // Время вышло — замочки возвращаются (проверка раз в 5 с).
 let lockSig = '';
@@ -731,7 +732,7 @@ function renderLoveCard() {
     const feats = FEATURES.filter((f) => f.lvl === i);
     const items = feats.map((f) => {
       const open = unlocked(f.id);
-      const byAd = open && i > Math.max(l, reachedLvl);
+      const byAd = open && i > l && !maxedOut();
       return `<li class="${open ? 'open' : ''}">${open ? '✓' : '🔒'} ${f.name}${byAd ? ' <em>(за рекламу)</em>' : ''}</li>`;
     }).join('');
     const pct = state === 'cur' && next ? Math.round(((love - lv.min) / (next.min - lv.min)) * 100) : state === 'done' ? 100 : 0;
