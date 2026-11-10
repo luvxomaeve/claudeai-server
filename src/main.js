@@ -675,6 +675,8 @@ function refillGain() {
   gainAt = now;
 }
 function changeAffection(delta) {
+  // Шкала никогда не откатывается назад: на тычки и «не те» зоны — только реакция и фраза.
+  if (!(delta > 0)) return;
   let d = delta * 2;
   if (d > 0) {
     refillGain();
