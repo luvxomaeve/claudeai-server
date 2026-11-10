@@ -690,14 +690,67 @@ function renderAffection() {
   $('affection').title = `${Math.round(love)} / ${LOVE_MAX}`;
   renderLocks();
 }
-// Тап по шкале — маленькое меню: макс / сброс.
+// Тап по шкале — окошко прогресса: уровни и что на каком открывается, x2 за рекламу.
+// «Макс» и «Сброс» — только для разработчика: 7 быстрых тапов по сердечку включают их.
+const DEV_KEY = 'waifu-dev';
+let devMode = false;
+try { devMode = localStorage.getItem(DEV_KEY) === '1'; } catch { /* ignore */ }
+let devTaps = [];
+const loveMenu = $('love-menu');
+loveMenu.innerHTML = '';
+const lmHead = document.createElement('div');
+lmHead.className = 'lm-head';
+const lmList = document.createElement('div');
+lmList.className = 'lm-levels';
+const lmBtns = document.createElement('div');
+lmBtns.className = 'lm-btns';
+const lmDev = document.createElement('div');
+lmDev.className = 'lm-dev';
+loveMenu.append(lmHead, lmList, lmBtns, lmDev);
+function renderLoveCard() {
+  const l = levelOf(love);
+  const next = LEVELS[l + 1];
+  lmHead.innerHTML = `<b>💗 ${LEVELS[l].label}</b><span>${Math.round(love)} / ${LOVE_MAX}</span>`
+    + (next ? `<small>До «${next.label}» — ещё ${Math.max(0, Math.ceil(next.min - love))} ♥</small>` : '<small>Максимум симпатии ♥</small>');
+  lmList.innerHTML = '';
+  LEVELS.forEach((lv, i) => {
+    const row = document.createElement('div');
+    const state = i < l ? 'done' : i === l ? 'cur' : 'lock';
+    row.className = `lm-lvl ${state}`;
+    const feats = FEATURES.filter((f) => f.lvl === i);
+    const items = feats.map((f) => {
+      const open = unlocked(f.id);
+      const byAd = open && i > l;
+      return `<li class="${open ? 'open' : ''}">${open ? '✓' : '🔒'} ${f.name}${byAd ? ' <em>(за рекламу)</em>' : ''}</li>`;
+    }).join('');
+    const pct = state === 'cur' && next ? Math.round(((love - lv.min) / (next.min - lv.min)) * 100) : state === 'done' ? 100 : 0;
+    row.innerHTML = `<div class="lm-top"><span class="lm-n">${state === 'lock' ? '🔒' : i + 1}</span><span class="lm-name">${lv.label}</span><span class="lm-min">${lv.min} ♥</span></div>`
+      + (state === 'cur' && next ? `<div class="lm-bar"><i style="width:${pct}%"></i></div>` : '')
+      + (items ? `<ul>${items}</ul>` : '');
+    lmList.appendChild(row);
+  });
+  lmDev.hidden = !(devMode || !window.WAIFU_RELEASE);
+}
 $('affection').addEventListener('click', (e) => {
   e.stopPropagation();
-  $('love-menu').hidden = !$('love-menu').hidden;
+  const now = performance.now();
+  devTaps = devTaps.filter((t) => now - t < 4000);
+  devTaps.push(now);
+  if (devTaps.length >= 7 && !devMode) {
+    devMode = true;
+    devTaps = [];
+    try { localStorage.setItem(DEV_KEY, '1'); } catch { /* ignore */ }
+    showToast('🛠 Режим разработчика: «Макс» и «Сброс» в окошке прогресса');
+  }
+  loveMenu.hidden = !loveMenu.hidden;
+  if (!loveMenu.hidden) { renderLoveCard(); renderBoost(); }
+  document.body.classList.toggle('love-open', !loveMenu.hidden);
 });
+loveMenu.addEventListener('click', (e) => e.stopPropagation());
+new MutationObserver(() => document.body.classList.toggle('love-open', !loveMenu.hidden)).observe(loveMenu, { attributes: true, attributeFilter: ['hidden'] });
 const boostBtn = document.createElement('button');
 boostBtn.id = 'love-boost';
-$('love-menu').prepend(boostBtn);
+lmBtns.appendChild(boostBtn);
 function renderBoost() {
   boostBtn.hidden = !hasAds() || love >= LOVE_MAX;
   if (boostOn()) {
@@ -723,12 +776,17 @@ boostBtn.addEventListener('click', (e) => {
 });
 $('affection').addEventListener('click', renderBoost, true);
 setInterval(() => { if (!$('love-menu').hidden) renderBoost(); }, 10000);
+{
+  const mx = document.createElement('button'); mx.id = 'love-max'; mx.textContent = '♥ Макс';
+  const rs = document.createElement('button'); rs.id = 'love-reset'; rs.textContent = 'Сброс';
+  lmDev.append(mx, rs);
+}
 $('love-max').addEventListener('click', (e) => { e.stopPropagation(); setLove(LOVE_MAX); $('love-menu').hidden = true; showToast('♥ Максимум'); });
 $('love-reset').addEventListener('click', (e) => { e.stopPropagation(); setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#affection, #love-menu')) $('love-menu').hidden = true; });
 renderAffection();
 // В релизе (Яндекс Игры) кнопки «Макс» нет — симпатию надо заработать.
-if (window.WAIFU_RELEASE) $('love-max').hidden = true;
+// «Макс» в релизе — только в режиме разработчика (см. окошко прогресса).
 initPlatform();
 
 // ---------- Реплики и озвучка ----------
