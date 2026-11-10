@@ -63,12 +63,16 @@ function installClothPoke(mesh) {
         vec4 pkW = modelMatrix * vec4( transformed, 1.0 );
         vec3 pkD = pkW.xyz - uPokePos;
         float pkK = exp( -dot( pkD, pkD ) / ( uPokeR * uPokeR ) );
-        pkW.xyz += uPokeDir * pkK;
         // подол: запаздывает за движением тела + лёгкая живая волна; у касания волна сильнее
         float hemW = aHem * aHem;
         vec3 wv = vec3( sin( uClothT * 2.1 + pkW.y * 15.0 + pkW.x * 7.0 ), 0.35 * sin( uClothT * 2.7 + pkW.x * 12.0 ), cos( uClothT * 1.7 + pkW.y * 12.0 + pkW.z * 7.0 ) );
-        pkW.xyz += uSway * hemW + wv * ( hemW * ( 0.0026 + 0.25 * length( uSway ) + 0.2 * length( uPokeDir ) * pkK ) );
+        vec3 pkMove = uPokeDir * pkK + uSway * hemW + wv * ( hemW * ( 0.0026 + 0.25 * length( uSway ) + 0.2 * length( uPokeDir ) * pkK ) );
+        // ткань не уходит «внутрь» тела и других слоёв: движение вглубь гасим, остаётся скольжение вдоль и наружу
+        vec3 pkV = mat3( viewMatrix ) * pkMove;
+        vec3 pkN = normalize( transformedNormal );
+        pkV -= pkN * ( min( 0.0, dot( pkV, pkN ) ) * 0.9 );
         mvPosition = viewMatrix * pkW;
+        mvPosition.xyz += pkV;
         mvPosition.xyz -= normalize( mvPosition.xyz ) * uLift;
         gl_Position = projectionMatrix * mvPosition;
       }`);

@@ -608,6 +608,7 @@ const adOpen = (id) => (adUnlocked[id] ?? 0) > Date.now();
 function unlocked(id) {
   const f = FEATURES.find((x) => x.id === id);
   if (!f) return true;
+  if (window.WAIFU_NOADS) return true; // сборка для проверки: всё открыто
   return levelOf(love) >= f.lvl || maxedOut() || adOpen(id);
 }
 // Время вышло — замочки возвращаются (проверка раз в 5 с).
