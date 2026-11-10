@@ -1436,3 +1436,17 @@ body.clean #clean-exit { display: grid; place-items: center; position: fixed; z-
   border-radius: 50%; background: #ff3b5c; box-shadow: 0 0 6px #ff3b5c;
 }
 body.ui-hidden #btn-pointmode { opacity: 0.35; }
+
+/* Желание девушки: плашка под шкалой симпатии */
+#wish { position: fixed; bottom: calc(104px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); white-space: nowrap; z-index: 8; display: flex; align-items: center; gap: 7px; max-width: calc(100vw - 32px);
+  padding: 8px 14px 10px 10px; border: none; border-radius: 16px; background: rgba(253, 244, 250, 0.94); color: var(--ink);
+  font: inherit; font-size: 13.5px; font-weight: 700; box-shadow: 0 6px 18px rgba(90, 40, 100, 0.25); overflow: hidden; cursor: pointer;
+  animation: wishIn 0.35s ease; }
+#wish[hidden] { display: none; }
+#wish .w-ico { font-size: 17px; animation: wishBob 1.6s ease-in-out infinite; }
+#wish .w-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--k, 1) * 100%); background: linear-gradient(90deg, var(--pink), #c77dff); border-radius: 0 3px 3px 0; }
+@keyframes wishIn { from { opacity: 0; transform: translate(-50%, 8px) scale(0.95); } to { opacity: 1; transform: translateX(-50%); } }
+body.posing #wish { bottom: calc(136px + env(safe-area-inset-bottom, 0px)); }
+@keyframes wishBob { 50% { transform: translateY(-2px) scale(1.12); } }
+body.love-open #wish { opacity: 0; pointer-events: none; }
+#love-menu .lm-head .lm-wishes { color: var(--ink); opacity: 0.75; font-weight: 600; }

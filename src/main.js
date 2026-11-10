@@ -743,6 +743,7 @@ function renderLoveCard() {
       + (items ? `<ul>${items}</ul>` : '');
     lmList.appendChild(row);
   });
+  if (wishCount > 0) lmHead.insertAdjacentHTML('beforeend', `<small class="lm-wishes">💭 Исполнено желаний: ${wishCount}</small>`);
   lmDev.hidden = !!window.WAIFU_RELEASE; // в версии для магазина «Макс» и «Сброс» скрыты
 }
 let devSuppressClick = false;
@@ -1069,6 +1070,7 @@ let lastStrokeLineAt = 0;
 function strokeTick(e) {
   const r = STROKES[stroking.hit.zone];
   if (!r) return;
+  wishEvent(stroking.hit.zone);
   const t = tier();
   stroking.ticks++;
   // Одежду ведёт за пальцем.
@@ -1213,6 +1215,7 @@ canvas.addEventListener('pointermove', (e) => {
       }
     }
     petting.ticks++;
+    wishEvent('headpat');
     changeAffection(0.4);
     floatHeart(e.clientX, e.clientY);
     if (petting.ticks % 6 === 1 && performance.now() - lastSpokeAt > 2500) {
@@ -1444,6 +1447,7 @@ $('cam-view')?.addEventListener('click', () => {
 let photoPending = false;
 $('cam-photo').addEventListener('click', (e) => {
   e.stopPropagation();
+  wishEvent('photo');
   document.body.classList.add('photo');
   // Фон страницы в кадр не попадает (холст прозрачный) — рисуем его в сцену на время снимка.
   const bg = getComputedStyle(document.body).backgroundColor;
@@ -1583,6 +1587,7 @@ const SLEEP_WAKE_LINES = ['Ммм?.. ну что такое… я же сплю 
 function triggerReaction(zone, hit, e) {
   const r = REACTIONS[zone];
   if (!r) return;
+  wishEvent(zone);
   // Спит: нежное касание — спит дальше и улыбается во сне; тормошишь
   // (несколько быстрых касаний подряд) — просыпается.
   if (character.sitS > 1.05 && character.sleep > 0.5) {
@@ -2757,6 +2762,7 @@ function cycleTint(cat, id) {
   try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
   applyWear();
   renderPieces();
+  wishEvent('tint');
   showToast(`🎨 ${TINTS[wearTint[key]].name}`);
 }
 const isDress = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.dress;
@@ -2778,6 +2784,7 @@ async function pickPiece(cat, id, quiet = false) {
   }
   applyWear();
   if (quiet) return;
+  wishEvent('wear');
   character?.react({ expression: 'happy', motion: 'sway' });
   if (cat === 'legs' && legwear() !== 'tights') say(pick(LEGS_LINES[legwear()]));
   else if (cat === 'legs') say(pick(['Колготки — классика~', 'Так уютнее ♥', 'Нравятся мои колготки?']));
@@ -3176,6 +3183,7 @@ async function playMocap(id) {
   if (!character) return;
   const entry = MOCAP.find((m) => m.id === id);
   if (!entry) return;
+  if (!entry.idle) wishEvent('dance');
   try {
     const data = await loadMocap(id);
     if (currentAnim) { currentAnim = null; }
@@ -3323,6 +3331,7 @@ async function playAnim(a) {
     character.loop = null;
     character.playClip(clipFor(a, character.vrm));
     currentAnim = a;
+    wishEvent('dance');
   } catch (err) {
     console.error(err);
     say('Не получается так двигаться… нужен .vrma или .fbx из Mixamo', 'sad');
@@ -4019,6 +4028,106 @@ onAdPause((on) => {
   for (const a of document.querySelectorAll('audio')) { if (on) a.pause(); }
   try { if (on) window.__waifuAudio?.suspend?.(); else window.__waifuAudio?.resume?.(); } catch { /* ignore */ }
 });
+// ---------- Желания ----------
+// Раз в пару минут она сама чего-то хочет. Выполнил — радуется и даёт бонус симпатии;
+// не успел — слегка дуется (без штрафа). Просит только то, что уже открыто.
+const WISHES = [
+  { id: 'headpat', need: 3, text: 'Погладь меня по голове', hint: 'Проведи пальцем по её макушке',
+    ask: ['Погладишь меня по голове?..', 'Хочу, чтобы меня погладили~', 'Мне бы сейчас немного ласки…'] },
+  { id: 'hair', need: 2, text: 'Поиграй с моими волосами', hint: 'Проведи пальцем по хвостикам',
+    ask: ['Поиграешь с моими волосами?', 'Потрогай хвостики, они мягкие~', 'Хочу, чтобы ты погладил мои волосы…'] },
+  { id: 'hand', need: 1, text: 'Возьми меня за руку', hint: 'Коснись её ладони',
+    ask: ['Возьмёшь меня за руку?', 'Дай руку… пожалуйста~', 'Хочу подержаться за руки ♥'] },
+  { id: 'sit', text: 'Давай присядем', hint: 'Потяни левый ползунок вниз',
+    ok: () => character.sitS < 0.15, check: () => character.sitS > 0.35,
+    ask: ['Давай присядем?', 'Ножки устали… присядем?', 'Хочу присесть на минутку~'] },
+  { id: 'stand', text: 'Помоги мне встать', hint: 'Потяни левый ползунок вверх',
+    ok: () => character.sitS > 0.5, check: () => character.sitS < 0.1,
+    ask: ['Поможешь встать?', 'Засиделась… хочу размяться!', 'Давай встанем~'] },
+  { id: 'lie', text: 'Хочу прилечь', hint: 'Потяни левый ползунок в самый низ',
+    ok: () => unlocked('floor') && allowLie && character.sitS < 0.9, check: () => character.sitS > 1.1,
+    ask: ['Хочу прилечь… можно?', 'Давай полежим немножко~', 'Уложишь меня?'] },
+  { id: 'wear', text: 'Переодень меня', hint: 'Открой гардероб (вешалка сверху) и выбери вещь',
+    ok: () => unlocked('wardrobe') && PIECE_SOURCES.length > 0,
+    ask: ['Хочу переодеться! Выберешь мне что-нибудь?', 'Надоел этот наряд… переоденешь?', 'Подбери мне что-нибудь красивое~'] },
+  { id: 'tint', text: 'Смени цвет моей одежды', hint: 'В гардеробе тапни надетую вещь ещё раз',
+    ok: () => unlocked('wardrobe'),
+    ask: ['Хочу другой цвет! Перекрасишь что-нибудь?', 'А в другом цвете мне пойдёт?', 'Давай поменяем цвет одежды~'] },
+  { id: 'dance', text: 'Хочу потанцевать!', hint: 'Нажми на нотку сверху и выбери танец',
+    ok: () => unlocked('dance') && MOCAP.some((m) => !m.idle),
+    ask: ['Хочу потанцевать! Включишь?', 'Так и тянет двигаться… потанцуем?', 'Включи мне танец~'] },
+  { id: 'photo', text: 'Сфотографируй меня', hint: 'Камера 🎥 внизу → кнопка фото',
+    ok: () => unlocked('photo'),
+    ask: ['Сфоткаешь меня? Я сегодня красивая~', 'Хочу фото на память!', 'Щёлкни меня, пожалуйста ♥'] },
+];
+const WISH_THANKS = ['Спасибо! Ты лучший ♥', 'Ура~ именно этого я и хотела!', 'Хи, ты меня понимаешь ♥', 'Мне так приятно… спасибо~', 'Вот теперь я счастлива ♥'];
+const WISH_MISS = ['Ну вот… ладно, в другой раз.', 'Эх… ты не заметил.', 'Хм… забыл про меня?', 'Ничего, я подожду~'];
+const WISH_TIME = 75; // секунд на исполнение
+const WISH_BONUS = 8;
+let wish = null; // { def, progress, t }
+let wishTimer = 40; // до первого желания
+let wishLast = null;
+let wishCount = 0;
+try { wishCount = Number(localStorage.getItem('waifu-wishes')) || 0; } catch { /* ignore */ }
+const wishEl = document.createElement('button');
+wishEl.id = 'wish';
+wishEl.hidden = true;
+wishEl.innerHTML = '<span class="w-ico">💭</span><span class="w-text"></span><i class="w-bar"></i>';
+document.body.appendChild(wishEl);
+wishEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+wishEl.addEventListener('click', (e) => { e.stopPropagation(); if (wish) showToast(`💡 ${wish.def.hint}`); });
+function wishEvent(id) {
+  if (!wish || wish.def.id !== id || wish.def.check) return;
+  wish.progress++;
+  if (wish.progress >= (wish.def.need ?? 1)) fulfillWish();
+}
+function fulfillWish() {
+  if (!wish) return;
+  wish = null;
+  wishEl.hidden = true;
+  wishTimer = 100 + Math.random() * 60;
+  wishCount++;
+  try { localStorage.setItem('waifu-wishes', String(wishCount)); } catch { /* ignore */ }
+  setLove(love + WISH_BONUS);
+  for (let i = 0; i < 6; i++) setTimeout(() => floatHeart(window.innerWidth * (0.3 + Math.random() * 0.4), window.innerHeight * 0.4), i * 110);
+  showToast(`💭 Желание исполнено · +${WISH_BONUS} ♥`);
+  // Чуть позже — чтобы не перебить реакцию на само касание.
+  setTimeout(() => {
+    if (!character) return;
+    character.react({ expression: 'happy', motion: 'tiltHead' });
+    say(pick(WISH_THANKS), 'happy');
+  }, 900);
+}
+function updateWishes(dt) {
+  if (!character || document.hidden) return;
+  if (wish) {
+    wish.t -= dt;
+    wishEl.style.setProperty('--k', Math.max(0, wish.t / WISH_TIME).toFixed(3));
+    if (wish.def.check?.()) { fulfillWish(); return; }
+    if (wish.t <= 0) {
+      wish = null;
+      wishEl.hidden = true;
+      wishTimer = 70 + Math.random() * 50;
+      if (character.sleep < 0.3) say(pick(WISH_MISS), 'sad');
+    }
+    return;
+  }
+  wishTimer -= dt;
+  if (wishTimer > 0) return;
+  // Просит в спокойный момент: не спит, палец не на экране, панели закрыты, не режим поз.
+  if (pointerActive || poseMode || character.sleep > 0.3 || character.mixer || document.querySelector('.panel:not(.hidden)')
+    || !$('love-menu').hidden || (lockPop && !lockPop.hidden)) { wishTimer = 4; return; }
+  const opts = WISHES.filter((w) => w.id !== wishLast && (!w.ok || w.ok()));
+  if (!opts.length) { wishTimer = 30; return; }
+  const def = opts[Math.floor(Math.random() * opts.length)];
+  wishLast = def.id;
+  wish = { def, progress: 0, t: WISH_TIME };
+  wishEl.querySelector('.w-text').textContent = def.text;
+  wishEl.style.setProperty('--k', '1');
+  wishEl.hidden = false;
+  character.react({ expression: 'relaxed', motion: 'tiltHead' });
+  say(pick(def.ask), 'happy');
+}
 // Вернулся в игру после перерыва больше минуты — пауза для рекламы (лимит — в ads.js).
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
@@ -4047,6 +4156,7 @@ function tick() {
   }
   updateSuggest(dt);
   updateSelfDress(dt);
+  updateWishes(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
