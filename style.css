@@ -1541,12 +1541,12 @@ body.automode #wish { bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
     linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
   --glass-on:
     radial-gradient(120% 70% at 20% -15%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 46%),
-    linear-gradient(140deg, rgba(255, 120, 180, 0.55), rgba(214, 110, 255, 0.42));
+    linear-gradient(140deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.22));
   --glass-edge:
     inset 0 0 0 1px rgba(255, 255, 255, 0.22),
     inset 2px 2px 3px -1px rgba(255, 255, 255, 0.95), inset -2px -2px 4px -1px rgba(255, 255, 255, 0.5),
     inset 0 0 12px rgba(255, 255, 255, 0.1),
-    0 8px 22px rgba(15, 4, 35, 0.28);
+    0 8px 22px rgba(0, 0, 0, 0.28);
   --glass-blur: blur(3px) saturate(1.7) brightness(1.12);
 }
 button:not(.swatch):not(.ci-tint):not(.del):not(.outfit-del):not(.panel-close), #buttons .btn, .chip, #wish, #affection, #toast {
@@ -1556,7 +1556,7 @@ button:not(.swatch):not(.ci-tint):not(.del):not(.outfit-del):not(.panel-close), 
   -webkit-backdrop-filter: var(--glass-blur) !important;
   backdrop-filter: var(--glass-blur) !important;
   color: #fff !important;
-  text-shadow: 0 1px 3px rgba(20, 5, 40, 0.85), 0 0 8px rgba(20, 5, 40, 0.45);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.45);
   transition: transform 0.14s ease, box-shadow 0.25s ease, background 0.25s ease;
 }
 button:not(.swatch):not(.ci-tint):not(.del):not(.outfit-del):not(.panel-close):active { transform: scale(0.93); }
@@ -1564,12 +1564,12 @@ button:not(.swatch):not(.ci-tint):not(.del):not(.outfit-del):not(.panel-close):a
 #cam-controls button, .panel button, .panel .chip, #love-menu button, #pose-bar button, #pose-list button {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), inset 2px 2px 3px -1px rgba(255, 255, 255, 0.8), inset -2px -2px 4px -1px rgba(255, 255, 255, 0.35), 0 3px 10px rgba(15, 4, 35, 0.2) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), inset 2px 2px 3px -1px rgba(255, 255, 255, 0.8), inset -2px -2px 4px -1px rgba(255, 255, 255, 0.35), 0 3px 10px rgba(0, 0, 0, 0.2) !important;
 }
 button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item):not(#_), .chip.active:not(#_), #cam-controls #btn-zoom:not(.off) {
   background: var(--glass-on) !important;
   border-color: rgba(255, 255, 255, 0.6) !important;
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.8), inset -1px -1px 0 rgba(255, 255, 255, 0.25), 0 0 18px rgba(255, 111, 168, 0.65), 0 6px 18px rgba(15, 4, 35, 0.35) !important;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.8), inset -1px -1px 0 rgba(255, 255, 255, 0.25), 0 0 16px rgba(255, 255, 255, 0.55), 0 6px 18px rgba(0, 0, 0, 0.3) !important;
   color: #fff !important;
 }
 #affection > :not(#love-menu), #affection > :not(#love-menu) * { color: #fff !important; }
@@ -1579,26 +1579,27 @@ button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item
   color: #fff !important;
   background:
     radial-gradient(120% 50% at 12% -5%, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0) 50%),
-    linear-gradient(165deg, rgba(120, 80, 170, 0.16), rgba(30, 14, 52, 0.26)) !important;
+    linear-gradient(165deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.16)) !important;
   border: 1px solid rgba(255, 255, 255, 0.38) !important;
   -webkit-backdrop-filter: blur(5px) saturate(1.6) !important;
   backdrop-filter: blur(5px) saturate(1.6) !important;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 2px 2px 4px -1px rgba(255, 255, 255, 0.85), inset -2px -2px 5px -1px rgba(255, 255, 255, 0.35), 0 16px 44px rgba(10, 2, 30, 0.35) !important;
-  text-shadow: 0 1px 3px rgba(20, 5, 40, 0.85), 0 0 8px rgba(20, 5, 40, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 2px 2px 4px -1px rgba(255, 255, 255, 0.85), inset -2px -2px 5px -1px rgba(255, 255, 255, 0.35), 0 16px 44px rgba(0, 0, 0, 0.35) !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.5);
 }
 #cam-controls, #pose-bar { background: linear-gradient(165deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)) !important; }
-#love-menu { background: radial-gradient(120% 50% at 12% -5%, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0) 50%), linear-gradient(165deg, rgba(70, 38, 104, 0.5), rgba(28, 12, 50, 0.58)) !important; }
+#love-menu { background: radial-gradient(120% 50% at 12% -5%, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0) 50%), linear-gradient(165deg, rgba(40, 40, 46, 0.42), rgba(0, 0, 0, 0.5)) !important; }
 #love-menu .lm-lvl { background: rgba(255, 255, 255, 0.09); }
-#love-menu .lm-lvl.cur { background: linear-gradient(135deg, rgba(255, 120, 180, 0.4), rgba(199, 125, 255, 0.3)); }
-#love-menu li.open { color: #8ff0c8; }
+#love-menu .lm-lvl.cur { background: rgba(255, 255, 255, 0.24); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.8) inset; }
+#love-menu li.open { color: #fff; }
+#love-menu .lm-head small, .panel h3, .panel .editor-group > b, .panel .editor-group > span { color: rgba(255, 255, 255, 0.75) !important; }
 #love-menu .lm-bar { background: rgba(255, 255, 255, 0.18); }
 .panel .swatch, .panel input, .panel select { background: rgba(255, 255, 255, 0.12) !important; color: #fff !important; border-color: rgba(255, 255, 255, 0.2); }
-.panel .swatch.active, .panel .closet-item.active { border-color: var(--pink) !important; }
+.panel .swatch.active, .panel .closet-item.active { border-color: #fff !important; }
 .panel .panel-close { color: #fff; background: rgba(255, 255, 255, 0.14); border-radius: 50%; }
 .panel .closet-item.active:not(#_) {
-  border-color: var(--pink) !important;
-  background: linear-gradient(140deg, rgba(255, 120, 180, 0.42), rgba(214, 110, 255, 0.3)) !important;
-  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.5), 0 0 14px rgba(255, 111, 168, 0.5) !important;
+  border-color: #fff !important;
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.16)) !important;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.6), 0 0 14px rgba(255, 255, 255, 0.45) !important;
 }
 
 /* «Авто»: плашка «Повторить» рядом с ней (двигается вместе с ней) */
@@ -1608,4 +1609,6 @@ button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item
 #auto-rep:active { transform: translate(-50%, -50%) scale(0.94) !important; }
 #auto-rep.offer { animation: fadeIn 0.25s ease, autoRepPulse 1s ease-in-out infinite; }
 #auto-rep.active { padding: 6px 12px; font-size: 12.5px; font-weight: 700; opacity: 0.8; background: var(--glass-bg) !important; box-shadow: var(--glass-edge) !important; }
-@keyframes autoRepPulse { 0%, 100% { box-shadow: var(--glass-edge), 0 0 0 0 rgba(255, 111, 168, 0.55); } 50% { box-shadow: var(--glass-edge), 0 0 0 10px rgba(255, 111, 168, 0); } }
+@keyframes autoRepPulse { 0%, 100% { box-shadow: var(--glass-edge), 0 0 0 0 rgba(255, 255, 255, 0.55); } 50% { box-shadow: var(--glass-edge), 0 0 0 10px rgba(255, 255, 255, 0); } }
+.panel .editor-group:not(#_) { color: rgba(255, 255, 255, 0.72) !important; }
+#love-menu .lm-n:not(#_) { background: rgba(255, 255, 255, 0.28); color: #fff; }
