@@ -4193,6 +4193,7 @@ document.body.appendChild(autoExit);
 function setAutoMode(on) {
   if (on && poseMode) setPoseMode(false);
   autoMode = on;
+  if (character) character.autoSleep = on;
   document.body.classList.toggle('automode', on);
   for (const p of document.querySelectorAll('.panel')) p.classList.add('hidden');
   $('love-menu').hidden = true;

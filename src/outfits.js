@@ -38,7 +38,8 @@ function indexVrm(vrm) {
 // ---------- Ткань идёт за пальцем (для любой одежды, даже без «пружинок») ----------
 // Вершины одежды рядом с точкой касания сдвигаются в шейдере: упруго, с затухающим
 // покачиванием. Тело не трогаем — только материалы одежды. Одна пара uniform на все вещи.
-const CLOTH_POKE = { pos: { value: new THREE.Vector3(0, -99, 0) }, dir: { value: new THREE.Vector3() }, r: { value: 0.13 } };
+const CLOTH_POKE = { pos: { value: new THREE.Vector3(0, -99, 0) }, dir: { value: new THREE.Vector3() }, r: { value: 0.13 }, sway: { value: new THREE.Vector3() }, time: { value: 0 } };
+const swaySim = { x: new THREE.Vector3(), v: new THREE.Vector3(), prev: null };
 const clothSim = { x: new THREE.Vector3(), v: new THREE.Vector3(), target: new THREE.Vector3(0, -99, 0) };
 function installClothPoke(mesh) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
@@ -51,14 +52,20 @@ function installClothPoke(mesh) {
       shader.uniforms.uPokePos = CLOTH_POKE.pos;
       shader.uniforms.uPokeDir = CLOTH_POKE.dir;
       shader.uniforms.uPokeR = CLOTH_POKE.r;
+      shader.uniforms.uSway = CLOTH_POKE.sway;
+      shader.uniforms.uClothT = CLOTH_POKE.time;
       shader.uniforms.uTuck = (m.userData.tuck ??= { value: 0 });
-      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed -= normalize( normal ) * ( aTuck * uTuck );');
-      shader.vertexShader = 'attribute float aTuck;\nuniform float uTuck;\nuniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed -= normalize( normal ) * ( ( aTuck + smoothstep( 0.03, 0.045, aTuck ) * 0.07 ) * uTuck );');
+      shader.vertexShader = 'attribute float aTuck;\nattribute float aHem;\nuniform float uTuck;\nuniform vec3 uSway;\nuniform float uClothT;\nuniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
       {
         vec4 pkW = modelMatrix * vec4( transformed, 1.0 );
         vec3 pkD = pkW.xyz - uPokePos;
         float pkK = exp( -dot( pkD, pkD ) / ( uPokeR * uPokeR ) );
         pkW.xyz += uPokeDir * pkK;
+        // подол: запаздывает за движением тела + лёгкая живая волна; у касания волна сильнее
+        float hemW = aHem * aHem;
+        vec3 wv = vec3( sin( uClothT * 2.1 + pkW.y * 15.0 + pkW.x * 7.0 ), 0.35 * sin( uClothT * 2.7 + pkW.x * 12.0 ), cos( uClothT * 1.7 + pkW.y * 12.0 + pkW.z * 7.0 ) );
+        pkW.xyz += uSway * hemW + wv * ( hemW * ( 0.0026 + 0.25 * length( uSway ) + 0.2 * length( uPokeDir ) * pkK ) );
         mvPosition = viewMatrix * pkW;
         gl_Position = projectionMatrix * mvPosition;
       }`);
@@ -90,6 +97,38 @@ function installTuck(vrm, mesh) {
   }
   g.setAttribute('aTuck', new THREE.BufferAttribute(arr, 1));
 }
+// Вес «подола»: 0 у пояса/ворота, 1 у нижнего края вещи (по исходной позе).
+function installHem(mesh, from) {
+  const g = mesh.geometry, pos = g.getAttribute('position');
+  if (!pos || g.getAttribute('aHem')) return;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < pos.count; i++) { const y = pos.getY(i); if (y < lo) lo = y; if (y > hi) hi = y; }
+  const arr = new Float32Array(pos.count), span = Math.max(1e-4, (hi - lo) * (1 - from));
+  for (let i = 0; i < pos.count; i++) arr[i] = Math.min(1, Math.max(0, 1 - (pos.getY(i) - lo) / span));
+  g.setAttribute('aHem', new THREE.BufferAttribute(arr, 1));
+}
+function installHems(pieces) {
+  for (const m of pieces.bottoms ?? []) installHem(m, 0.12);
+  for (const m of pieces.tops ?? []) installHem(m, 0.55);
+}
+// Тело донора — только «заплатка» под одеждой: без чёрной обводки и чуть меньше, чтобы не торчало.
+function patchDonorSkin(mesh) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m) continue;
+    m.polygonOffset = true; m.polygonOffsetFactor = 2; m.polygonOffsetUnits = 2;
+    if (m.isOutline) { m.visible = false; continue; }
+    if (m.userData.shrunk) continue;
+    m.userData.shrunk = true;
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (shader, renderer) => {
+      prev?.call(m, shader, renderer);
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed -= normalize( normal ) * 0.005;');
+    };
+    const pk = m.customProgramCacheKey?.bind(m);
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|shrunk`;
+    m.needsUpdate = true;
+  }
+}
 function setTuck(mesh, on) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m) (m.userData.tuck ??= { value: 0 }).value = on ? 1 : 0;
 }
@@ -105,6 +144,7 @@ export class PieceWardrobe {
     this.base = { vrm, ...indexVrm(vrm) };
     for (const list of Object.values(this.base.pieces)) list.forEach(installClothPoke);
     for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
+    installHems(this.base.pieces);
   }
 
   // Палец ведёт ткань: point — где касание (мир), dir — куда ведут (мир), power — сила толчка.
@@ -126,6 +166,21 @@ export class PieceWardrobe {
     if (clothSim.x.length() > lim) clothSim.x.setLength(lim);
     CLOTH_POKE.pos.value.copy(clothSim.target);
     CLOTH_POKE.dir.value.copy(clothSim.x);
+    // Тело двинулось — подолы запаздывают и качаются следом.
+    CLOTH_POKE.time.value += h;
+    const hips = this.base?.vrm.humanoid?.getRawBoneNode('hips');
+    if (hips) {
+      const p = hips.getWorldPosition(new THREE.Vector3());
+      if (swaySim.prev) {
+        const d = p.clone().sub(swaySim.prev);
+        if (d.length() < 0.2) swaySim.v.addScaledVector(d, -7);
+      }
+      (swaySim.prev ??= new THREE.Vector3()).copy(p);
+    }
+    swaySim.v.addScaledVector(swaySim.x, -70 * h).multiplyScalar(Math.exp(-4.2 * h));
+    swaySim.x.addScaledVector(swaySim.v, h);
+    if (swaySim.x.length() > 0.022) swaySim.x.setLength(0.022);
+    CLOTH_POKE.sway.value.copy(swaySim.x);
   }
 
   // Вещи с другой девушки: у неё другие пропорции (длина рук, ног, шеи). Подгоняем скелет
@@ -177,6 +232,8 @@ export class PieceWardrobe {
     this.sources.set(id, { vrm, ...idx, active: false });
     for (const list of Object.values(idx.pieces)) list.forEach(installClothPoke);
     for (const m of idx.pieces.bottoms ?? []) installTuck(vrm, m);
+    installHems(idx.pieces);
+    idx.skins.forEach(patchDonorSkin);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
     this.skinCache?.clear();
@@ -206,11 +263,6 @@ export class PieceWardrobe {
       // остаются дыры. Тело донора (с нашей кожей) показываем «позади» нашего: оно закрывает дыры.
       for (const m of s.skins) {
         m.visible = s.active;
-        const mat = Array.isArray(m.material) ? m.material[0] : m.material;
-        if (!mat) continue;
-        mat.polygonOffset = true;
-        mat.polygonOffsetFactor = 2;
-        mat.polygonOffsetUnits = 2;
       }
     }
     // Кожа собирается из двух нарядов: торс — от того, чей верх надет (у VRoid под каждым

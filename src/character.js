@@ -727,7 +727,10 @@ export class Character {
     // Тормошат — просыпается; гладят и нежно трогают — спит дальше, довольная.
     {
       const ph = this.sitPhases();
-      const lying = Math.max(ph.b4, ph.c4, ph.p4) > 0.85;
+      // Лежит — в готовой позе или в любой своей (на боку, на спине): таз и голова у самого пола.
+      const hipsY = this.bones.hips.getWorldPosition(new THREE.Vector3()).y;
+      const headY = this.bones.head.getWorldPosition(new THREE.Vector3()).y;
+      const lying = Math.max(ph.b4, ph.c4, ph.p4) > 0.85 || (hipsY < 0.36 && headY < 0.42);
       this.disturb = Math.max(0, (this.disturb ?? 0) - dt * 0.6);
       if (lying && this.wakeT <= 0) this.lieT = (this.lieT ?? 0) + dt;
       else if (!lying) this.lieT = 0;
@@ -742,8 +745,8 @@ export class Character {
         const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(chestQ.multiply(this.hipsRestInv));
         watched = toCam.dot(fwd) > 0.2;
       }
-      if (watched) this.lieT = Math.min(this.lieT, 8);
-      const want = lying && this.wakeT <= 0 && this.lieT > 10 ? 1 : 0;
+      // Смотришь в лицо — засыпает позже, но всё равно засыпает.
+      const want = lying && this.wakeT <= 0 && this.lieT > (watched || this.autoSleep ? 22 : 10) ? 1 : 0;
       // Засыпает медленно (веки тяжелеют), просыпается быстрее.
       this.sleep += (want - this.sleep) * (1 - Math.exp(-dt * (want ? 0.7 : 3)));
       this.sleepJoy = Math.max(0, (this.sleepJoy ?? 0) - dt * 0.25);
