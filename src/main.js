@@ -947,6 +947,7 @@ function touchRipple(x, y) {
 const touches = new Map();
 let orbitDrag = null; // { lastX }
 let stroking = null;
+let lastOnHerAt = 0; // когда последний раз палец был на ней (для «Авто»: промах ≠ жест камерой)
 let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
 let pinchMidY = null;
@@ -1043,6 +1044,13 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!hit) {
     // Пустое место в обычном режиме: свайп крутит камеру (сесть/встать — у левого края).
     bgSwipe = { sy: e.clientY, sx: e.clientX, lastX: e.clientX, lastY: e.clientY, axis: null };
+    if (autoMode) {
+      // Рядом с ней (в пределах пальца) или сразу после поглаживания — это промах мимо неё, а не жест камерой.
+      bgSwipe.near = performance.now() - lastOnHerAt < 900;
+      for (let a = 0; a < 8 && !bgSwipe.near; a++) {
+        if (zoneAt({ clientX: e.clientX + Math.cos(a * Math.PI / 4) * 34, clientY: e.clientY + Math.sin(a * Math.PI / 4) * 34 }, true)) bgSwipe.near = true;
+      }
+    }
     return;
   }
 
@@ -1182,8 +1190,17 @@ canvas.addEventListener('pointermove', (e) => {
     // Пустое место в обычном режиме — камера свободно вращается (со всех ракурсов).
     // В «Авто» одним пальцем: вбок — вокруг неё, вверх/вниз — ближе/дальше.
     if (autoMode) {
-      rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, 0);
-      zoomBy(Math.exp((e.clientY - bgSwipe.lastY) * 0.004));
+      // Палец соскользнул с неё или начал вплотную к ней — камеру не трогаем (она не «уезжает» при поглаживании).
+      if (bgSwipe.near) return;
+      // Сначала понимаем жест (вбок или вверх-вниз) и дальше держим только его — без случайного зума при повороте.
+      if (!bgSwipe.axis) {
+        const ax = Math.abs(e.clientX - bgSwipe.sx), ay = Math.abs(e.clientY - bgSwipe.sy);
+        if (Math.max(ax, ay) < 14) return;
+        bgSwipe.axis = ax >= ay ? 'x' : 'y';
+        bgSwipe.lastX = e.clientX; bgSwipe.lastY = e.clientY;
+      }
+      if (bgSwipe.axis === 'x') rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, 0);
+      else zoomBy(Math.exp((e.clientY - bgSwipe.lastY) * 0.003));
     } else rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, (e.clientY - bgSwipe.lastY) * 0.005);
     bgSwipe.lastX = e.clientX;
     bgSwipe.lastY = e.clientY;
@@ -1194,13 +1211,16 @@ canvas.addEventListener('pointermove', (e) => {
     // вбок или по кругу — поглаживание.
     const ax = Math.abs(e.clientX - stroking.sx), ay = Math.abs(e.clientY - stroking.sy);
     if (ay > 22 && ay > ax * 1.5) {
+      // «Авто»: потянул за грудь/плечи/лицо — наклон вперёд или прогиб назад; за живот и ноги — сесть/встать.
+      const upper = autoMode && !poseMode && ['body', 'arm', 'face'].includes(stroking.hit.zone);
       stroking = null;
-      poseDrag = { kind: 'sitdrag', y: e.clientY, t: performance.now() };
-      showLabel('Ниже — сесть / лечь, выше — встать');
+      poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now() };
+      showLabel(upper ? 'Ниже — наклон вперёд, выше — прогиб назад' : 'Ниже — сесть / лечь, выше — встать');
       return;
     }
   }
   if (stroking) {
+    lastOnHerAt = performance.now();
     const d = Math.hypot(e.clientX - stroking.lastX, e.clientY - stroking.lastY);
     stroking.moved += d;
     stroking.dist += d;
@@ -2506,7 +2526,21 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
+  if (poseDrag.kind === 'benddrag') {
+    // Полная амплитуда наклона и прогиба, как у левой полосы во вкладке «Позы».
+    lastOnHerAt = performance.now();
+    character.effortT = 0.35;
+    character.dragBoostT = 0.5;
+    const o = character.bodyOffset;
+    const bend = THREE.MathUtils.clamp(o.hipsRotX + ((e.clientY - poseDrag.y) / (window.innerHeight * 0.42)) * BEND_RANGE, BEND_MIN, BEND_MAX);
+    poseDrag.y = e.clientY;
+    o.hipsRotX = bend;
+    o.spineX = bendSpine(bend);
+    showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
+    return;
+  }
   if (poseDrag.kind === 'sitdrag') {
+    lastOnHerAt = performance.now();
     character.effortT = 0.35;
     const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || window.innerHeight * 0.5;
     const dv = ((e.clientY - poseDrag.y) / h) * sitMax();
@@ -4195,6 +4229,14 @@ function setAutoMode(on) {
   if (on && poseMode) setPoseMode(false);
   autoMode = on;
   if (character) character.autoSleep = on;
+  if (!on && character && !poseMode) {
+    // Вышел из «Авто» — наклон/прогиб плавно возвращается в ровное положение.
+    const o = character.bodyOffset;
+    const iv = setInterval(() => {
+      o.hipsRotX *= 0.82; o.spineX = bendSpine(o.hipsRotX);
+      if (Math.abs(o.hipsRotX) < 0.01 || autoMode || poseMode) { if (!autoMode && !poseMode) { o.hipsRotX = 0; o.spineX = 0; } clearInterval(iv); }
+    }, 33);
+  }
   document.body.classList.toggle('automode', on);
   for (const p of document.querySelectorAll('.panel')) p.classList.add('hidden');
   $('love-menu').hidden = true;
@@ -4217,7 +4259,8 @@ autoHint.id = 'auto-hint';
 autoHint.hidden = true;
 autoHint.innerHTML = '<b>✨ Авто — всё одним пальцем</b>'
   + '<span>👆 Тап и поглаживание — как обычно</span>'
-  + '<span>↕️ Вести по ней вверх-вниз — сесть / лечь / встать</span>'
+  + '<span>↕️ Вести вверх-вниз по животу и ногам — сесть / лечь / встать</span>'
+  + '<span>🙇 Вести вверх-вниз по груди и плечам — наклон / прогиб</span>'
   + '<span>👗 Двойной тап по ней — переоденется</span>'
   + '<span>↔️ По фону вбок — камера вокруг</span>'
   + '<span>🔍 По фону вверх-вниз — ближе / дальше</span>'
