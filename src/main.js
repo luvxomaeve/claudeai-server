@@ -575,6 +575,9 @@ function setLove(v, silent = false) {
   renderLocks();
   if (!silent && after > before) {
     say(LEVEL_UP_LINES[after], 'happy');
+    fxGlow();
+    fxBurst(window.innerWidth / 2, window.innerHeight * 0.4, 26, 150);
+    fxBanner(`✨ ${LEVELS[after].label} ✨`);
     const opened = after > reachedBefore ? FEATURES.filter((f) => f.lvl === after && !adOpen(f.id)) : [];
     if (opened.length) setTimeout(() => showToast(`🔓 Открыто: ${opened.map((f) => f.name).join(', ')}`), 2200);
     $('affection').classList.remove('levelup');
@@ -647,6 +650,7 @@ function showLock(f) {
       renderLocks();
       if (!$('wardrobe').classList.contains('hidden')) renderGirls();
       showToast(`🔓 Открыто: ${f.name}`);
+      fxBurst(window.innerWidth / 2, window.innerHeight * 0.42, 16, 120);
     }, () => showToast('Реклама не досмотрена — ничего страшного'));
   };
   lockPop.hidden = false;
@@ -1668,14 +1672,71 @@ function floatLock(x, y) {
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 1100);
 }
+// ---------- Эффекты ----------
+const FX_COLORS = ['#ff6fa8', '#ff9ac4', '#c77dff', '#ffd1e6', '#ffffff'];
+const fxRand = (a, b) => a + Math.random() * (b - a);
+function fxParticle(x, y, glyph, { dx, dy, size, color, dur = 1.1, rot = 0 }) {
+  const el = document.createElement('div');
+  el.className = 'fx-p';
+  el.textContent = glyph;
+  el.style.cssText = `left:${x}px;top:${y}px;font-size:${size}px;color:${color};--dx:${dx}px;--dy:${dy}px;--r:${rot}deg;animation-duration:${dur}s`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), dur * 1000 + 50);
+}
+// Искорки возле пальца.
+function fxSpark(x, y, n = 2) {
+  for (let i = 0; i < n; i++) {
+    const a = fxRand(0, Math.PI * 2), d = fxRand(18, 46);
+    fxParticle(x + fxRand(-10, 10), y + fxRand(-10, 10), Math.random() < 0.5 ? '✦' : '✧',
+      { dx: Math.cos(a) * d, dy: Math.sin(a) * d - 14, size: fxRand(9, 15), color: pick(FX_COLORS), dur: fxRand(0.6, 0.95), rot: fxRand(-90, 90) });
+  }
+}
+// Россыпь сердечек и звёзд из точки.
+function fxBurst(x, y, n = 18, dist = 120) {
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + fxRand(-0.25, 0.25), d = dist * fxRand(0.45, 1);
+    fxParticle(x, y, pick(['♥', '♥', '✦', '✧']),
+      { dx: Math.cos(a) * d, dy: Math.sin(a) * d - dist * 0.25, size: fxRand(14, 28), color: pick(FX_COLORS), dur: fxRand(0.9, 1.5), rot: fxRand(-140, 140) });
+  }
+}
+// Мягкая вспышка света на весь экран.
+function fxGlow() {
+  const el = document.createElement('div');
+  el.className = 'fx-glow';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1300);
+}
+// Крупная надпись по центру (новый уровень).
+function fxBanner(text) {
+  const el = document.createElement('div');
+  el.className = 'fx-banner';
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+// Сердечко от касания: разного размера и цвета, всплывает с покачиванием, рядом искорки.
 function floatHeart(x, y) {
   const el = document.createElement('div');
-  el.className = 'float-heart';
+  el.className = 'float-heart' + (Math.random() < 0.5 ? ' sway' : '');
   el.textContent = '♥';
   el.style.left = `${x + (Math.random() - 0.5) * 30}px`;
   el.style.top = `${y - 10}px`;
+  el.style.fontSize = `${Math.round(fxRand(17, 29))}px`;
+  el.style.color = pick(['#ff6fa8', '#ff6fa8', '#ff8fc0', '#e879f9']);
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1100);
+  setTimeout(() => el.remove(), 1250);
+  fxSpark(x, y, 2);
+}
+// Фон: плывущие огоньки (на звёздном — мерцающие звёзды). Лёгкий слой под сценой.
+{
+  const amb = document.createElement('div');
+  amb.id = 'ambient';
+  for (let i = 0; i < 18; i++) {
+    const d = document.createElement('i');
+    d.style.cssText = `left:${fxRand(2, 98).toFixed(1)}%;top:${fxRand(4, 96).toFixed(1)}%;--d:${fxRand(6, 14).toFixed(1)}s;--delay:${(-fxRand(0, 12)).toFixed(1)}s;--sz:${fxRand(2, 5).toFixed(1)}px;--drift:${fxRand(-30, 30).toFixed(0)}px`;
+    amb.appendChild(d);
+  }
+  $('scene').before(amb);
 }
 
 // ---------- Зоны касаний (отладка) ----------
@@ -4165,6 +4226,7 @@ function fulfillWish() {
   setLove(love + WISH_BONUS);
   for (let i = 0; i < 6; i++) setTimeout(() => floatHeart(window.innerWidth * (0.3 + Math.random() * 0.4), window.innerHeight * 0.4), i * 110);
   showToast(`💭 Желание исполнено · +${WISH_BONUS} ♥`);
+  fxBurst(window.innerWidth / 2, window.innerHeight * 0.4, 14, 110);
   // Чуть позже — чтобы не перебить реакцию на само касание.
   setTimeout(() => {
     if (!character) return;
