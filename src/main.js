@@ -3529,6 +3529,7 @@ $('btn-gaze').addEventListener('click', () => {
 });
 renderGaze();
 const lookNdc = new THREE.Vector2();
+const pleasureV = new THREE.Vector3();
 let idleTime = 0;
 
 let saccadeT = 1;
@@ -4328,6 +4329,19 @@ function tick() {
 
     const patTarget = petting && petting.ticks > 0 ? 1 : 0;
     character.patAmount += (patTarget - character.patAmount) * (1 - Math.exp(-dt * 5));
+    // Удовольствие: гладят по голове или там, где ей уже нравится, — тянется к руке и жмурится.
+    {
+      const st = stroking && stroking.ticks > 0 ? STROKES[stroking.hit.zone] : null;
+      const liked = (petting && petting.ticks > 0) || (st && (st.affection[tier()] ?? 0) > 0);
+      const cur = character.pleasure ?? 0;
+      character.pleasure = cur + ((liked ? 1 : 0) - cur) * (1 - Math.exp(-dt * (liked ? 1.4 : 2.2)));
+      if (liked) {
+        const fx = (petting ?? stroking).lastX;
+        pleasureV.copy(character.bones.head.getWorldPosition(pleasureV)).project(camera);
+        const hx = (pleasureV.x * 0.5 + 0.5) * window.innerWidth;
+        character.touchSide = THREE.MathUtils.clamp((fx - hx) / (window.innerWidth * 0.1), -1, 1) * (Math.cos(camYaw) >= 0 ? 1 : -1);
+      }
+    }
 
     character.update(dt);
     pieceWardrobe.sync(dt);

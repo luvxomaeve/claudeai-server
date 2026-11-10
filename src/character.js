@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { tuneSkirt, shapeHips, HIP_FLEX } from './outfits.js';
+const HEAD_LEAN_SIGN = -1; // знак наклона головы «к пальцу» (проверено тестом)
 
 const EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
 
@@ -1067,8 +1068,15 @@ export class Character {
     pose.headX += -this.headLook.y * 0.2;
 
     // Пока гладят — голова клонится и прижимается к руке.
-    pose.headZ += this.patAmount * 0.18 * Math.sin(t * 2.2);
+    // Тянется к руке: голова (и чуть корпус) клонятся в сторону пальца — и когда гладят
+    // по голове, и когда гладят там, где ей нравится.
+    const pl = this.pleasure ?? 0;
+    this.touchSideS = (this.touchSideS ?? 0) + ((this.touchSide ?? 0) - (this.touchSideS ?? 0)) * (1 - Math.exp(-(this.lastDt ?? 0.016) * 4));
+    const lean = pl * this.touchSideS * (1 - (this.sleep ?? 0));
+    pose.headZ += this.patAmount * 0.18 * Math.sin(t * 2.2) * (1 - 0.55 * Math.abs(this.touchSideS));
     pose.headX += this.patAmount * 0.12;
+    pose.headZ += HEAD_LEAN_SIGN * 0.17 * lean;
+    pose.spineZ += HEAD_LEAN_SIGN * 0.045 * lean * (1 - THREE.MathUtils.smoothstep(this.sitS, 0.9, 1.2));
     // Пока гладят — смущённо сводит ладошки перед собой, плечики чуть вверх.
     {
       const pa = this.patAmount * (this.armPreset.left || this.armPreset.right || this.handTargets.left || this.handTargets.right ? 0 : 1)
@@ -3084,6 +3092,14 @@ export class Character {
     if (this.exprHold <= 0) for (const e of EXPRESSIONS) this.exprTarget[e] = 0;
     if (this.patAmount > 0.2) this.exprTarget.happy = Math.max(this.exprTarget.happy, this.patAmount * (1 - 0.6 * (this.sleep ?? 0)));
     if (this.patAmount > 0.2 && (this.sleep ?? 0) > 0.5) this.sleepJoy = 1;
+    // Жмурится от удовольствия: гладят дольше секунды — глаза мягко закрываются в улыбке.
+    {
+      const bliss = THREE.MathUtils.smoothstep(this.pleasure ?? 0, 0.5, 0.95) * (1 - (this.sleep ?? 0));
+      if (bliss > 0.01 && this.exprTarget.angry < 0.1 && this.exprTarget.surprised < 0.1) {
+        this.exprTarget.relaxed = Math.max(this.exprTarget.relaxed, bliss * 0.9);
+        this.exprTarget.happy = Math.min(this.exprTarget.happy, 0.6 - 0.3 * bliss);
+      }
+    }
     // Лицо живее: смотрит на тебя — лёгкая улыбка; спит — спокойное расслабленное лицо.
     if (this.exprHold <= 0) {
       this.exprTarget.relaxed = Math.max(this.exprTarget.relaxed, (this.sleep ?? 0) * 0.45, (this.shyNow ?? 0) * 0.22);
