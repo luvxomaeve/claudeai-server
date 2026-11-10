@@ -1076,7 +1076,7 @@ function strokeTick(e) {
     lastStrokeLineAt = now;
     // Ноги — про чулки/гольфы/колготки, как при тапе (иногда — обычная фраза).
     const lw = stroking.hit.zone === 'legs' ? LEGS_LINES[legwear()] : null;
-    say(pick(lw && Math.random() < 0.65 ? lw : r.lines[t]));
+    say(pick(lw && Math.random() < 0.4 ? lw : r.lines[t]));
   }
 }
 
