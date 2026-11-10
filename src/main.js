@@ -933,7 +933,7 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   // Ждём: если палец поведут — это поглаживание, если отпустят — тычок.
-  stroking = { hit, lastX: e.clientX, lastY: e.clientY, moved: 0, dist: 0, ticks: 0 };
+  stroking = { hit, lastX: e.clientX, lastY: e.clientY, sx: e.clientX, sy: e.clientY, moved: 0, dist: 0, ticks: 0 };
 });
 
 // Тычок: срабатывает, когда палец отпустили, не поведя им.
@@ -1041,6 +1041,17 @@ canvas.addEventListener('pointermove', (e) => {
     bgSwipe.lastX = e.clientX;
     bgSwipe.lastY = e.clientY;
     return;
+  }
+  if (stroking && poseMode && stroking.ticks === 0) {
+    // Режим позы без точек: повёл по ней вверх-вниз — сажаем/поднимаем (как правая полоса);
+    // вбок или по кругу — поглаживание.
+    const ax = Math.abs(e.clientX - stroking.sx), ay = Math.abs(e.clientY - stroking.sy);
+    if (ay > 22 && ay > ax * 1.5) {
+      stroking = null;
+      poseDrag = { kind: 'sitdrag', y: e.clientY, t: performance.now() };
+      showLabel('Ниже — сесть / лечь, выше — встать');
+      return;
+    }
   }
   if (stroking) {
     const d = Math.hypot(e.clientX - stroking.lastX, e.clientY - stroking.lastY);
@@ -1810,25 +1821,34 @@ function nearestAnchor(e, side) {
 
 let activeHandle = null; // какая точка сейчас в руке — она подсвечивается, остальные притухают
 const HANDLE_LABELS = { kneeL: 'Левое колено', kneeR: 'Правое колено', handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра: вниз — сесть, вбок — качнуть', footL: 'Левая нога', footR: 'Правая нога' };
-// 👁 в режиме позы: спрятать точки — смотреть на позу чисто, полоса слева всё так же наклоняет.
-let handlesHidden = false;
-const petInPose = () => handlesHidden || document.body.classList.contains('clean');
-try { handlesHidden = localStorage.getItem('waifu-handles-hidden') === '1'; } catch { /* ignore */ }
+// Точки поз: только когда открыты (уровень/реклама) и включены кнопкой ⁘.
+// Без точек в режиме позы её гладят и трогают, как на главной, а ведя по ней
+// пальцем вверх-вниз — сажают/поднимают. Полосы работают всегда.
+let handlesShown = false;
+try { handlesShown = localStorage.getItem('waifu-handles-on') === '1'; } catch { /* ignore */ }
+let handlesHidden = true; // итог: точки сейчас не активны
+function syncHandles() {
+  handlesHidden = !(handlesShown && unlocked('handles'));
+}
+const petInPose = () => { syncHandles(); return handlesHidden || document.body.classList.contains('clean'); };
 function renderHandlesBtn() {
+  syncHandles();
   $('btn-handles').classList.toggle('active', !handlesHidden);
   $('btn-handles').title = handlesHidden ? 'Показать точки' : 'Спрятать точки';
 }
 $('btn-handles').addEventListener('click', () => {
-  handlesHidden = !handlesHidden;
-  try { localStorage.setItem('waifu-handles-hidden', handlesHidden ? '1' : '0'); } catch { /* ignore */ }
+  if (!unlocked('handles')) return; // закрыто — покажется замочек
+  handlesShown = !handlesShown;
+  try { localStorage.setItem('waifu-handles-on', handlesShown ? '1' : '0'); } catch { /* ignore */ }
   renderHandlesBtn();
-  showToast(handlesHidden ? 'Точки спрятаны — гладь и тапай её 💗 (полоса работает)' : 'Точки видны — ставь позу');
+  showToast(handlesShown ? 'Точки включены — ставь позу (движения точек тоже записываются в повтор)' : 'Точки выключены — гладь и трогай её 💗, веди по ней вверх-вниз — сесть/встать');
 });
 renderHandlesBtn();
 $('btn-handles').hidden = true;
 $('btn-home').classList.add('active');
 function updateHandles() {
-  const show = poseMode && !!character && (!handlesHidden || !!poseDrag);
+  const show = poseMode && !!character && !petInPose();
+  if ($('btn-handles').classList.contains('active') === handlesHidden) renderHandlesBtn();
   $('handles').hidden = !show;
   // Пока крутишь камеру — точки бледнеют и не мешают.
   $('handles').classList.toggle('calm', poseDrag?.kind === 'bg' || performance.now() - lastCamMove < 450);
