@@ -814,6 +814,12 @@ $('affection').addEventListener('click', renderBoost, true);
 setInterval(() => { if (!$('love-menu').hidden) renderBoost(); }, 10000);
 {
   const rs = document.createElement('button'); rs.id = 'love-reset'; rs.textContent = 'Сброс';
+  if (!window.WAIFU_RELEASE) {
+    // «Макс» — только в веб-версии для проверки (в приложении его нет).
+    const mx = document.createElement('button'); mx.id = 'love-max'; mx.textContent = '♥ Макс';
+    mx.addEventListener('click', (e) => { e.stopPropagation(); setLove(LOVE_MAX); loveMenu.hidden = true; showToast('♥ Максимум'); });
+    lmDev.append(mx);
+  }
   lmDev.append(rs);
 }
 $('love-reset').addEventListener('click', (e) => { e.stopPropagation(); reachedLvl = 0; try { localStorage.setItem('waifu-reached', '0'); } catch { /* ignore */ } setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
@@ -840,6 +846,7 @@ function legwear() {
 const LEGS_LINES = {
   stockings: ['Тебе нравятся мои чулочки? ♥', 'Чулочки — моя слабость~', 'Хи, красивые чулки, правда?', 'Смотришь на мои чулки? 😳', 'Резинка не сползла?..'],
   socks: ['Тебе нравятся мои гольфы? ♥', 'Хи, гольфики~', 'Мило же, да?'],
+  tights: ['Нравятся мои колготки? ♥', 'Колготки — классика~', 'Мягкие, правда?', 'Хи, гладкие, да?~'],
 };
 function legsText(text) {
   const k = legwear();
@@ -1030,7 +1037,7 @@ canvas.addEventListener('pointerdown', (e) => {
 
 // Тычок: срабатывает, когда палец отпустили, не поведя им.
 function tapReaction(hit, e) {
-  if (hit?.zone === 'legs' && legwear() !== 'tights' && Math.random() < 0.5) {
+  if (hit?.zone === 'legs' && LEGS_LINES[legwear()] && Math.random() < 0.5) {
     character.react({ expression: 'happy', motion: 'shyLegs' });
     changeAffection(0.4);
     floatHeart(e.clientX, e.clientY);
@@ -1067,7 +1074,9 @@ function strokeTick(e) {
   const now = performance.now();
   if (now - lastStrokeLineAt > 2600 && now - lastSpokeAt > 1800) {
     lastStrokeLineAt = now;
-    say(pick(r.lines[t]));
+    // Ноги — про чулки/гольфы/колготки, как при тапе (иногда — обычная фраза).
+    const lw = stroking.hit.zone === 'legs' ? LEGS_LINES[legwear()] : null;
+    say(pick(lw && Math.random() < 0.65 ? lw : r.lines[t]));
   }
 }
 
