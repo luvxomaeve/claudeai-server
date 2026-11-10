@@ -270,7 +270,7 @@ export class PieceWardrobe {
     const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : this.sources.get(id))?.skinMap ?? this.base.skinMap;
     const topId = wear.tops ?? 'base';
     let map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
-    map = this.recolorShorts(map, wear.legsDark ? null : (wear.legsTint ?? null));
+    map = this.recolorShorts(map, wear.legsDark ? null : (wear.legsTint ?? null), !wear.legsDark && wear.legsTint == null);
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     this.setSkin(map);
@@ -321,13 +321,14 @@ export class PieceWardrobe {
 
   // Нарисованные на коже серые шортики — перекрашиваем в чёрный (подходит к любому наряду).
   // Меняем только серые (ненасыщенные) пиксели в зоне бёдер — кожу не трогаем.
-  recolorShorts(map, hex = null) {
+  recolorShorts(map, hex = null, auto = false) {
     if (!map?.image || !this.base) return map;
     this.shortsCache ??= new Map();
-    const sKey = `${map.uuid}|${hex}`;
+    const sKey = `${map.uuid}|${hex}|${auto}`;
     if (this.shortsCache.has(sKey)) return this.shortsCache.get(sKey);
     if (!this.shortsTris) {
       this.shortsTris = [];
+      this.calfUV = [];
       for (const mesh of this.base.skins) {
         const g = mesh.geometry, pos = g.attributes.position, uv = g.attributes.uv;
         if (!uv) continue;
@@ -339,6 +340,9 @@ export class PieceWardrobe {
         for (let t = 0; t < n; t += 3) {
           const a = id(t), b = id(t + 1), c = id(t + 2);
           const ys = [a, b, c].map((q) => vy(pos, q, v));
+          // икра (ниже колена) — по ней узнаём цвет чулок
+          const leg = hipY - kneeY;
+          if (Math.max(...ys) < kneeY - leg * 0.15 && Math.min(...ys) > kneeY - leg * 0.6) this.calfUV.push((uv.getX(a) + uv.getX(b) + uv.getX(c)) / 3, (uv.getY(a) + uv.getY(b) + uv.getY(c)) / 3);
           if (Math.max(...ys) > top || Math.min(...ys) < bot) continue;
           this.shortsTris.push(uv.getX(a), uv.getY(a), uv.getX(b), uv.getY(b), uv.getX(c), uv.getY(c));
         }
@@ -363,6 +367,20 @@ export class PieceWardrobe {
     const m = mc.getImageData(0, 0, w, h).data;
     const id = ctx.getImageData(0, 0, w, h);
     const d = id.data;
+    // Без выбранного цвета — берём цвет самих чулок (с икры), чтобы бельё было им в тон.
+    let autoTone = false;
+    if (auto && hex == null && this.calfUV?.length) {
+      let r = 0, g = 0, b = 0, n = 0, skin = 0, tot = 0;
+      for (let k = 0; k < this.calfUV.length; k += 2) {
+        const x = Math.min(w - 1, Math.max(0, Math.floor(this.calfUV[k] * w))), y = Math.min(h - 1, Math.max(0, Math.floor(this.calfUV[k + 1] * h)));
+        const i = (y * w + x) * 4;
+        if (d[i + 3] < 200) continue;
+        tot++;
+        if (d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 30 && (d[i] + d[i + 1] + d[i + 2]) / 3 > 125) { skin++; continue; }
+        r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+      }
+      if (n && skin < tot * 0.6) { hex = (Math.round(r / n) << 16) | (Math.round(g / n) << 8) | Math.round(b / n); autoTone = true; }
+    }
     // Резинка шортиков выглядывает над юбкой серой полоской — закрашиваем её кожей
     // (цвет берём с кожи прямо над ней в том же столбце).
     {
@@ -395,7 +413,7 @@ export class PieceWardrobe {
       const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
       const mx = Math.max(r0, g0, b0), mn = Math.min(r0, g0, b0);
       if (mx - mn > 26) continue; // кожа — не трогаем
-      if (mx > 242 && hex == null) continue; // белое (верх белых чулок) без цвета — остаётся белым
+      if (mx > 242 && (hex == null || autoTone)) continue; // белое (верх белых чулок) без цвета — остаётся белым
       const l0 = (r0 + g0 + b0) / 3;
       const l = mx > 200 ? l0 : lMid + (l0 - lMid) * 0.3;
       if (hex == null) {
@@ -404,7 +422,7 @@ export class PieceWardrobe {
       } else {
         // В тон чулкам: тот же цвет, чуть темнее (складки видны).
         // Светлое (кружевной верх чулок) — как сами чулки, тёмно-серое (шортики) — темнее.
-        const k = l > 200 ? 0.35 + 0.9 * (l / 255) : 0.3 + 0.75 * (l / 255);
+        const k = autoTone ? Math.min(1, 0.7 + 0.6 * (l / 255)) : l > 200 ? 0.35 + 0.9 * (l / 255) : 0.3 + 0.75 * (l / 255);
         d[i] = Math.min(255, ((hex >> 16) & 255) * k); d[i + 1] = Math.min(255, ((hex >> 8) & 255) * k); d[i + 2] = Math.min(255, (hex & 255) * k);
       }
     }

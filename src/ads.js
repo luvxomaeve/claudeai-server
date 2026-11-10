@@ -7,7 +7,8 @@
 let ysdk = null;
 let vk = null; // VK Bridge, если игра открыта внутри VK
 let pauseHook = () => {};
-const native = typeof window !== 'undefined' ? window.WaifuAndroid : null;
+// window.WAIFU_NOADS — сборка «без рекламы» (для проверки): моста к рекламе как будто нет.
+const native = typeof window !== 'undefined' && !window.WAIFU_NOADS ? window.WaifuAndroid : null;
 // Полноэкранная — не чаще раза в 6 минут; в приложении первая — не раньше чем через 5 минут.
 const FULLSCREEN_GAP = 6 * 60000;
 let lastFullscreen = native ? Date.now() - FULLSCREEN_GAP + 5 * 60000 : 0;
