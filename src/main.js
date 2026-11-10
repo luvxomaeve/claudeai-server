@@ -729,10 +729,11 @@ function renderLoveCard() {
       + (items ? `<ul>${items}</ul>` : '');
     lmList.appendChild(row);
   });
-  lmDev.hidden = false; // «Макс» и «Сброс» видны всегда (для проверки; перед релизом можно скрыть)
+  lmDev.hidden = !!window.WAIFU_RELEASE; // в версии для магазина «Макс» и «Сброс» скрыты
 }
 let devSuppressClick = false;
 function enableDev() {
+  if (window.WAIFU_RELEASE) return; // в версии для магазина режима разработчика нет
   devSuppressClick = true; // клик после касания не должен закрыть окошко
   if (devMode) { showToast('🛠 Режим разработчика уже включён'); return; }
   devMode = true;
