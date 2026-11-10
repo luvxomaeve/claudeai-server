@@ -55,8 +55,10 @@ function installClothPoke(mesh) {
       shader.uniforms.uSway = CLOTH_POKE.sway;
       shader.uniforms.uClothT = CLOTH_POKE.time;
       shader.uniforms.uTuck = (m.userData.tuck ??= { value: 0 });
-      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed -= normalize( normal ) * ( ( aTuck + smoothstep( 0.03, 0.045, aTuck ) * 0.07 ) * uTuck );');
-      shader.vertexShader = 'attribute float aTuck;\nattribute float aHem;\nuniform float uTuck;\nuniform vec3 uSway;\nuniform float uClothT;\nuniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      shader.uniforms.uTuckY = (m.userData.tuckY ??= { value: 0 });
+      shader.uniforms.uLift = (m.userData.lift ??= { value: 0 });
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed -= normalize( normal ) * ( ( aTuck + smoothstep( 0.03, 0.045, aTuck ) * 0.07 ) * uTuck * mix( 1.0, smoothstep( 0.034, 0.045, aTuck ), uTuckY ) );');
+      shader.vertexShader = 'attribute float aTuck;\nattribute float aHem;\nuniform float uTuck;\nuniform float uTuckY;\nuniform float uLift;\nuniform vec3 uSway;\nuniform float uClothT;\nuniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
       {
         vec4 pkW = modelMatrix * vec4( transformed, 1.0 );
         vec3 pkD = pkW.xyz - uPokePos;
@@ -67,6 +69,7 @@ function installClothPoke(mesh) {
         vec3 wv = vec3( sin( uClothT * 2.1 + pkW.y * 15.0 + pkW.x * 7.0 ), 0.35 * sin( uClothT * 2.7 + pkW.x * 12.0 ), cos( uClothT * 1.7 + pkW.y * 12.0 + pkW.z * 7.0 ) );
         pkW.xyz += uSway * hemW + wv * ( hemW * ( 0.0026 + 0.25 * length( uSway ) + 0.2 * length( uPokeDir ) * pkK ) );
         mvPosition = viewMatrix * pkW;
+        mvPosition.xyz -= normalize( mvPosition.xyz ) * uLift;
         gl_Position = projectionMatrix * mvPosition;
       }`);
     };
@@ -129,8 +132,15 @@ function patchDonorSkin(mesh) {
     m.needsUpdate = true;
   }
 }
-function setTuck(mesh, on) {
-  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m) (m.userData.tuck ??= { value: 0 }).value = on ? 1 : 0;
+function setLift(mesh, v) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m) (m.userData.lift ??= { value: 0 }).value = v;
+}
+function setTuck(mesh, on, y = 0) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m) continue;
+    (m.userData.tuck ??= { value: 0 }).value = on ? 1 : 0;
+    (m.userData.tuckY ??= { value: 0 }).value = y;
+  }
 }
 
 export class PieceWardrobe {
@@ -254,8 +264,13 @@ export class PieceWardrobe {
     // Низ под верхом от другого наряда — заправляем.
     const topC = wear.tops ?? 'base', botC = wear.bottoms ?? 'base';
     const tuck = topC !== 'none' && topC !== botC;
-    for (const m of this.base.pieces.bottoms ?? []) setTuck(m, tuck);
-    for (const [, s] of this.sources) for (const m of s.pieces.bottoms ?? []) setTuck(m, tuck);
+    // Юбку не деформируем (иначе пояс «ломается» под коротким топом): прячем только то, что на груди,
+    // а верх рисуем на сантиметр «поверх» низа — где топ прозрачный, юбка видна как есть.
+    const put = (m) => setTuck(m, tuck, 1);
+    for (const m of this.base.pieces.tops ?? []) setLift(m, tuck ? 0.009 : 0);
+    for (const [, s] of this.sources) for (const m of s.pieces.tops ?? []) setLift(m, tuck ? 0.009 : 0);
+    for (const m of this.base.pieces.bottoms ?? []) put(m);
+    for (const [, s] of this.sources) for (const m of s.pieces.bottoms ?? []) put(m);
     for (const [, s] of this.sources) {
       s.active = PIECE_CATS.some((c) => !c.skin && (s.pieces[c.id] ?? []).some((m) => m.visible));
       s.vrm.scene.visible = s.active;
