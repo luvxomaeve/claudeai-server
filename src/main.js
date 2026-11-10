@@ -1926,9 +1926,42 @@ $('btn-handles').addEventListener('click', () => {
 });
 renderHandlesBtn();
 $('btn-handles').hidden = true;
+// Точки и повтор: 📌 «Поставить» — точки просто ставят позу и НЕ сбивают повтор
+// (он идёт дальше, а рука/нога остаётся, где поставил); 🔁 «Запись» — движение точкой
+// записывается в повтор и она его повторяет.
+let pointMode = 'pin';
+try { if (localStorage.getItem('waifu-point-mode') === 'rec') pointMode = 'rec'; } catch { /* ignore */ }
+const pointModeBtn = document.createElement('button');
+pointModeBtn.id = 'btn-pointmode';
+pointModeBtn.hidden = true;
+$('btn-handles').after(pointModeBtn);
+function renderPointMode() {
+  pointModeBtn.hidden = !poseMode || petInPose();
+  pointModeBtn.textContent = pointMode === 'pin' ? '📌' : '🔁';
+  pointModeBtn.title = pointMode === 'pin' ? 'Точки: ставить позу' : 'Точки: запись движения в повтор';
+  pointModeBtn.classList.toggle('rec', pointMode === 'rec');
+  pointModeBtn.classList.toggle('recording', pointMode === 'rec' && curRep().on && curRep().state === 'rec');
+}
+pointModeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+pointModeBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  pointMode = pointMode === 'pin' ? 'rec' : 'pin';
+  try { localStorage.setItem('waifu-point-mode', pointMode); } catch { /* ignore */ }
+  // Обратно в 📌: точки из повтора останавливаются там, где сейчас (их можно ставить руками).
+  if (pointMode === 'pin') for (const r of Object.values(reps)) r.movedPts = {};
+  renderPointMode();
+  showToast(pointMode === 'pin' ? '📌 Точки: ставить позу (повтор не сбивается)' : '🔁 Точки: запись движения — подвигай точку и отпусти');
+});
+// Точку взяли в режиме 📌: повтор больше не управляет этой рукой/ногой.
+function pinLimb(kind, side) {
+  const key = (kind === 'hand' ? 'h' : 'f') + (side === 'left' ? 'L' : 'R');
+  for (const r of Object.values(reps)) if (r.movedPts) r.movedPts[key] = false;
+}
+const repPlaying = () => { const r = curRep(); return r.on && r.state === 'play'; };
 $('btn-home').classList.add('active');
 function updateHandles() {
   const show = poseMode && !!character && !petInPose();
+  renderPointMode();
   if ($('btn-handles').classList.contains('active') === handlesHidden) renderHandlesBtn();
   $('handles').hidden = !show;
   // Пока крутишь камеру — точки бледнеют и не мешают.
@@ -2255,7 +2288,8 @@ function poseDragMove(e) {
     return;
   }
   if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
-    loopNoteMove(); // повтор запоминает и движение точек рук/ног
+    if (pointMode === 'rec') loopNoteMove(); // 🔁 повтор запоминает движение точек рук/ног
+    else pinLimb(poseDrag.kind, poseDrag.side); // 📌 повтор идёт дальше, точка — где поставил
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
@@ -2302,14 +2336,16 @@ function poseDragMove(e) {
     // Вниз — наклон вперёд как у человека: в основном в тазобедренных (таз уходит
     // назад для баланса, ноги на полу) и немного в спине; вверх — прогиб назад.
     const o = character.bodyOffset;
-    o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
-    o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
+    if (!(pointMode === 'pin' && repPlaying())) { // наклон ведёт повтор — не спорим с ним
+      o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
+      o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
+    }
     o.spineZ = clamp(o.spineZ - dx * 0.004 * facing, -0.5, 0.5);
   } else if (poseDrag.kind === 'twist') {
     // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
     const o = character.bodyOffset;
     o.spineY = clamp(o.spineY + dx * 0.005 * facing, -0.8, 0.8);
-    o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
+    if (!(pointMode === 'pin' && repPlaying())) o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
   } else {
     // Таз: тянешь вниз — опускается (присед → на колени → сидит → лежит), вверх — встаёт;
     // вбок — бёдра в сторону (стоя), с противовесом плеч и головы.
@@ -2327,7 +2363,8 @@ function poseDragMove(e) {
     o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -lim * S, lim * S);
     o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
-    {
+    // В 📌 при играющем повторе присед ведёт повтор — точкой бёдер только вбок.
+    if (pointMode === 'rec' || !repPlaying()) {
       const dyPx = dy;
       const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || window.innerHeight * 0.5;
       const dv = (dyPx / h) * sitMax();
@@ -2337,7 +2374,7 @@ function poseDragMove(e) {
       character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
       character.slideHold = 3;
       character.dragBoostT = 0.5;
-      loopNoteMove();
+      if (pointMode === 'rec') loopNoteMove();
       sitBy(dv / 0.004);
     }
   }
