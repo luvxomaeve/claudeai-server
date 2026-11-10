@@ -1077,6 +1077,7 @@ function strokeTick(e) {
   }
   changeAffection(r.affection[t]);
   if (r.affection[t] > 0 && stroking.ticks % 2 === 0) floatHeart(e.clientX, e.clientY);
+  else if (r.affection[t] <= 0) lockedStroke(stroking.hit.zone, r, e);
   const now = performance.now();
   if (now - lastStrokeLineAt > 2600 && now - lastSpokeAt > 1800) {
     lastStrokeLineAt = now;
@@ -1628,6 +1629,28 @@ function triggerReaction(zone, hit, e) {
   }
 }
 
+// Зона пока не даёт симпатию: вместо сердечка всплывает замочек + подсказка, когда откроется.
+const ZONE_NAMES = { face: 'Лицо', arm: 'Плечи', belly: 'Живот', legs: 'Ноги', body: 'Грудь', hand: 'Рука', hair: 'Волосы' };
+const TIER_NAMES = ['', '«Друг»', '«Близкий человек»'];
+let lockHintAt = 0;
+function lockedStroke(zone, r, e) {
+  if (stroking && stroking.ticks % 2 === 0) floatLock(e.clientX, e.clientY);
+  const ti = r.affection.findIndex((v) => v > 0);
+  const now = performance.now();
+  if (ti > 0 && now - lockHintAt > 20000) {
+    lockHintAt = now;
+    showToast(`🔒 ${ZONE_NAMES[zone] ?? 'Эта зона'} — гладить откроется на уровне ${TIER_NAMES[ti]} 💗`);
+  }
+}
+function floatLock(x, y) {
+  const el = document.createElement('div');
+  el.className = 'float-heart float-lock';
+  el.textContent = '🔒';
+  el.style.left = `${x + (Math.random() - 0.5) * 24}px`;
+  el.style.top = `${y - 10}px`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1100);
+}
 function floatHeart(x, y) {
   const el = document.createElement('div');
   el.className = 'float-heart';
