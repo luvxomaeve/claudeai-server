@@ -731,17 +731,40 @@ function renderLoveCard() {
   });
   lmDev.hidden = !(devMode || !window.WAIFU_RELEASE);
 }
+let devSuppressClick = false;
+function enableDev() {
+  devSuppressClick = true; // клик после касания не должен закрыть окошко
+  if (devMode) { showToast('🛠 Режим разработчика уже включён'); return; }
+  devMode = true;
+  devTaps = [];
+  try { localStorage.setItem(DEV_KEY, '1'); } catch { /* ignore */ }
+  wakeUi();
+  // Открываем окошко после текущего касания (иначе оно сразу закроется «тапом мимо»).
+  setTimeout(() => { renderLoveCard(); loveMenu.hidden = false; }, 60);
+  showToast('🛠 Режим разработчика: «Макс» и «Сброс» в окошке прогресса');
+}
+// Секрет: 7 быстрых касаний по сердечку (шкала сверху или 💗 в окошке) или удержание 3 с.
+let devHold = 0;
+// Ловим на всём окне по месту сердечка: даже если кнопки спрятались (через 4 с без касаний),
+// касание туда всё равно считается.
+window.addEventListener('pointerdown', (e) => {
+  const t = e.target;
+  const r = $('affection').getBoundingClientRect();
+  const onBadge = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  if (!onBadge && !t.closest?.('.lm-head')) return;
+  if (t.closest?.('#love-menu') && !t.closest('.lm-head')) return;
+  const now = performance.now();
+  devTaps = devTaps.filter((x) => now - x < 10000);
+  devTaps.push(now);
+  if (devTaps.length >= 7) enableDev();
+  clearTimeout(devHold);
+  devHold = setTimeout(enableDev, 3000);
+}, true);
+for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, () => clearTimeout(devHold), true);
 $('affection').addEventListener('click', (e) => {
   e.stopPropagation();
-  const now = performance.now();
-  devTaps = devTaps.filter((t) => now - t < 4000);
-  devTaps.push(now);
-  if (devTaps.length >= 7 && !devMode) {
-    devMode = true;
-    devTaps = [];
-    try { localStorage.setItem(DEV_KEY, '1'); } catch { /* ignore */ }
-    showToast('🛠 Режим разработчика: «Макс» и «Сброс» в окошке прогресса');
-  }
+  if (e.target.closest('#love-menu')) return;
+  if (devSuppressClick) { devSuppressClick = false; loveMenu.hidden = false; renderLoveCard(); return; }
   loveMenu.hidden = !loveMenu.hidden;
   if (!loveMenu.hidden) { renderLoveCard(); renderBoost(); }
   document.body.classList.toggle('love-open', !loveMenu.hidden);
