@@ -102,6 +102,7 @@ window.addEventListener('resize', resize);
 let character = null;
 let fullBody = false;
 let camTween = 1;
+var autoSmoothCam = false; // «Авто»: камера не прыгает в новое положение, а плавно доезжает (везде)
 const camFrom = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
 const camTo = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
 
@@ -277,6 +278,7 @@ function applyOrbit() {
   if (freeCam) { applyFree(); return; }
   orbitTarget(camTo);
   camTween = 1;
+  if (autoSmoothCam) return; // доедет плавно в updateCamera
   camera.position.copy(camTo.pos);
   cameraLookAt.copy(camTo.look);
   camera.lookAt(cameraLookAt);
@@ -348,8 +350,17 @@ function updateCamera(dt) {
     camSitSeen = character.sitS;
     applyOrbit();
   }
-  if (camTween >= 1) return;
-  camTween = Math.min(1, camTween + dt / 0.6);
+  if (camTween >= 1) {
+    if (autoSmoothCam) {
+      // «Авто»: любое движение камеры (поворот, щипок, сдвиг, слежение за ней) — мягко, без рывков.
+      const a = 1 - Math.exp(-dt * 9);
+      camera.position.lerp(camTo.pos, a);
+      cameraLookAt.lerp(camTo.look, a);
+      camera.lookAt(cameraLookAt);
+    }
+    return;
+  }
+  camTween = Math.min(1, camTween + dt / (autoSmoothCam ? 0.9 : 0.6));
   const k = camTween < 0.5 ? 2 * camTween * camTween : 1 - Math.pow(-2 * camTween + 2, 2) / 2;
   camera.position.lerpVectors(camFrom.pos, camTo.pos, k);
   cameraLookAt.lerpVectors(camFrom.look, camTo.look, k);
@@ -1359,8 +1370,7 @@ function endPointer(e) {
           if (unlocked('wardrobe') && PIECE_SOURCES.length) { selfDressTimer = 0; showToast('👗 Переодевается…'); }
           else showToast('🔒 Гардероб откроется позже');
         } else {
-          setFullBody(!fullBody);
-          showToast(fullBody ? 'В полный рост' : 'Крупный план');
+          autoReturn();
         }
       } else autoTap = { t: now, x: e.clientX, y: e.clientY, her: !!herTap };
     } else autoTap = null;
@@ -4243,6 +4253,7 @@ document.body.appendChild(autoExit);
 function setAutoMode(on) {
   if (on && poseMode) setPoseMode(false);
   autoMode = on;
+  autoSmoothCam = on;
   autoRec = null; autoRepOffer = null; renderAutoRep();
   if (character) character.autoSleep = on;
   if (!on && character && !poseMode) {
@@ -4280,7 +4291,8 @@ autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
   + '<span>🙇 Ведёшь вверх-вниз по груди и лицу — наклон / прогиб</span>'
   + '<span>🔁 Подвигал туда-сюда — предложит повторить</span>'
   + '<span>🎥 По фону — камера вокруг неё; двумя пальцами — ближе/дальше и сдвиг</span>'
-  + '<span>👗 Двойной тап по ней — переоденется · по фону — крупно / в рост</span>';
+  + '<span>👗 Двойной тап по ней — переоденется</span>'
+  + '<span>↩️ Двойной тап по фону — всё вернётся как было</span>';
 document.body.appendChild(autoHint);
 let autoHintTimer = 0;
 function showAutoHint() {
@@ -4327,7 +4339,7 @@ let autoLoopT = performance.now();
     const o = character.bodyOffset;
     if (!autoMode || poseMode || reps.home.on) autoBendTarget = null;
     else {
-      o.hipsRotX += (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * 11)); // плотно за пальцем, но без рывков
+      o.hipsRotX += (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * (poseDrag ? 11 : 3.5))); // за пальцем — плотно, сама — неспешно
       o.spineX = bendSpine(o.hipsRotX);
       if (!poseDrag && Math.abs(autoBendTarget - o.hipsRotX) < 0.004) autoBendTarget = null;
     }
@@ -4357,6 +4369,20 @@ function renderAutoRep() {
   autoRepBtn.classList.toggle('active', playing);
   autoRepBtn.classList.toggle('offer', !playing && !!autoRepOffer);
   autoRepBtn.textContent = playing ? '✕ отмена' : '🔁 Повторить';
+}
+// Двойной тап по фону в «Авто»: всё плавно возвращается как было — она встаёт и выпрямляется,
+// камера снова «приклеена» к ней в обычном виде спереди.
+function autoReturn() {
+  if (reps.home.on) { setRepeat(false, true); }
+  autoRec = null; autoRepOffer = null; renderAutoRep();
+  stopAuto(true);
+  camEase.yaw = 0; camEase.pitch = 0;
+  character.wake?.(2);
+  character.sitRate = 1;
+  if (character.sit > 0.01) sitBy(-character.sit / 0.004);
+  autoBendTarget = 0;
+  resetView();
+  showToast('↩️ Как было');
 }
 // Свайп-команда в «Авто». dir: +1 — вниз, −1 — вверх.
 // По груди/плечам/лицу — наклон вперёд ↔ прогиб назад (по ступенькам); по животу и ногам — ниже ↔ выше
