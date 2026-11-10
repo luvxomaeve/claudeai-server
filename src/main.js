@@ -547,16 +547,27 @@ const tier = () => (love >= 500 ? 2 : love >= 150 ? 1 : 0);
 
 const LEVEL_UP_LINES = ['', 'Мы ведь уже знакомы~', 'Слушай, а с тобой весело!', 'Ты мне нравишься, правда-правда~',
   'Кажется… ты мне правда нравишься ♥', 'Я тебя люблю… вот. Сказала ♥', 'Ты — самый родной ♥♥♥'];
+// Самый высокий достигнутый уровень: открытые на нём функции не закрываются,
+// даже если симпатия потом упала (сбрасывает только «Сброс»).
+let reachedLvl = 0;
+try { reachedLvl = Number(localStorage.getItem('waifu-reached')) || 0; } catch { /* ignore */ }
+reachedLvl = Math.max(reachedLvl, levelOf(love)); // уже набранная симпатия тоже считается
+try { localStorage.setItem('waifu-reached', String(reachedLvl)); } catch { /* ignore */ }
 function setLove(v, silent = false) {
   const before = levelOf(love);
+  const reachedBefore = Math.max(reachedLvl, before);
   love = THREE.MathUtils.clamp(v, 0, LOVE_MAX);
   try { localStorage.setItem(STORAGE_KEY, String(love)); } catch { /* ignore */ }
-  renderAffection();
   const after = levelOf(love);
+  if (after > reachedLvl) {
+    reachedLvl = after;
+    try { localStorage.setItem('waifu-reached', String(reachedLvl)); } catch { /* ignore */ }
+  }
+  renderAffection();
   renderLocks();
   if (!silent && after > before) {
     say(LEVEL_UP_LINES[after], 'happy');
-    const opened = FEATURES.filter((f) => f.lvl === after && !adOpen(f.id));
+    const opened = after > reachedBefore ? FEATURES.filter((f) => f.lvl === after && !adOpen(f.id)) : [];
     if (opened.length) setTimeout(() => showToast(`🔓 Открыто: ${opened.map((f) => f.name).join(', ')}`), 2200);
     $('affection').classList.remove('levelup');
     void $('affection').offsetWidth;
@@ -585,7 +596,7 @@ const adOpen = (id) => (adUnlocked[id] ?? 0) > Date.now();
 function unlocked(id) {
   const f = FEATURES.find((x) => x.id === id);
   if (!f) return true;
-  return levelOf(love) >= f.lvl || adOpen(id);
+  return Math.max(levelOf(love), reachedLvl) >= f.lvl || adOpen(id);
 }
 // Время вышло — замочки возвращаются (проверка раз в 5 с).
 let lockSig = '';
@@ -720,7 +731,7 @@ function renderLoveCard() {
     const feats = FEATURES.filter((f) => f.lvl === i);
     const items = feats.map((f) => {
       const open = unlocked(f.id);
-      const byAd = open && i > l;
+      const byAd = open && i > Math.max(l, reachedLvl);
       return `<li class="${open ? 'open' : ''}">${open ? '✓' : '🔒'} ${f.name}${byAd ? ' <em>(за рекламу)</em>' : ''}</li>`;
     }).join('');
     const pct = state === 'cur' && next ? Math.round(((love - lv.min) / (next.min - lv.min)) * 100) : state === 'done' ? 100 : 0;
@@ -801,12 +812,10 @@ boostBtn.addEventListener('click', (e) => {
 $('affection').addEventListener('click', renderBoost, true);
 setInterval(() => { if (!$('love-menu').hidden) renderBoost(); }, 10000);
 {
-  const mx = document.createElement('button'); mx.id = 'love-max'; mx.textContent = '♥ Макс';
   const rs = document.createElement('button'); rs.id = 'love-reset'; rs.textContent = 'Сброс';
-  lmDev.append(mx, rs);
+  lmDev.append(rs);
 }
-$('love-max').addEventListener('click', (e) => { e.stopPropagation(); setLove(LOVE_MAX); $('love-menu').hidden = true; showToast('♥ Максимум'); });
-$('love-reset').addEventListener('click', (e) => { e.stopPropagation(); setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
+$('love-reset').addEventListener('click', (e) => { e.stopPropagation(); reachedLvl = 0; try { localStorage.setItem('waifu-reached', '0'); } catch { /* ignore */ } setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#affection, #love-menu')) $('love-menu').hidden = true; });
 renderAffection();
 // В релизе (Яндекс Игры) кнопки «Макс» нет — симпатию надо заработать.
