@@ -2155,11 +2155,13 @@ sitSlider.addEventListener('pointermove', (e) => {
   // Повтор идёт — полоса не перезаписывает его, а сдвигает: глубже/выше, не останавливая.
   if (loopNoteMove() === 'shift') {
     const r = curRep();
+    repRanges(r);
     if (poseMode) {
-      r.bendOff = THREE.MathUtils.clamp((r.bendOff ?? 0) + (dv / sitMax()) * BEND_RANGE, -BEND_RANGE, BEND_RANGE);
+      // Сдвиг не выводит движение за края — иначе оно «упирается» и залипает.
+      r.bendOff = THREE.MathUtils.clamp((r.bendOff ?? 0) + (dv / sitMax()) * BEND_RANGE, BEND_MIN - r.bendLo, BEND_MAX - r.bendHi);
       showLabel(dv > 0 ? 'Повтор: наклон глубже' : 'Повтор: наклон выше');
     } else {
-      r.sitOff = THREE.MathUtils.clamp((r.sitOff ?? 0) + dv, -sitMax(), sitMax());
+      r.sitOff = THREE.MathUtils.clamp((r.sitOff ?? 0) + dv, -r.sitLo, Math.max(-r.sitLo, sitMax() - r.sitHi));
       showLabel(dv > 0 ? 'Повтор: ниже' : 'Повтор: выше');
     }
     return;
@@ -3604,6 +3606,17 @@ function movedPoints(samples) {
     out[key] = vals.some((v) => Math.hypot(v[0] - f[0], v[1] - f[1], v[2] - f[2]) > 0.01);
   }
   return out;
+}
+// Края записанного движения: до куда его можно сдвигать полосой.
+function repRanges(r) {
+  if (r.rangeFor === r.samples) return;
+  r.rangeFor = r.samples;
+  const S = r.samples ?? [];
+  const sit = S.map((x) => x.sit), bend = S.map((x) => x.bend);
+  r.sitLo = sit.length ? Math.min(...sit) : 0;
+  r.sitHi = sit.length ? Math.max(...sit) : 0;
+  r.bendLo = bend.length ? Math.min(...bend) : 0;
+  r.bendHi = bend.length ? Math.max(...bend) : 0;
 }
 const sitMovedIn = (S) => { const v = S.map((x) => x.sit); return Math.max(...v) - Math.min(...v) > 0.02; };
 function playMove(r, mv) {
