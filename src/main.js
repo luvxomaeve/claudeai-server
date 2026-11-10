@@ -1629,7 +1629,7 @@ function triggerReaction(zone, hit, e) {
   }
 }
 
-// Зона пока не даёт симпатию: вместо сердечка всплывает замочек + подсказка, когда откроется.
+// Зона пока не даёт симпатию: ей «всё равно» — вместо сердечек всплывают 😐 + подсказка, когда понравится.
 const ZONE_NAMES = { face: 'Лицо', arm: 'Плечи', belly: 'Живот', legs: 'Ноги', body: 'Грудь', hand: 'Рука', hair: 'Волосы' };
 const TIER_NAMES = ['', '«Друг»', '«Близкий человек»'];
 let lockHintAt = 0;
@@ -1639,13 +1639,14 @@ function lockedStroke(zone, r, e) {
   const now = performance.now();
   if (ti > 0 && now - lockHintAt > 20000) {
     lockHintAt = now;
-    showToast(`🔒 ${ZONE_NAMES[zone] ?? 'Эта зона'} — гладить откроется на уровне ${TIER_NAMES[ti]} 💗`);
+    const what = { face: 'лицо понравится', arm: 'плечи понравятся', belly: 'живот понравится', legs: 'ноги понравятся', body: 'грудь понравится' }[zone] ?? 'это понравится';
+    showToast(`😐 Ей пока всё равно — ${what} на уровне ${TIER_NAMES[ti]} 💗`);
   }
 }
 function floatLock(x, y) {
   const el = document.createElement('div');
-  el.className = 'float-heart float-lock';
-  el.textContent = '🔒';
+  el.className = 'float-heart float-meh';
+  el.textContent = Math.random() < 0.7 ? '😐' : '😶';
   el.style.left = `${x + (Math.random() - 0.5) * 24}px`;
   el.style.top = `${y - 10}px`;
   document.body.appendChild(el);
