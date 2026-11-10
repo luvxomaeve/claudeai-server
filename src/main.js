@@ -1046,9 +1046,9 @@ canvas.addEventListener('pointerdown', (e) => {
     bgSwipe = { sy: e.clientY, sx: e.clientX, lastX: e.clientX, lastY: e.clientY, axis: null };
     if (autoMode) {
       // Рядом с ней (в пределах пальца) или сразу после поглаживания — это промах мимо неё, а не жест камерой.
-      bgSwipe.near = performance.now() - lastOnHerAt < 900;
+      bgSwipe.near = performance.now() - lastOnHerAt < 450;
       for (let a = 0; a < 8 && !bgSwipe.near; a++) {
-        if (zoneAt({ clientX: e.clientX + Math.cos(a * Math.PI / 4) * 34, clientY: e.clientY + Math.sin(a * Math.PI / 4) * 34 }, true)) bgSwipe.near = true;
+        if (zoneAt({ clientX: e.clientX + Math.cos(a * Math.PI / 4) * 16, clientY: e.clientY + Math.sin(a * Math.PI / 4) * 16 }, true)) bgSwipe.near = true;
       }
     }
     return;
@@ -1190,32 +1190,29 @@ canvas.addEventListener('pointermove', (e) => {
     // Пустое место в обычном режиме — камера свободно вращается (со всех ракурсов).
     // В «Авто» одним пальцем: вбок — вокруг неё, вверх/вниз — ближе/дальше.
     if (autoMode) {
-      // Палец соскользнул с неё или начал вплотную к ней — камеру не трогаем (она не «уезжает» при поглаживании).
+      // Палец соскользнул с неё (только что гладил) — камеру не трогаем, она не «уезжает» при поглаживании.
       if (bgSwipe.near) return;
-      // Сначала понимаем жест (вбок или вверх-вниз) и дальше держим только его — без случайного зума при повороте.
-      if (!bgSwipe.axis) {
-        const ax = Math.abs(e.clientX - bgSwipe.sx), ay = Math.abs(e.clientY - bgSwipe.sy);
-        if (Math.max(ax, ay) < 14) return;
-        bgSwipe.axis = ax >= ay ? 'x' : 'y';
-        bgSwipe.lastX = e.clientX; bgSwipe.lastY = e.clientY;
-      }
-      if (bgSwipe.axis === 'x') rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, 0);
-      else zoomBy(Math.exp((e.clientY - bgSwipe.lastY) * 0.003));
+      // Свободно вокруг неё: вбок — по кругу, вверх-вниз — сверху/снизу. Плавно (см. camEase).
+      camEase.yaw += -(e.clientX - bgSwipe.lastX) * 0.009;
+      camEase.pitch += (e.clientY - bgSwipe.lastY) * 0.0045;
     } else rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, (e.clientY - bgSwipe.lastY) * 0.005);
     bgSwipe.lastX = e.clientX;
     bgSwipe.lastY = e.clientY;
     return;
   }
   if (stroking && autoMode && !poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
-    // «Авто» — управление свайпами: быстрый свайп по ней вверх/вниз — команда (она сама плавно
-    // делает движение), медленно водишь в любую сторону — просто гладишь, ничего не срывается.
-    stroking.t0 ??= performance.now();
+    // «Авто»: повёл по ней вверх-вниз — ведёшь её саму (палец = положение, сколько провёл — столько и сдвинулась):
+    // выше пояса — наклон вперёд / прогиб назад, ниже пояса — присесть / сесть / лечь / встать.
+    // Вбок или по кругу — гладишь.
     const dx = e.clientX - stroking.sx, dy = e.clientY - stroking.sy;
-    if (Math.abs(dy) > 56 && Math.abs(dy) > Math.abs(dx) * 1.7 && performance.now() - stroking.t0 < 260) {
-      // По лицу и плечам — наклон/прогиб; по всему остальному телу — сесть/встать.
-      const upper = ['face', 'arm'].includes(stroking.hit.zone);
+    if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.25) {
+      const waist = character.bones.spine?.getWorldPosition(new THREE.Vector3()).y ?? 0;
+      const upper = stroking.hit.point ? stroking.hit.point.y > waist + 0.04 * (character.scale ?? 1) : ['body', 'arm', 'face'].includes(stroking.hit.zone);
+      if (reps.home.on) { setRepeat(false, true); renderAutoRep(); } // идёт повтор — уступает руке
+      stopAuto(true);
       stroking = null;
-      autoSwipe(upper, dy > 0 ? 1 : -1);
+      poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now(), auto: true, dir: 0, run: 0, turns: 0 };
+      showLabel(upper ? 'Ниже — наклон, выше — прогиб' : 'Ниже — сесть / лечь, выше — встать');
       return;
     }
   } else if (stroking && poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
@@ -2536,14 +2533,22 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
-  if (autoMode && !poseMode && (poseDrag.kind === 'benddrag' || poseDrag.kind === 'sitdrag')) autoDragAt = performance.now();
+  if (poseDrag.auto) {
+    autoDragAt = performance.now();
+    lastOnHerAt = autoDragAt;
+    // Сколько раз сменил направление (туда-сюда) — по этому понимаем, что её «подвигали».
+    const d = e.clientY - poseDrag.y;
+    if (Math.sign(d) && Math.sign(d) !== poseDrag.dir) { if (poseDrag.dir && poseDrag.run > 24) poseDrag.turns++; poseDrag.dir = Math.sign(d); poseDrag.run = 0; }
+    poseDrag.run += Math.abs(d);
+    if (autoRec) autoRec.turns = Math.max(autoRec.turns ?? 0, poseDrag.turns);
+  }
   if (poseDrag.kind === 'benddrag') {
     // Полная амплитуда наклона и прогиба, как у левой полосы во вкладке «Позы».
     lastOnHerAt = performance.now();
     character.effortT = 0.35;
     character.dragBoostT = 0.5;
     // Палец задаёт цель, тело плавно догоняет её каждый кадр (без рывков от неровных касаний).
-    const bend = THREE.MathUtils.clamp((autoBendTarget ?? character.bodyOffset.hipsRotX) + ((e.clientY - poseDrag.y) / (window.innerHeight * 0.6)) * BEND_RANGE, BEND_MIN, BEND_MAX);
+    const bend = THREE.MathUtils.clamp((autoBendTarget ?? character.bodyOffset.hipsRotX) + ((e.clientY - poseDrag.y) / (window.innerHeight * 0.5)) * BEND_RANGE, BEND_MIN, BEND_MAX);
     poseDrag.y = e.clientY;
     autoBendTarget = bend;
     showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
@@ -4269,15 +4274,13 @@ function setAutoMode(on) {
 const autoHint = document.createElement('div');
 autoHint.id = 'auto-hint';
 autoHint.hidden = true;
-autoHint.innerHTML = '<b>✨ Авто — всё одним пальцем</b>'
-  + '<span>👆 Медленно водишь — гладишь</span>'
-  + '<span>👇 Быстрый свайп вниз/вверх по телу — ниже / выше (сесть, лечь, встать)</span>'
-  + '<span>🙇 Быстрый свайп вниз/вверх по лицу или плечам — наклон / прогиб</span>'
-  + '<span>🔁 Пара свайпов туда-сюда — предложит повторить</span>'
-  + '<span>👗 Двойной тап по ней — переоденется</span>'
-  + '<span>↔️ По фону вбок — камера вокруг</span>'
-  + '<span>🔍 По фону вверх-вниз — ближе / дальше</span>'
-  + '<span>⤢ Двойной тап по фону — крупно / в полный рост</span>';
+autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
+  + '<span>👆 Водишь по ней вбок — гладишь</span>'
+  + '<span>↕️ Ведёшь вверх-вниз по ногам и животу — сесть / лечь / встать</span>'
+  + '<span>🙇 Ведёшь вверх-вниз по груди и лицу — наклон / прогиб</span>'
+  + '<span>🔁 Подвигал туда-сюда — предложит повторить</span>'
+  + '<span>🎥 По фону — камера вокруг неё; двумя пальцами — ближе/дальше и сдвиг</span>'
+  + '<span>👗 Двойной тап по ней — переоденется · по фону — крупно / в рост</span>';
 document.body.appendChild(autoHint);
 let autoHintTimer = 0;
 function showAutoHint() {
@@ -4303,6 +4306,7 @@ autoRepBtn.id = 'auto-rep';
 autoRepBtn.hidden = true;
 document.body.appendChild(autoRepBtn);
 for (const ev of ['pointerdown', 'touchstart']) autoRepBtn.addEventListener(ev, (e) => e.stopPropagation());
+const camEase = { yaw: 0, pitch: 0 }; // сколько камере ещё довернуться
 let autoBendTarget = null; // куда палец ведёт наклон; тело догоняет плавно
 let autoDragAt = 0;
 function autoRecNote() {
@@ -4323,16 +4327,19 @@ let autoLoopT = performance.now();
     const o = character.bodyOffset;
     if (!autoMode || poseMode || reps.home.on) autoBendTarget = null;
     else {
-      // Плавный ход к цели: разгон и мягкое торможение (не быстрее ~1.6 рад/с).
-      const step = (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * 4.5));
-      o.hipsRotX += THREE.MathUtils.clamp(step, -1.6 * dt, 1.6 * dt);
+      o.hipsRotX += (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * 11)); // плотно за пальцем, но без рывков
       o.spineX = bendSpine(o.hipsRotX);
       if (!poseDrag && Math.abs(autoBendTarget - o.hipsRotX) < 0.004) autoBendTarget = null;
     }
   }
   // Пишем, пока она выполняет команды (садится/встаёт, наклоняется) — ровно, по кадрам.
-  if (autoMode && !poseMode && !reps.home.on && (autoBendTarget != null || Math.abs(character.sit - character.sitS) > 0.05)) autoDragAt = now;
-  if (autoMode && !reps.home.on && now - autoDragAt < 200 && autoSwipes.length) autoRecNote();
+  if (autoMode && !reps.home.on && now - autoDragAt < 300) autoRecNote();
+  // Камера: палец задаёт поворот, камера доезжает плавно и чуть «докатывается».
+  if (Math.abs(camEase.yaw) + Math.abs(camEase.pitch) > 1e-5) {
+    const a = 1 - Math.exp(-dt * 13);
+    rotateBy(camEase.yaw * a, camEase.pitch * a);
+    camEase.yaw *= 1 - a; camEase.pitch *= 1 - a;
+  }
   autoRepCheck(now);
   if (!autoRepBtn.hidden && character.bones?.head) {
     const v = character.bones.head.getWorldPosition(new THREE.Vector3());
@@ -4382,13 +4389,14 @@ function autoSwipe(upper, dir) {
 }
 // Сделал подряд пару свайпов (подвигал её туда-сюда) — когда она закончит, предложим повторить.
 function autoRepCheck(now) {
-  if (!autoMode || !autoRec || reps.home.on || pointerActive || now - autoRec.last < 1100) return;
+  if (!autoMode || !autoRec || reps.home.on || pointerActive || now - autoRec.last < 500) return;
   const rec = autoRec;
   autoRec = null;
   const n = autoSwipes.filter((t) => t >= rec.start - 50).length;
   autoSwipes = [];
   const S = rec.samples;
-  if (n < 2 || S.length < 8) return;
+  if ((rec.turns ?? 0) < 1 && n < 2) return;
+  if (S.length < 8) return;
   const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
   if (S[S.length - 1].t < 0.6 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
   autoRepOffer = rec;
@@ -4421,7 +4429,9 @@ function updateAutoCam(dt) {
   if (!autoMode || !character || pointerActive || freeCam || faceCam) return;
   if (performance.now() - autoTouchAt < 3000) return;
   autoPhase += dt * 0.16;
-  camYaw = (camYaw + Math.cos(autoPhase) * 0.04 * dt) % (Math.PI * 2);
+  // Покачивание включается мягко (без рывка после касания).
+  const swayK = THREE.MathUtils.smoothstep(performance.now() - autoTouchAt, 3000, 8000);
+  camYaw = (camYaw + Math.cos(autoPhase) * 0.04 * dt * swayK) % (Math.PI * 2);
   applyOrbit();
 }
 // ---------- Живые моменты ----------
