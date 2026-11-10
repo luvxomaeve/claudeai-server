@@ -4073,6 +4073,35 @@ onAdPause((on) => {
   for (const a of document.querySelectorAll('audio')) { if (on) a.pause(); }
   try { if (on) window.__waifuAudio?.suspend?.(); else window.__waifuAudio?.resume?.(); } catch { /* ignore */ }
 });
+// ---------- Живые моменты ----------
+// Когда её не трогают, она не просто говорит фразу, а «живёт»: смеётся, дуется, потягивается,
+// поправляет волосы, смущается… Эмоция + движение + реплика. Не повторяется подряд.
+const EMOTES = [
+  { id: 'giggle', expr: ['happy', 0.75, 2.4], motion: 'bounce', lines: ['Хи-хи~', 'Ахах, вспомнила смешное~', 'Хи, ты забавный!'] },
+  { id: 'stretch', expr: ['relaxed', 0.6, 3], motion: 'stretch', lines: ['*потягивается* Ммм~', 'Ох, затекла спинка…', 'Ааах~ хорошо!'] },
+  { id: 'hair', expr: ['relaxed', 0.4, 3], motion: 'touchHair', lines: ['Причёска не растрепалась?', 'Волосы лезут в глаза~', 'Как я выгляжу?'] },
+  { id: 'pout', expr: ['angry', 0.4, 2.6], motion: 'turnAway', lines: ['Хмф… обрати на меня внимание!', 'Ну и ладно. Не трогай тогда.', 'Скучно без тебя…'], minTier: 1 },
+  { id: 'shy', expr: ['relaxed', 0.55, 2.8], motion: 'clasp', lines: ['Чего ты так смотришь?.. 😳', 'Не смотри так, я смущаюсь~', 'Хи… что?'] },
+  { id: 'look', expr: ['surprised', 0.3, 1.6], motion: 'lookAround', lines: ['Хм? Показалось…', 'Ты слышал?', 'А? Что там?'] },
+  { id: 'nails', expr: ['relaxed', 0.35, 3], motion: 'nails', lines: ['Надо бы маникюр обновить~', 'Хм… этот цвет мне идёт?', '*рассматривает ногти*'] },
+  { id: 'sigh', expr: ['sad', 0.35, 2.4], motion: 'sigh', lines: ['Эх…', 'О чём бы помечтать~', 'Тихо сегодня…'] },
+  { id: 'wink', expr: ['happy', 0.5, 1.6], wink: true, motion: 'tiltHead', lines: ['Хи~ 😉', 'Я тебя вижу~', 'Поймал мой взгляд?'], minTier: 1 },
+  { id: 'hip', expr: ['happy', 0.4, 3.5], motion: 'handOnHip', lines: ['Ну что, чем займёмся?', 'Я готова к приключениям!', 'Придумай что-нибудь~'] },
+  { id: 'love', expr: ['happy', 0.8, 3], motion: 'sway', lines: ['С тобой так хорошо ♥', 'Я рада, что ты рядом~', 'Останься подольше, ладно? ♥'], minTier: 2 },
+];
+let emoteLast = null;
+function idleEmote() {
+  const t = tier();
+  const opts = EMOTES.filter((e) => e.id !== emoteLast && (e.minTier ?? 0) <= t);
+  const e = opts[Math.floor(Math.random() * opts.length)];
+  emoteLast = e.id;
+  character.setExpression(e.expr[0], e.expr[1], e.expr[2]);
+  // Поза выставлена руками, идёт повтор или танец — без движений тела, только лицо и слова.
+  const busy = poseMode || character.mixer || curRep().on;
+  if (!busy) character.playMotion(e.motion);
+  if (e.wink) character.wink();
+  say(pick(e.lines));
+}
 // ---------- Желания ----------
 // Раз в пару минут она сама чего-то хочет. Выполнил — радуется и даёт бонус симпатии;
 // не успел — слегка дуется (без штрафа). Просит только то, что уже открыто.
@@ -4266,6 +4295,7 @@ function tick() {
     if (idleTime > 18) {
       idleTime = 0;
       if (character.sleep > 0.3) say(pick(['zzz…', '*тихо сопит*', 'Ммм… 😴']));
+      else if (Math.random() < 0.6) idleEmote();
       else say(pick(IDLE_LINES[tier()]), tier() === 2 ? 'relaxed' : 'sad');
     }
   }

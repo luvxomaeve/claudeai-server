@@ -263,6 +263,7 @@ export class Character {
     this.loop = null; // встроенная анимация: cute | flirty | shy | happy | dance2
     this.armFix = { left: { need: 0, dir: -1 }, right: { need: 0, dir: -1 } };
     this.stabilizeSprings();
+    this.tuneHair();
 
     this.zones = ZONE_DEFS
       .map((d) => ({ ...d, node: vrm.humanoid.getRawBoneNode(d.bone), center: new THREE.Vector3() }))
@@ -1385,6 +1386,7 @@ export class Character {
 
   finishFrame(dt) {
     this.restorePokes();
+    this.hairInertia(dt);
     if (this.dancing && !this.mixer) this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.5);
     this.updateExpressions(dt);
     this.vrm.update(dt);
@@ -2963,6 +2965,61 @@ export class Character {
       fix.need += (need - fix.need) * k;
       fix.dir += (dir - fix.dir) * (1 - Math.exp(-dt * 6));
       this.applyUpperArm(side, pose, fix.need * 0.6, fix.need * fix.dir);
+    }
+  }
+
+  // Волосы: у VRoid они по умолчанию «деревянные» (жёсткие и сильно задемпфированы).
+  // Делаем мягче к кончикам и чуть тяжелее — висят естественно и качаются с запаздыванием.
+  tuneHair() {
+    const joints = this.vrm.springBoneManager?.joints;
+    if (!joints) return;
+    const hair = [...joints].filter((j) => j.bone && /hair/i.test(j.bone.name));
+    const bones = new Set(hair.map((j) => j.bone));
+    const depthOf = (b) => { let d = 0; for (let p = b.parent; p; p = p.parent) if (bones.has(p)) d++; return d; };
+    let maxD = 0;
+    for (const j of hair) { j.userData ??= {}; j.userData.hairDepth = depthOf(j.bone); maxD = Math.max(maxD, j.userData.hairDepth); }
+    for (const j of hair) {
+      const k = maxD ? j.userData.hairDepth / maxD : 0; // 0 — у корня, 1 — кончик
+      j.settings.stiffness = Math.max(0.22, j.settings.stiffness * (0.85 - 0.4 * k));
+      j.settings.dragForce = THREE.MathUtils.clamp(j.settings.dragForce * (0.8 - 0.25 * k), 0.2, 0.4);
+      j.userData.hairBase = Math.max(j.settings.gravityPower, 0.1) + 0.06 * k;
+      j.settings.gravityPower = j.userData.hairBase;
+    }
+    this.hairJoints = hair;
+    this.hairSim = null;
+  }
+
+  // Инерция волос: голова двигается или поворачивается — пряди запаздывают и качаются,
+  // потом догоняют; плюс еле заметный «воздух». Тяжесть всегда в основном вниз.
+  hairInertia(dt) {
+    const hair = this.hairJoints;
+    const head = this.bones.head;
+    if (!hair?.length || !head || !(dt > 0)) return;
+    // Точка за затылком: ловит и перемещение головы, и её повороты.
+    const p = this._hairP ??= new THREE.Vector3();
+    p.set(0, -0.12 * this.scale, -0.12 * this.scale).applyQuaternion(head.getWorldQuaternion(this._hairQ ??= new THREE.Quaternion()));
+    p.add(head.getWorldPosition(this._hairH ??= new THREE.Vector3()));
+    if (!this.hairSim) this.hairSim = { p: p.clone(), v: new THREE.Vector3(), t: Math.random() * 10 };
+    const hs = this.hairSim;
+    const vel = (this._hairV ??= new THREE.Vector3()).copy(p).sub(hs.p).divideScalar(dt);
+    hs.p.copy(p);
+    if (vel.length() > 3) vel.setLength(3); // телепорт/смена позы — без рывка
+    hs.v.lerp(vel, 1 - Math.exp(-dt * 9));
+    hs.t += dt;
+    const S = this.scale;
+    const hx = -hs.v.x / S * 0.55 + Math.sin(hs.t * 0.8) * 0.018 + Math.sin(hs.t * 2.1 + 1) * 0.008;
+    const hz = -hs.v.z / S * 0.55 + Math.cos(hs.t * 0.6) * 0.012;
+    const hy = THREE.MathUtils.clamp(-hs.v.y / S * 0.35, -0.12, 0.08); // резко вниз — волосы «взлетают» чуть-чуть
+    const g = this._hairG ??= new THREE.Vector3();
+    for (const j of hair) {
+      if (j.userData?.poke) continue; // её сейчас трогают — не перебиваем толчок от пальца
+      const base = j.userData.hairBase ?? 0.1;
+      const k = 0.5 + 0.5 * (j.userData.hairDepth ? 1 : 0);
+      g.set(hx * k, -base + hy * k, hz * k);
+      const lim = base * 2.2 + 0.1;
+      if (g.length() > lim) g.setLength(lim);
+      j.settings.gravityPower = g.length();
+      j.settings.gravityDir.copy(g).normalize();
     }
   }
 
