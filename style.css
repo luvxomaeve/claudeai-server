@@ -1436,3 +1436,23 @@ body.clean #clean-exit { display: grid; place-items: center; position: fixed; z-
   border-radius: 50%; background: #ff3b5c; box-shadow: 0 0 6px #ff3b5c;
 }
 body.ui-hidden #btn-pointmode { opacity: 0.35; }
+
+/* Подарок дня */
+#daily-pop { position: fixed; left: 50%; top: 44%; transform: translate(-50%, -50%); z-index: 55; width: min(340px, calc(100vw - 28px));
+  background: rgba(253, 244, 250, 0.97); backdrop-filter: blur(14px); border-radius: 22px; padding: 18px 16px 16px; text-align: center;
+  color: var(--ink); box-shadow: 0 14px 44px rgba(60, 20, 80, 0.38); animation: lmIn 0.25s ease; }
+#daily-pop[hidden] { display: none; }
+#daily-pop .dp-title { font-weight: 800; font-size: 19px; margin-bottom: 6px; }
+#daily-pop .dp-text { font-size: 13.5px; opacity: 0.85; margin-bottom: 12px; line-height: 1.35; }
+#daily-pop .dp-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 14px; }
+#daily-pop .dp-days span { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 7px 0 5px; border-radius: 12px; background: rgba(255, 255, 255, 0.6); }
+#daily-pop .dp-days b { font-size: 12.5px; }
+#daily-pop .dp-days i { font-style: normal; font-size: 8.5px; opacity: 0.6; }
+#daily-pop .dp-days .done { background: #c9efdf; color: #2f9e7a; }
+#daily-pop .dp-days .cur { background: linear-gradient(135deg, #ffb3d1, #c77dff); color: #fff; box-shadow: 0 3px 10px rgba(255, 111, 168, 0.45); transform: scale(1.08); }
+#daily-pop .dp-days .cur i { opacity: 0.9; }
+#daily-pop .dp-btns { display: flex; flex-direction: column; gap: 8px; }
+#daily-pop button { border: none; border-radius: 999px; padding: 11px 14px; font: inherit; font-weight: 700; font-size: 14px; background: rgba(255, 255, 255, 0.75); color: var(--ink); cursor: pointer; }
+#daily-pop button[hidden] { display: none; }
+#daily-pop button.primary { background: linear-gradient(90deg, var(--pink), #c77dff); color: #fff; }
+#love-menu .lm-head .lm-daily { color: var(--ink); opacity: 0.75; font-weight: 600; }
