@@ -2074,8 +2074,7 @@ function renderLieToggle() {
   if (character && allowLie) character.setLieStyle(lieMode);
   sitSlider.classList.toggle('no-lie', !allowLie);
   // Точки-отметки: стоит, присед, на коленях, боком, лёжа — по текущему пределу.
-  const marks = [0, 0.5, 0.8, 1.0, 1.3];
-  sitSlider.querySelectorAll('.track i').forEach((el, i) => { el.style.top = `${(marks[i] / sitMax()) * 100}%`; });
+  renderSitMarks();
 }
 $('lie-toggle').addEventListener('pointerdown', (e) => e.stopPropagation());
 // В режиме позы полоса умеет два дела: наклон (по умолчанию) или сесть/лечь, не ломая позу.
@@ -2202,8 +2201,25 @@ const BEND_MAX = 1.9; // наклон вперёд поглубже
 const BEND_RANGE = BEND_MAX - BEND_MIN;
 // Сколько изгиба берёт спина: вперёд — мягкая дуга, назад — глубокий прогиб (S-линия).
 function bendSpine(b) { return b >= 0 ? b * 0.55 : b * 1.25; }
+// Точки-отметки: стоит, присед, на коленях, боком, лёжа — только те, что в пределах полосы
+// (пока «сесть на пол» не открыто, полоса короче — нижние отметки прячем).
+var sitMarksFor = null; // var: renderLieToggle() вызывается при запуске раньше этой строки
+function renderSitMarks() {
+  const max = sitMax();
+  if (sitMarksFor === max) return;
+  sitMarksFor = max;
+  const marks = [0, 0.5, 0.8, 1.0, 1.3];
+  for (const sl of [sitSlider, $('sit-slider2')]) {
+    sl?.querySelectorAll('.track i').forEach((el, i) => {
+      const m = marks[i];
+      el.style.display = m == null || m > max + 1e-6 ? 'none' : '';
+      if (m != null) el.style.top = `${(m / max) * 100}%`;
+    });
+  }
+}
 function updateSitSlider() {
   if (!character) return;
+  renderSitMarks();
   // В режиме позы стоя — наклон; если она сидит/лежит — полоса поднимает/опускает её.
   const bendMode = poseMode;
   sitSlider2.style.setProperty('--k', THREE.MathUtils.clamp(character.sitS / sitMax(), 0, 1).toFixed(3));
