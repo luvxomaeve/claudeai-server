@@ -1158,7 +1158,8 @@ body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0p
 #love-menu #love-boost:disabled { opacity: 0.85; }
 #love-max { background: var(--pink) !important; color: #fff !important; }
 /* Окошко прогресса открыто — оно поверх всего, реплика не мешает. */
-body.love-open #hud { z-index: 60; }
+body.love-open #hud { z-index: 60; opacity: 1 !important; }
+body.love-open #affection, body.love-open #love-menu, body.love-open #love-menu * { pointer-events: auto !important; opacity: 1; }
 body.love-open #bubble { opacity: 0; }
 #hud { z-index: 9; }
 

@@ -706,7 +706,7 @@ const lmBtns = document.createElement('div');
 lmBtns.className = 'lm-btns';
 const lmDev = document.createElement('div');
 lmDev.className = 'lm-dev';
-loveMenu.append(lmHead, lmList, lmBtns, lmDev);
+loveMenu.append(lmHead, lmDev, lmBtns, lmList); // «Макс» — сразу под заголовком, без прокрутки
 function renderLoveCard() {
   const l = levelOf(love);
   const next = LEVELS[l + 1];
@@ -2420,7 +2420,7 @@ function wakeUi() {
   clearTimeout(uiIdleTimer);
   // Во вкладке «Позы» кнопок больше — прячем быстрее.
   uiIdleTimer = setTimeout(() => {
-    if (document.querySelector('.panel:not(.hidden)') || (!$('pose-list').hidden && !poseMode) || poseDrag || $('pose-save-form').hidden === false) { wakeUi(); return; }
+    if (document.querySelector('.panel:not(.hidden)') || (!$('pose-list').hidden && !poseMode) || poseDrag || $('pose-save-form').hidden === false || !$('love-menu').hidden) { wakeUi(); return; }
     document.body.classList.add('ui-hidden');
   }, poseMode ? 2500 : 4000);
 }
