@@ -1214,7 +1214,7 @@ canvas.addEventListener('pointermove', (e) => {
       // «Авто»: потянул за грудь/плечи/лицо — наклон вперёд или прогиб назад; за живот и ноги — сесть/встать.
       const upper = autoMode && !poseMode && ['body', 'arm', 'face'].includes(stroking.hit.zone);
       // «Авто»: идёт повтор, а ты снова взялся двигать её — повтор уступает, запомню новое движение.
-      if (autoMode && !poseMode && reps.home.on) { setRepeat(false); renderAutoRep(); }
+      if (autoMode && !poseMode && reps.home.on) { setRepeat(false, true); renderAutoRep(); }
       stroking = null;
       poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now() };
       showLabel(upper ? 'Ниже — наклон вперёд, выше — прогиб назад' : 'Ниже — сесть / лечь, выше — встать');
@@ -2528,17 +2528,16 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
-  if (autoMode && !poseMode && (poseDrag.kind === 'benddrag' || poseDrag.kind === 'sitdrag')) autoRecNote();
+  if (autoMode && !poseMode && (poseDrag.kind === 'benddrag' || poseDrag.kind === 'sitdrag')) autoDragAt = performance.now();
   if (poseDrag.kind === 'benddrag') {
     // Полная амплитуда наклона и прогиба, как у левой полосы во вкладке «Позы».
     lastOnHerAt = performance.now();
     character.effortT = 0.35;
     character.dragBoostT = 0.5;
-    const o = character.bodyOffset;
-    const bend = THREE.MathUtils.clamp(o.hipsRotX + ((e.clientY - poseDrag.y) / (window.innerHeight * 0.42)) * BEND_RANGE, BEND_MIN, BEND_MAX);
+    // Палец задаёт цель, тело плавно догоняет её каждый кадр (без рывков от неровных касаний).
+    const bend = THREE.MathUtils.clamp((autoBendTarget ?? character.bodyOffset.hipsRotX) + ((e.clientY - poseDrag.y) / (window.innerHeight * 0.6)) * BEND_RANGE, BEND_MIN, BEND_MAX);
     poseDrag.y = e.clientY;
-    o.hipsRotX = bend;
-    o.spineX = bendSpine(bend);
+    autoBendTarget = bend;
     showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
     return;
   }
@@ -3828,7 +3827,7 @@ function playMove(r, mv) {
   r.state = 'play';
   r.midFor = null;
 }
-function setRepeat(on) {
+function setRepeat(on, quiet = false) {
   if (!character) return;
   const r = curRep();
   r.on = on;
@@ -3843,7 +3842,7 @@ function setRepeat(on) {
   renderRep();
   // Включил — всегда с чистого листа: ждёт твоё новое движение.
   // Сохранённые движения — только из избранного (номерки рядом с кнопкой).
-  showToast(on ? 'Подвигай ползунком — я повторю 💗' : 'Стоп');
+  if (!quiet) showToast(on ? 'Подвигай ползунком — я повторю 💗' : 'Стоп');
 }
 // Кнопка повтора — над левым ползунком; рядом — избранные движения.
 const repFavsEl = document.createElement('div');
@@ -4236,6 +4235,7 @@ function setAutoMode(on) {
   if (!on && character && !poseMode) {
     // Вышел из «Авто» — наклон/прогиб плавно возвращается в ровное положение.
     const o = character.bodyOffset;
+    autoBendTarget = null;
     const iv = setInterval(() => {
       o.hipsRotX *= 0.82; o.spineX = bendSpine(o.hipsRotX);
       if (Math.abs(o.hipsRotX) < 0.01 || autoMode || poseMode) { if (!autoMode && !poseMode) { o.hipsRotX = 0; o.spineX = 0; } clearInterval(iv); }
@@ -4294,25 +4294,56 @@ autoRepBtn.id = 'auto-rep';
 autoRepBtn.hidden = true;
 document.body.appendChild(autoRepBtn);
 for (const ev of ['pointerdown', 'touchstart']) autoRepBtn.addEventListener(ev, (e) => e.stopPropagation());
+let autoBendTarget = null; // куда палец ведёт наклон; тело догоняет плавно
+let autoDragAt = 0;
 function autoRecNote() {
   const now = performance.now();
   if (!autoRec || now - autoRec.last > 700) autoRec = { start: now, samples: [] };
   autoRec.last = now;
   autoRec.samples.push({ t: (now - autoRec.start) / 1000, ...nowPose() });
 }
+// Каждый кадр: наклон плавно идёт к цели, движение пишется ровно (по кадрам, а не по касаниям),
+// плашка «Повторить» держится рядом с её головой и двигается вместе с ней.
+let autoLoopT = performance.now();
+(function autoLoop() {
+  requestAnimationFrame(autoLoop);
+  const now = performance.now(), dt = Math.min(0.05, (now - autoLoopT) / 1000);
+  autoLoopT = now;
+  if (!character) return;
+  if (autoBendTarget != null) {
+    const o = character.bodyOffset;
+    if (!autoMode || poseMode || reps.home.on) autoBendTarget = null;
+    else {
+      o.hipsRotX += (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * 9));
+      o.spineX = bendSpine(o.hipsRotX);
+      if (!poseDrag && Math.abs(autoBendTarget - o.hipsRotX) < 0.004) autoBendTarget = null;
+    }
+  }
+  // Пишем, пока палец ведёт её и ещё чуть после (тело доезжает).
+  if (autoMode && !reps.home.on && now - autoDragAt < 350) autoRecNote();
+  if (!autoRepBtn.hidden && character.bones?.head) {
+    const v = character.bones.head.getWorldPosition(new THREE.Vector3());
+    v.y += 0.2 * (character.scale ?? 1);
+    v.project(camera);
+    const x = THREE.MathUtils.clamp((v.x * 0.5 + 0.5) * window.innerWidth + 78, 70, window.innerWidth - 70);
+    const y = THREE.MathUtils.clamp((-v.y * 0.5 + 0.5) * window.innerHeight, 90, window.innerHeight - 60);
+    autoRepBtn.style.left = `${x.toFixed(1)}px`;
+    autoRepBtn.style.top = `${y.toFixed(1)}px`;
+  }
+})();
 function renderAutoRep() {
   const playing = autoMode && reps.home.on && reps.home.state === 'play';
   autoRepBtn.hidden = !(autoMode && (playing || autoRepOffer));
   autoRepBtn.classList.toggle('active', playing);
   autoRepBtn.classList.toggle('offer', !playing && !!autoRepOffer);
-  autoRepBtn.textContent = playing ? '⏹ Стоп' : '🔁 Повторить?';
+  autoRepBtn.textContent = playing ? '✕ отмена' : '🔁 Повторить';
 }
 window.addEventListener('pointerup', () => {
   if (!autoMode || !autoRec || reps.home.on) return;
   const rec = autoRec;
   // Ждём чуть-чуть: вдруг это пауза между рывками одного движения.
   setTimeout(() => {
-    if (autoRec !== rec || pointerActive || performance.now() - rec.last < 250 || reps.home.on || !autoMode) return;
+    if (autoRec !== rec || pointerActive || performance.now() - rec.last < 200 || reps.home.on || !autoMode) return;
     autoRec = null;
     const S = rec.samples;
     if (S.length < 5) return;
@@ -4322,12 +4353,12 @@ window.addEventListener('pointerup', () => {
     renderAutoRep();
     clearTimeout(autoRepTimer);
     autoRepTimer = setTimeout(() => { autoRepOffer = null; renderAutoRep(); }, 6000);
-  }, 300);
+  }, 600);
 }, { capture: true, passive: true });
 autoRepBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   const r = reps.home;
-  if (r.on) { setRepeat(false); renderAutoRep(); return; }
+  if (r.on) { setRepeat(false, true); renderAutoRep(); return; }
   const rec = autoRepOffer;
   if (!rec) return;
   autoRepOffer = null;

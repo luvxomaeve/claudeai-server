@@ -1601,10 +1601,11 @@ button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item
   box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.5), 0 0 14px rgba(255, 111, 168, 0.5) !important;
 }
 
-/* «Авто»: кнопка «Повторить?» */
-#auto-rep { position: fixed; left: 50%; bottom: calc(max(22px, env(safe-area-inset-bottom, 0px)) + 86px); transform: translateX(-50%); z-index: 30;
-  padding: 13px 24px; border-radius: 999px; font: inherit; font-size: 17px; font-weight: 800; cursor: pointer; animation: fadeIn 0.25s ease; }
+/* «Авто»: плашка «Повторить» рядом с ней (двигается вместе с ней) */
+#auto-rep { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); z-index: 30; white-space: nowrap;
+  padding: 9px 16px; border-radius: 999px; font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; animation: fadeIn 0.25s ease; }
 #auto-rep[hidden] { display: none; }
-#auto-rep:active { transform: translateX(-50%) scale(0.94) !important; }
+#auto-rep:active { transform: translate(-50%, -50%) scale(0.94) !important; }
 #auto-rep.offer { animation: fadeIn 0.25s ease, autoRepPulse 1s ease-in-out infinite; }
+#auto-rep.active { padding: 6px 12px; font-size: 12.5px; font-weight: 700; opacity: 0.8; background: var(--glass-bg) !important; box-shadow: var(--glass-edge) !important; }
 @keyframes autoRepPulse { 0%, 100% { box-shadow: var(--glass-edge), 0 0 0 0 rgba(255, 111, 168, 0.55); } 50% { box-shadow: var(--glass-edge), 0 0 0 10px rgba(255, 111, 168, 0); } }
