@@ -1046,7 +1046,7 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 
   // Одежда и волосы рядом с пальцем качнулись от прикосновения.
-  character.poke(hit.point, raycaster.ray.direction, 0.8);
+  { character.poke(hit.point, raycaster.ray.direction, 0.8); pieceWardrobe.poke(hit.point, raycaster.ray.direction, 0.8, character.scale); }
 
   if (hit.zone === 'headpat') {
     petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 0 };
@@ -1080,6 +1080,7 @@ function tapReaction(hit, e) {
 
 // Поглаживание любой зоны, кроме головы: мягкая реакция раз в ~80px.
 let lastStrokeLineAt = 0;
+let lastDragPoke = 0;
 function strokeTick(e) {
   const r = STROKES[stroking.hit.zone];
   if (!r) return;
@@ -1088,7 +1089,7 @@ function strokeTick(e) {
   stroking.ticks++;
   // Одежду ведёт за пальцем.
   const hit = zoneAt(e);
-  if (hit) character.poke(hit.point, dragDirection(e), 0.7);
+  if (hit) { character.poke(hit.point, dragDirection(e), 0.7); pieceWardrobe.poke(hit.point, dragDirection(e), 0.7, character.scale); }
   if (stroking.ticks % 3 === 1 && !character.motions.some((m) => m.name === r.motion)) {
     character.react({ expression: r.expression[t], motion: r.motion, side: stroking.hit.side, strength: 0.7 });
   }
@@ -1198,6 +1199,16 @@ canvas.addEventListener('pointermove', (e) => {
       }
       if (!stroking) return;
     }
+    // Ткань и волосы идут за пальцем непрерывно, пока ведёшь (а не только раз в «тик»).
+    if (stroking.moved > 18 && performance.now() - lastDragPoke > 70) {
+      lastDragPoke = performance.now();
+      const h = zoneAt(e, true);
+      if (h) {
+        const dir = dragDirection(e);
+        character.poke(h.point, dir, 0.55);
+        pieceWardrobe.poke(h.point, dir, 0.55, character.scale);
+      }
+    }
     stroking.lastX = e.clientX;
     stroking.lastY = e.clientY;
     return;
@@ -1206,7 +1217,7 @@ canvas.addEventListener('pointermove', (e) => {
   // Поглаживание головы тоже качает волосы.
   if (petting.dist > 35) {
     const hit = zoneAt(e);
-    if (hit) character.poke(hit.point, raycaster.ray.direction, 0.4);
+    if (hit) { character.poke(hit.point, raycaster.ray.direction, 0.4); pieceWardrobe.poke(hit.point, raycaster.ray.direction, 0.4, character.scale); }
   }
   const dx = e.clientX - petting.lastX;
   const dy = e.clientY - petting.lastY;

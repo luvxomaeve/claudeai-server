@@ -407,6 +407,7 @@ export class PieceWardrobe {
   // Каждый кадр: доноры повторяют её позу (нормализованные кости), затем считают свою физику.
   sync(dt) {
     if (!this.base) return;
+    this.restorePokes();
     const bh = this.base.vrm.humanoid;
     for (const [, s] of this.sources) {
       if (!s.active) continue;
@@ -453,8 +454,48 @@ export class PieceWardrobe {
     const power = g.length();
     g.normalize();
     for (const j of s.skirtJoints) {
+      if (j.userData?.poke) continue; // её сейчас трогают — не затираем толчок от пальца
       j.settings.gravityDir.copy(g);
       j.settings.gravityPower = power;
+    }
+  }
+
+  // Касание толкает одежду с физикой и на вещах из шкафа (у них свои «пружинки»).
+  poke(point, dir, strength = 1, scale = 1) {
+    const push = new THREE.Vector3(dir.x, 0, dir.z);
+    if (push.lengthSq() < 1e-6) return;
+    push.normalize();
+    const radius = 0.24 * scale;
+    const pos = new THREE.Vector3();
+    const now = performance.now();
+    this.poked ??= new Set();
+    for (const [, s] of this.sources) {
+      if (!s.active) continue;
+      for (const j of s.vrm.springBoneManager?.joints ?? []) {
+        if (/bust|breast|hair/i.test(j.bone.name)) continue; // у донора видна только одежда
+        j.bone.getWorldPosition(pos);
+        const d = pos.distanceTo(point);
+        if (d > radius) continue;
+        j.userData ??= {};
+        if (!j.userData.poke) j.userData.poke = { power: j.settings.gravityPower, dir: j.settings.gravityDir.clone() };
+        const k = (1 - d / radius) * strength;
+        j.settings.gravityDir.copy(push);
+        j.settings.gravityPower = Math.max(j.settings.gravityPower, 1.6 * k);
+        j.userData.pokeUntil = now + 240;
+        this.poked.add(j);
+      }
+    }
+  }
+
+  restorePokes() {
+    if (!this.poked?.size) return;
+    const now = performance.now();
+    for (const j of this.poked) {
+      if (now < j.userData.pokeUntil) continue;
+      j.settings.gravityPower = j.userData.poke.power;
+      j.settings.gravityDir.copy(j.userData.poke.dir);
+      j.userData.poke = null;
+      this.poked.delete(j);
     }
   }
 
