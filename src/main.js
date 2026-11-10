@@ -1167,7 +1167,7 @@ canvas.addEventListener('pointermove', (e) => {
     bgSwipe.lastY = e.clientY;
     return;
   }
-  if (stroking && poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
+  if (stroking && (poseMode || autoMode) && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
     // Режим позы без точек: повёл по ней вверх-вниз — сажаем/поднимаем (как правая полоса);
     // вбок или по кругу — поглаживание.
     const ax = Math.abs(e.clientX - stroking.sx), ay = Math.abs(e.clientY - stroking.sy);
@@ -3648,7 +3648,7 @@ function updateAuto(dt) {
     return;
   }
   autoCooldown -= dt;
-  const calm = autoMoves && !poseMode && autoIdle > 5 && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
+  const calm = (autoMoves || autoMode) && !poseMode && autoIdle > 5 && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
     && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
@@ -4135,6 +4135,55 @@ onAdPause((on) => {
   for (const a of document.querySelectorAll('audio')) { if (on) a.pause(); }
   try { if (on) window.__waifuAudio?.suspend?.(); else window.__waifuAudio?.resume?.(); } catch { /* ignore */ }
 });
+// ---------- Режим «Авто» ----------
+// Она на весь экран, кнопок нет. Всё жестами: гладишь и тапаешь — как обычно; ведёшь по ней
+// вверх-вниз — садится/встаёт/ложится; по фону — камера, два пальца — ближе/дальше.
+// Она сама двигается, просит и реагирует; камера еле заметно «дышит» вокруг неё.
+let autoMode = false;
+let autoPhase = 0;
+let autoTouchAt = 0;
+const autoBtn = document.createElement('button');
+autoBtn.id = 'btn-automode';
+autoBtn.title = 'Режим «Авто»: только она, управление жестами';
+autoBtn.innerHTML = '<span>✨</span>Авто';
+$('poses').appendChild(autoBtn);
+const autoExit = document.createElement('button');
+autoExit.id = 'auto-exit';
+autoExit.title = 'Выйти из режима «Авто»';
+autoExit.textContent = '✕';
+document.body.appendChild(autoExit);
+function setAutoMode(on) {
+  if (on && poseMode) setPoseMode(false);
+  autoMode = on;
+  document.body.classList.toggle('automode', on);
+  for (const p of document.querySelectorAll('.panel')) p.classList.add('hidden');
+  $('love-menu').hidden = true;
+  if (lockPop) lockPop.hidden = true;
+  if (on) {
+    autoIdle = 0;
+    autoCooldown = 3;
+    autoTouchAt = performance.now();
+    wishTimer = Math.min(wishTimer, 25);
+    showToast('✨ Авто: гладь её · веди по ней вверх-вниз — сесть/встать · по фону — камера');
+  } else {
+    stopAuto();
+    wakeUi();
+    showToast('Обычный режим');
+  }
+}
+autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
+autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
+autoExit.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(false); });
+window.addEventListener('pointerdown', () => { autoTouchAt = performance.now(); }, { capture: true, passive: true });
+// Камера плавно покачивается вокруг неё, пока её не трогают (и ещё 3 секунды после).
+function updateAutoCam(dt) {
+  if (!autoMode || !character || pointerActive || freeCam || faceCam) return;
+  if (performance.now() - autoTouchAt < 3000) return;
+  autoPhase += dt * 0.16;
+  camYaw = (camYaw + Math.cos(autoPhase) * 0.04 * dt) % (Math.PI * 2);
+  applyOrbit();
+}
 // ---------- Живые моменты ----------
 // Когда её не трогают, она не просто говорит фразу, а «живёт»: смеётся, дуется, потягивается,
 // поправляет волосы, смущается… Эмоция + движение + реплика. Не повторяется подряд.
@@ -4294,6 +4343,7 @@ function tick() {
   updateSuggest(dt);
   updateSelfDress(dt);
   updateWishes(dt);
+  updateAutoCam(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);

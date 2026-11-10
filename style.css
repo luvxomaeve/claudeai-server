@@ -1500,3 +1500,27 @@ body.bg-stars #ambient i { background: rgba(255, 255, 255, 0.85); box-shadow: 0 
 @keyframes ambTwinkle { 0%, 100% { opacity: 0.08; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.4); } }
 body.bg-night #ambient i { background: rgba(230, 200, 255, 0.85); box-shadow: 0 0 8px 2px rgba(199, 125, 255, 0.7); }
 body.photo #ambient { display: none; }
+
+/* Режим «Авто»: кнопка внизу и сам режим (только она, без интерфейса) */
+#poses #btn-automode { position: fixed; bottom: 16px; left: calc(max(16px, env(safe-area-inset-left, 0px)) + 208px); height: 44px; padding: 0 14px 0 11px;
+  display: flex; align-items: center; gap: 5px; border: 1px solid rgba(255, 255, 255, 0.75); border-radius: 999px; font: inherit; font-weight: 800; font-size: 14px;
+  color: #fff; background: linear-gradient(90deg, var(--pink), #c77dff); box-shadow: 0 4px 14px rgba(255, 111, 168, 0.4); cursor: pointer; transition: transform 0.12s ease; }
+#poses #btn-automode:active { transform: scale(0.94); }
+#poses #btn-automode span { font-size: 15px; }
+body.posing #btn-automode { display: none; }
+#auto-exit { display: none; }
+body.automode #hud, body.automode #cam-controls, body.automode #sit-slider, body.automode #sit-slider2, body.automode #handles,
+body.automode #poses, body.automode #rep-favs, body.automode #hint, body.automode #pose-label, body.automode #btn-pointmode,
+body.automode #clean-exit, body.automode #suggest { display: none !important; }
+body.automode #auto-exit { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+  width: 36px; height: 36px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.22); color: rgba(255, 255, 255, 0.9);
+  font-size: 15px; backdrop-filter: blur(6px); cursor: pointer; }
+body.automode #wish { bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
+/* Плавные меню: панели выезжают, кнопки пружинят */
+.panel:not(.hidden) { animation: panelIn 0.26s cubic-bezier(0.2, 0.8, 0.3, 1); }
+@keyframes panelIn { from { transform: translateY(22px); opacity: 0; } to { transform: none; opacity: 1; } }
+#lock-pop:not([hidden]) { animation: popIn 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+@keyframes popIn { from { transform: translate(-50%, -46%) scale(0.92); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+.girl-chip, .closet-tabs button, #piece-list button, .chip, .panel-big { transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease; }
+.girl-chip:active, .closet-tabs button:active, #piece-list button:active, .chip:active, .panel-big:active { transform: scale(0.95); }
