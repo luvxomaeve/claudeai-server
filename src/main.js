@@ -729,7 +729,7 @@ function renderLoveCard() {
       + (items ? `<ul>${items}</ul>` : '');
     lmList.appendChild(row);
   });
-  lmDev.hidden = !(devMode || !window.WAIFU_RELEASE);
+  lmDev.hidden = false; // «Макс» и «Сброс» видны всегда (для проверки; перед релизом можно скрыть)
 }
 let devSuppressClick = false;
 function enableDev() {
