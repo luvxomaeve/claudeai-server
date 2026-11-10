@@ -1206,18 +1206,26 @@ canvas.addEventListener('pointermove', (e) => {
     bgSwipe.lastY = e.clientY;
     return;
   }
-  if (stroking && (poseMode || autoMode) && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
+  if (stroking && autoMode && !poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
+    // «Авто» — управление свайпами: быстрый свайп по ней вверх/вниз — команда (она сама плавно
+    // делает движение), медленно водишь в любую сторону — просто гладишь, ничего не срывается.
+    stroking.t0 ??= performance.now();
+    const dx = e.clientX - stroking.sx, dy = e.clientY - stroking.sy;
+    if (Math.abs(dy) > 56 && Math.abs(dy) > Math.abs(dx) * 1.7 && performance.now() - stroking.t0 < 260) {
+      // По лицу и плечам — наклон/прогиб; по всему остальному телу — сесть/встать.
+      const upper = ['face', 'arm'].includes(stroking.hit.zone);
+      stroking = null;
+      autoSwipe(upper, dy > 0 ? 1 : -1);
+      return;
+    }
+  } else if (stroking && poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
     // Режим позы без точек: повёл по ней вверх-вниз — сажаем/поднимаем (как правая полоса);
     // вбок или по кругу — поглаживание.
     const ax = Math.abs(e.clientX - stroking.sx), ay = Math.abs(e.clientY - stroking.sy);
     if (ay > 22 && ay > ax * 1.5) {
-      // «Авто»: потянул за грудь/плечи/лицо — наклон вперёд или прогиб назад; за живот и ноги — сесть/встать.
-      const upper = autoMode && !poseMode && ['body', 'arm', 'face'].includes(stroking.hit.zone);
-      // «Авто»: идёт повтор, а ты снова взялся двигать её — повтор уступает, запомню новое движение.
-      if (autoMode && !poseMode && reps.home.on) { setRepeat(false, true); renderAutoRep(); }
       stroking = null;
-      poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now() };
-      showLabel(upper ? 'Ниже — наклон вперёд, выше — прогиб назад' : 'Ниже — сесть / лечь, выше — встать');
+      poseDrag = { kind: 'sitdrag', y: e.clientY, t: performance.now() };
+      showLabel('Ниже — сесть / лечь, выше — встать');
       return;
     }
   }
@@ -4262,9 +4270,10 @@ const autoHint = document.createElement('div');
 autoHint.id = 'auto-hint';
 autoHint.hidden = true;
 autoHint.innerHTML = '<b>✨ Авто — всё одним пальцем</b>'
-  + '<span>👆 Тап и поглаживание — как обычно</span>'
-  + '<span>↕️ Вести вверх-вниз по животу и ногам — сесть / лечь / встать</span>'
-  + '<span>🙇 Вести вверх-вниз по груди и плечам — наклон / прогиб</span>'
+  + '<span>👆 Медленно водишь — гладишь</span>'
+  + '<span>👇 Быстрый свайп вниз/вверх по телу — ниже / выше (сесть, лечь, встать)</span>'
+  + '<span>🙇 Быстрый свайп вниз/вверх по лицу или плечам — наклон / прогиб</span>'
+  + '<span>🔁 Пара свайпов туда-сюда — предложит повторить</span>'
   + '<span>👗 Двойной тап по ней — переоденется</span>'
   + '<span>↔️ По фону вбок — камера вокруг</span>'
   + '<span>🔍 По фону вверх-вниз — ближе / дальше</span>'
@@ -4298,7 +4307,7 @@ let autoBendTarget = null; // куда палец ведёт наклон; те�
 let autoDragAt = 0;
 function autoRecNote() {
   const now = performance.now();
-  if (!autoRec || now - autoRec.last > 700) autoRec = { start: now, samples: [] };
+  if (!autoRec || now - autoRec.last > 1600) autoRec = { start: now, samples: [] };
   autoRec.last = now;
   autoRec.samples.push({ t: (now - autoRec.start) / 1000, ...nowPose() });
 }
@@ -4314,13 +4323,17 @@ let autoLoopT = performance.now();
     const o = character.bodyOffset;
     if (!autoMode || poseMode || reps.home.on) autoBendTarget = null;
     else {
-      o.hipsRotX += (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * 9));
+      // Плавный ход к цели: разгон и мягкое торможение (не быстрее ~1.6 рад/с).
+      const step = (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * 4.5));
+      o.hipsRotX += THREE.MathUtils.clamp(step, -1.6 * dt, 1.6 * dt);
       o.spineX = bendSpine(o.hipsRotX);
       if (!poseDrag && Math.abs(autoBendTarget - o.hipsRotX) < 0.004) autoBendTarget = null;
     }
   }
-  // Пишем, пока палец ведёт её и ещё чуть после (тело доезжает).
-  if (autoMode && !reps.home.on && now - autoDragAt < 350) autoRecNote();
+  // Пишем, пока она выполняет команды (садится/встаёт, наклоняется) — ровно, по кадрам.
+  if (autoMode && !poseMode && !reps.home.on && (autoBendTarget != null || Math.abs(character.sit - character.sitS) > 0.05)) autoDragAt = now;
+  if (autoMode && !reps.home.on && now - autoDragAt < 200 && autoSwipes.length) autoRecNote();
+  autoRepCheck(now);
   if (!autoRepBtn.hidden && character.bones?.head) {
     const v = character.bones.head.getWorldPosition(new THREE.Vector3());
     v.y += 0.2 * (character.scale ?? 1);
@@ -4338,23 +4351,51 @@ function renderAutoRep() {
   autoRepBtn.classList.toggle('offer', !playing && !!autoRepOffer);
   autoRepBtn.textContent = playing ? '✕ отмена' : '🔁 Повторить';
 }
-window.addEventListener('pointerup', () => {
-  if (!autoMode || !autoRec || reps.home.on) return;
+// Свайп-команда в «Авто». dir: +1 — вниз, −1 — вверх.
+// По груди/плечам/лицу — наклон вперёд ↔ прогиб назад (по ступенькам); по животу и ногам — ниже ↔ выше
+// (стоит → присела → на коленях → сидит → лежит). Движение делает она сама — плавно, без рывков.
+const AUTO_BENDS = [-0.65, 0, 0.75, 1.45];
+let autoSwipes = [];
+function autoSwipe(upper, dir) {
+  if (reps.home.on) { setRepeat(false, true); renderAutoRep(); } // идёт повтор — уступает новой команде
+  stopAuto(true);
+  lastOnHerAt = performance.now();
+  autoSwipes.push(lastOnHerAt);
+  autoRecNote();
+  if (upper) {
+    const cur = autoBendTarget ?? character.bodyOffset.hipsRotX;
+    const next = dir > 0 ? AUTO_BENDS.find((v) => v > cur + 0.12) : [...AUTO_BENDS].reverse().find((v) => v < cur - 0.12);
+    if (next == null) { showLabel(dir > 0 ? 'Ниже некуда~' : 'Дальше не гнётся~'); return; }
+    autoBendTarget = next;
+    character.effortT = 0.5;
+    showLabel(next > 0.05 ? 'Наклон вперёд' : next < -0.05 ? 'Прогиб назад' : 'Прямо');
+    return;
+  }
+  const marks = [0, 0.5, 0.8, 1.0, 1.3].filter((m) => m <= sitMax() + 1e-6);
+  const cur = character.sit;
+  const next = dir > 0 ? marks.find((v) => v > cur + 0.06) : [...marks].reverse().find((v) => v < cur - 0.06);
+  if (next == null) { showLabel(dir > 0 ? 'Уже лежит~' : 'Уже стоит~'); return; }
+  character.sitRate = 1.1;
+  character.effortT = 0.5;
+  sitBy((next - cur) / 0.004);
+  showLabel(['Встала', 'Присела', 'На коленях', 'Села', 'Легла'][[0, 0.5, 0.8, 1.0, 1.3].indexOf(next)] ?? '');
+}
+// Сделал подряд пару свайпов (подвигал её туда-сюда) — когда она закончит, предложим повторить.
+function autoRepCheck(now) {
+  if (!autoMode || !autoRec || reps.home.on || pointerActive || now - autoRec.last < 1100) return;
   const rec = autoRec;
-  // Ждём чуть-чуть: вдруг это пауза между рывками одного движения.
-  setTimeout(() => {
-    if (autoRec !== rec || pointerActive || performance.now() - rec.last < 200 || reps.home.on || !autoMode) return;
-    autoRec = null;
-    const S = rec.samples;
-    if (S.length < 5) return;
-    const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
-    if (S[S.length - 1].t < 0.45 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
-    autoRepOffer = rec;
-    renderAutoRep();
-    clearTimeout(autoRepTimer);
-    autoRepTimer = setTimeout(() => { autoRepOffer = null; renderAutoRep(); }, 6000);
-  }, 600);
-}, { capture: true, passive: true });
+  autoRec = null;
+  const n = autoSwipes.filter((t) => t >= rec.start - 50).length;
+  autoSwipes = [];
+  const S = rec.samples;
+  if (n < 2 || S.length < 8) return;
+  const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
+  if (S[S.length - 1].t < 0.6 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
+  autoRepOffer = rec;
+  renderAutoRep();
+  clearTimeout(autoRepTimer);
+  autoRepTimer = setTimeout(() => { autoRepOffer = null; renderAutoRep(); }, 6000);
+}
 autoRepBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   const r = reps.home;
