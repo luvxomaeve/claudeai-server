@@ -881,11 +881,13 @@ export class Character {
       if (p4 > 0) {
         // Ложится на правый бок, приподнявшись на локте: таз заваливается набок,
         // грудь приподнята, голова ровно и смотрит на тебя, ноги вместе и согнуты.
+        // Засыпает — опускается с локтя: корпус ложится на бок, голова — на пол/руку.
+        const up = 1 - (this.sleep ?? 0);
         pose.hipsZ += 1.3 * p4;
         pose.hipsRotY -= 0.25 * p4;
-        pose.spineZ -= 0.5 * p4;
-        pose.spineY += 0.2 * p4;
-        pose.headZ -= 0.55 * p4;
+        pose.spineZ -= (0.5 * up - 0.06 * (1 - up)) * p4;
+        pose.spineY += 0.2 * p4 * up;
+        pose.headZ -= (0.55 * up - 0.3 * (1 - up)) * p4;
         pose.headX += 0.05 * p4;
       }
       const { c3, c4 } = this.sitPhases(s);
@@ -893,7 +895,7 @@ export class Character {
         // Садится на пол (чуть откинувшись, опираясь на руки), потом плавно ложится на спину.
         pose.hipsRotX -= 0.22 * c3 * (1 - c4) + 1.5 * c4;
         pose.spineX -= 0.05 * c3 * (1 - c4) - 0.1 * c4;
-        pose.headX += 0.45 * c4; // голова чуть приподнята — видно тебя
+        pose.headX += 0.45 * c4 * (1 - (this.sleep ?? 0)); // голова чуть приподнята — видно тебя; во сне — опущена
       }
       const { b3, b4 } = this.sitPhases(s);
       if (b3 > 0) {
