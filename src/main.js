@@ -905,6 +905,12 @@ function zoneAt(e, deep = false) {
   toNdc(e);
   raycaster.setFromCamera(pointer, camera);
   const hit = character.hitTest(raycaster.ray);
+  // Хвостики волос — своя зона (ей нравится, когда их гладят), если они ближе к пальцу.
+  const hair = character.hitHair?.(raycaster.ray);
+  if (hair) {
+    const ht = hit ? hit.point.clone().sub(raycaster.ray.origin).dot(raycaster.ray.direction) : Infinity;
+    if (!hit || hair.t < ht + 0.01 * character.scale) return hair;
+  }
   if (hit || !deep) return hit;
   // Не попали в зону — проверяем саму модель (край юбки, бёдра, плечи, волосы…).
   return character.hitTestMesh(raycaster);
@@ -1143,7 +1149,7 @@ canvas.addEventListener('pointermove', (e) => {
     bgSwipe.lastY = e.clientY;
     return;
   }
-  if (stroking && poseMode && stroking.ticks === 0) {
+  if (stroking && poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
     // Режим позы без точек: повёл по ней вверх-вниз — сажаем/поднимаем (как правая полоса);
     // вбок или по кругу — поглаживание.
     const ax = Math.abs(e.clientX - stroking.sx), ay = Math.abs(e.clientY - stroking.sy);
@@ -1161,8 +1167,18 @@ canvas.addEventListener('pointermove', (e) => {
     if (stroking.moved > 18) {
       while (stroking.dist > 80) {
         stroking.dist -= 80;
+        // Не отрывая пальца перешёл на другую зону — гладим уже её.
+        const now = zoneAt(e, true);
+        if (now && now.zone === 'headpat') {
+          petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 1 };
+          canvas.classList.add('petting');
+          stroking = null;
+          break;
+        }
+        if (now && STROKES[now.zone]) stroking.hit = now;
         strokeTick(e);
       }
+      if (!stroking) return;
     }
     stroking.lastX = e.clientX;
     stroking.lastY = e.clientY;
@@ -1182,6 +1198,17 @@ canvas.addEventListener('pointermove', (e) => {
   // Каждые ~70px поглаживания — «тик»: симпатия и сердечко.
   while (petting.dist > 70) {
     petting.dist -= 70;
+    // Ушёл с макушки на другую зону, не отрывая пальца, — дальше гладим её.
+    {
+      const now = zoneAt(e, true);
+      if (now && now.zone !== 'headpat' && STROKES[now.zone]) {
+        stroking = { hit: now, lastX: e.clientX, lastY: e.clientY, sx: e.clientX, sy: e.clientY, moved: 99, dist: 0, ticks: 1 };
+        petting = null;
+        canvas.classList.remove('petting');
+        strokeTick(e);
+        return;
+      }
+    }
     petting.ticks++;
     changeAffection(0.4);
     floatHeart(e.clientX, e.clientY);

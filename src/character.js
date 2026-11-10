@@ -517,6 +517,32 @@ export class Character {
     return best;
   }
 
+  // Волосы (хвостики ниже головы): по костям пружин волос — двигаются вместе с ними.
+  hitHair(ray) {
+    if (!this.hairSegs) {
+      this.hairSegs = [];
+      const joints = this.vrm.springBoneManager?.joints ?? [];
+      for (const j of joints) {
+        if (j.bone && j.child && /hair/i.test(j.bone.name)) this.hairSegs.push([j.bone, j.child]);
+      }
+    }
+    if (!this.hairSegs.length) return null;
+    const S = this.scale;
+    const head = this.bones.head?.getWorldPosition(new THREE.Vector3());
+    if (!head) return null;
+    const a = new THREE.Vector3(), c = new THREE.Vector3(), pr = new THREE.Vector3(), ps = new THREE.Vector3();
+    let best = null;
+    for (const [b0, b1] of this.hairSegs) {
+      b0.getWorldPosition(a); b1.getWorldPosition(c);
+      if (Math.max(a.y, c.y) > head.y - 0.02 * S) continue; // макушка — это «погладить по голове»
+      const d2 = ray.distanceSqToSegment(a, c, pr, ps);
+      if (d2 > (0.04 * S) ** 2) continue;
+      const t = pr.clone().sub(ray.origin).dot(ray.direction);
+      if (!best || t < best.t) best = { zone: 'hair', point: ps.clone(), t, score: 0 };
+    }
+    return best;
+  }
+
   hitTest(ray) {
     let best = null;
     const sphere = new THREE.Sphere();
