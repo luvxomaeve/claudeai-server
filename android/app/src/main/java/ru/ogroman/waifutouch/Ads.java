@@ -24,9 +24,9 @@ import com.yandex.mobile.ads.rewarded.RewardedAdLoader;
 // События уходят в игру: window.__waifuAdEvent('open' | 'reward' | 'close' | 'error').
 public class Ads {
   // ЗАМЕНИТЬ на свои ID блоков из кабинета Рекламной сети Яндекса (вида R-M-1234567-1).
-  // Сейчас — тестовые блоки Яндекса (показывают пробную рекламу, дохода нет).
-  static final String INTERSTITIAL_ID = "demo-interstitial-yandex";
-  static final String REWARDED_ID = "demo-rewarded-yandex";
+  // Боевые блоки РСЯ (приложение 20376815).
+  static final String INTERSTITIAL_ID = "R-M-20376815-1"; // «Шкаф»
+  static final String REWARDED_ID = "R-M-20376815-2"; // «Награда»
 
   final Activity act;
   final WebView web;
