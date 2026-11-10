@@ -2082,7 +2082,18 @@ sitSlider.addEventListener('pointermove', (e) => {
   character.slideHold = 3;
   character.dragBoostT = 0.5; // палец на полосе — тело отзывается в его темпе
   sliderTakesOver();
-  loopNoteMove();
+  // Повтор идёт — полоса не перезаписывает его, а сдвигает: глубже/выше, не останавливая.
+  if (loopNoteMove() === 'shift') {
+    const r = curRep();
+    if (poseMode) {
+      r.bendOff = THREE.MathUtils.clamp((r.bendOff ?? 0) + (dv / sitMax()) * BEND_RANGE, -BEND_RANGE, BEND_RANGE);
+      showLabel(dv > 0 ? 'Повтор: наклон глубже' : 'Повтор: наклон выше');
+    } else {
+      r.sitOff = THREE.MathUtils.clamp((r.sitOff ?? 0) + dv, -sitMax(), sitMax());
+      showLabel(dv > 0 ? 'Повтор: ниже' : 'Повтор: выше');
+    }
+    return;
+  }
   if (poseMode) {
     // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
     // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
@@ -2339,7 +2350,7 @@ function poseDragMove(e) {
     // Вниз — наклон вперёд как у человека: в основном в тазобедренных (таз уходит
     // назад для баланса, ноги на полу) и немного в спине; вверх — прогиб назад.
     const o = character.bodyOffset;
-    if (!(pointMode === 'pin' && repPlaying())) { // наклон ведёт повтор — не спорим с ним
+    if (!repPlaying()) { // наклон ведёт повтор — не спорим с ним
       o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
       o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
     }
@@ -2348,7 +2359,7 @@ function poseDragMove(e) {
     // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
     const o = character.bodyOffset;
     o.spineY = clamp(o.spineY + dx * 0.005 * facing, -0.8, 0.8);
-    if (!(pointMode === 'pin' && repPlaying())) o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
+    if (!repPlaying()) o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
   } else {
     // Таз: тянешь вниз — опускается (присед → на колени → сидит → лежит), вверх — встаёт;
     // вбок — бёдра в сторону (стоя), с противовесом плеч и головы.
@@ -3512,6 +3523,8 @@ function playMove(r, mv) {
   r.movedPts = movedPoints(mv.samples);
   r.sitMoved = sitMovedIn(mv.samples);
   r.sitFree = false;
+  r.bendOff = 0;
+  r.sitOff = 0;
   r.samples = mv.samples;
   r.dur = mv.dur;
   r.t = 0;
@@ -3529,6 +3542,8 @@ function setRepeat(on) {
   r.ptsTrack = null;
   r.ptsRec = null;
   r.sitFree = false;
+  r.bendOff = 0;
+  r.sitOff = 0;
   if (on) stopAuto(true);
   renderRep();
   // Включил — всегда с чистого листа: ждёт твоё новое движение.
@@ -3658,7 +3673,9 @@ function loopNoteMove(kind = 'main') {
   if (!r.on) return;
   // Положение (сесть/встать) меняешь, пока идёт повтор, — повтор не останавливается:
   // посадка просто становится ручной, а наклон и дальше качается.
-  if (kind === 'sit' && r.state === 'play') { r.sitFree = true; return; }
+  if (kind === 'sit' && r.state === 'play') { r.sitFree = true; return 'free'; }
+  // Идёт повтор — останавливает его только кнопка повтора; движения его лишь сдвигают.
+  if (r.state === 'play') return 'shift';
   const now = performance.now();
   if (r.state !== 'rec') {
     r.state = 'rec';
@@ -3702,6 +3719,8 @@ function updateLoop(dt) {
       if (r.ptsTrack) for (const key of Object.keys(r.ptsTrack.moved)) if (r.ptsTrack.moved[key]) r.movedPts[key] = false;
       r.sitMoved = sitMovedIn(r.samples);
       r.sitFree = false;
+      r.bendOff = 0;
+      r.sitOff = 0;
       r.midFor = null;
       try { localStorage.setItem(repKey(r), JSON.stringify({ dur: r.dur, samples: r.samples.filter((_, i) => i % 2 === 0 || i === r.samples.length - 1) })); } catch { /* ignore */ }
       if (!r.toldOnce) { r.toldOnce = true; showToast('Повторяю~ ♥ ＋ — в избранное, подвигай — запомню новое'); }
@@ -3728,9 +3747,9 @@ function updateLoop(dt) {
     r.midFor = r.samples;
     r.midBend = S.reduce((m, x) => m + x.bend, 0) / S.length;
   }
-  let bend = r.midBend + (L(a.bend, b.bend) - r.midBend) * amp;
+  let bend = THREE.MathUtils.clamp(r.midBend + (L(a.bend, b.bend) - r.midBend) * amp + (r.bendOff ?? 0), BEND_MIN, BEND_MAX);
   let spine = bendSpine(bend);
-  let sit = L(a.sit, b.sit);
+  let sit = THREE.MathUtils.clamp(L(a.sit, b.sit) + (r.sitOff ?? 0), 0, sitMax());
   let pts = { hL: lerpArr(a.hL, b.hL, k), hR: lerpArr(a.hR, b.hR, k), fL: lerpArr(a.fL, b.fL, k), fR: lerpArr(a.fR, b.fR, k) };
   if (r.blendFrom) {
     r.blendK = Math.min(1, r.blendK + dt / 1.2);
