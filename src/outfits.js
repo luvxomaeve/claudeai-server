@@ -45,6 +45,12 @@ function installClothPoke(mesh) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     if (!m || m.userData.clothPoke) continue;
     m.userData.clothPoke = true;
+    // Обводка одежды: тонкая и нейтральная тёмная (без красных линий), одинаковая на всех вещах.
+    if ('outlineWidthFactor' in m) {
+      m.outlineWidthFactor *= 0.4;
+      m.outlineColorFactor?.setRGB(0.1, 0.08, 0.13);
+      if ('outlineLightingMixFactor' in m) m.outlineLightingMixFactor = 0.6;
+    }
     const prevCompile = m.onBeforeCompile;
     m.onBeforeCompile = (shader, renderer) => {
       prevCompile?.call(m, shader, renderer);

@@ -679,9 +679,10 @@ export class Character {
     pose.spineY -= twist * 0.05;
     pose.lUpperX += twist * 0.05;
     pose.rUpperX -= twist * 0.05;
-    pose.headY += Math.sin(t * 0.31) * 0.14 + Math.sin(t * 0.83) * 0.04;
-    pose.headX += Math.sin(t * 0.23) * 0.05;
-    pose.headZ += Math.sin(t * 0.47 + 0.9) * 0.04;
+    const awakeK = 1 - (this.sleep ?? 0); // спит — голова не блуждает
+    pose.headY += (Math.sin(t * 0.31) * 0.14 + Math.sin(t * 0.83) * 0.04) * awakeK;
+    pose.headX += Math.sin(t * 0.23) * 0.05 * awakeK;
+    pose.headZ += Math.sin(t * 0.47 + 0.9) * 0.04 * awakeK;
 
     if (this.dancing) this.applyDance(pose, t);
     else if (this.loop) this.applyLoop(pose, t);
@@ -952,7 +953,8 @@ export class Character {
     {
       const lie = 1 - this.bendW;
       if (lie > 0) {
-        const bend = this.bodyOffset.hipsRotX;
+        // Засыпает — опускается с рук и ложится (прогиб/наклон плавно уходят).
+        const bend = this.bodyOffset.hipsRotX * (1 - 0.92 * (this.sleep ?? 0));
         const ph = this.sitPhases();
         // Сидя на полу / лёжа наклон делает спина — с хорошей амплитудой;
         // немного помогает и таз (кроме «на боку», где он лежит).
@@ -1019,7 +1021,7 @@ export class Character {
 
     // Голова чуть поворачивается за пальцем/курсором.
     const bendHL = 1 - 0.6 * THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
-    pose.headY += this.headLook.x * 0.35 * bendHL;
+    pose.headY += this.headLook.x * 0.35 * bendHL * (1 - (this.sleep ?? 0));
     // Смущение, когда камера близко к лицу: сначала смотрит в глаза и улыбается,
     // потом (чем выше симпатия, тем мягче и чаще) отводит взгляд и голову, краснеет — и снова смотрит.
     {
@@ -1068,7 +1070,7 @@ export class Character {
       pose.headX += pitchT * w;
       pose.spineX += THREE.MathUtils.clamp(pitchT * 0.25, -0.15, 0.12) * w * (1 - bendK) * (1 - lieK);
     }
-    pose.headX += -this.headLook.y * 0.2;
+    pose.headX += -this.headLook.y * 0.2 * (1 - (this.sleep ?? 0));
 
     // Пока гладят — голова клонится и прижимается к руке.
     // Тянется к руке: голова (и чуть корпус) клонятся в сторону пальца — и когда гладят
