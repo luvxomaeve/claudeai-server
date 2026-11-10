@@ -3047,7 +3047,7 @@ export class Character {
   }
 
   // Касание толкает одежду и волосы с физикой (spring bones) рядом с точкой касания.
-  // Толкаем только горизонтально — в сторону от камеры и вбок, не вверх.
+  // Толчок плавный: добавляется к «тяжести» сустава и мягко затухает — вещь пружинит, а не дёргается.
   poke(point, dir, strength = 1) {
     const joints = this.vrm.springBoneManager?.joints;
     if (!joints) return;
@@ -3063,23 +3063,32 @@ export class Character {
       if (d > radius) continue;
       j.userData ??= {};
       if (!j.userData.poke) {
-        j.userData.poke = { power: j.settings.gravityPower, dir: j.settings.gravityDir.clone() };
+        j.userData.poke = { power: j.settings.gravityPower, dir: j.settings.gravityDir.clone(), vec: new THREE.Vector3() };
       }
       const k = (1 - d / radius) * strength;
-      j.settings.gravityDir.copy(push);
-      j.settings.gravityPower = Math.max(j.settings.gravityPower, 1.6 * k);
-      j.userData.pokeUntil = this.time + 0.22;
+      j.userData.poke.vec.addScaledVector(push, 0.55 * k);
+      if (j.userData.poke.vec.length() > 0.85) j.userData.poke.vec.setLength(0.85);
       this.poked.add(j);
     }
   }
 
   restorePokes() {
+    if (!this.poked.size) return;
+    const decay = Math.exp(-(this.lastDt ?? 0.016) * 4.5);
+    const g = this._pokeG ??= new THREE.Vector3();
     for (const j of this.poked) {
-      if (this.time < j.userData.pokeUntil) continue;
-      j.settings.gravityPower = j.userData.poke.power;
-      j.settings.gravityDir.copy(j.userData.poke.dir);
-      j.userData.poke = null;
-      this.poked.delete(j);
+      const pk = j.userData.poke;
+      pk.vec.multiplyScalar(decay);
+      if (pk.vec.length() < 0.012) {
+        j.settings.gravityPower = pk.power;
+        j.settings.gravityDir.copy(pk.dir);
+        j.userData.poke = null;
+        this.poked.delete(j);
+        continue;
+      }
+      g.copy(pk.dir).multiplyScalar(pk.power).add(pk.vec);
+      j.settings.gravityPower = g.length();
+      if (j.settings.gravityPower > 1e-5) j.settings.gravityDir.copy(g).normalize();
     }
   }
 

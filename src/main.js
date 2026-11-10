@@ -1047,6 +1047,8 @@ canvas.addEventListener('pointerdown', (e) => {
 
   // Одежда и волосы рядом с пальцем качнулись от прикосновения.
   { character.poke(hit.point, raycaster.ray.direction, 0.8); pieceWardrobe.poke(hit.point, raycaster.ray.direction, 0.8, character.scale); }
+  // Тап: ткань в этом месте слегка «вздрагивает».
+  pieceWardrobe.clothPush(hit.point, clothAx.setFromMatrixColumn(camera.matrixWorld, 2), 0.7, character.scale);
 
   if (hit.zone === 'headpat') {
     petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 0 };
@@ -1107,6 +1109,20 @@ function strokeTick(e) {
 
 // Направление движения пальца в мире (по горизонтали).
 const dragVec = new THREE.Vector3();
+// Ткань под пальцем уходит туда, куда ведёшь (и чуть «на тебя», чтобы не проваливалась в тело).
+const clothDir = new THREE.Vector3();
+const clothAx = new THREE.Vector3();
+function clothDrag(e, lastX, lastY) {
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  const sp = Math.hypot(dx, dy);
+  if (sp < 0.5 || !character) return;
+  const h = zoneAt(e, true);
+  if (!h) return;
+  clothDir.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(dx / sp);
+  clothDir.addScaledVector(clothAx.setFromMatrixColumn(camera.matrixWorld, 1), -dy / sp);
+  clothDir.addScaledVector(clothAx.setFromMatrixColumn(camera.matrixWorld, 2), 0.3);
+  pieceWardrobe.clothPush(h.point, clothDir, Math.min(sp / 14, 1.4), character.scale);
+}
 function dragDirection(e) {
   const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
   const fwd = raycaster.ray.direction.clone();
@@ -1163,7 +1179,11 @@ canvas.addEventListener('pointermove', (e) => {
   }
   if (bgSwipe) {
     // Пустое место в обычном режиме — камера свободно вращается (со всех ракурсов).
-    rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, (e.clientY - bgSwipe.lastY) * 0.005);
+    // В «Авто» одним пальцем: вбок — вокруг неё, вверх/вниз — ближе/дальше.
+    if (autoMode) {
+      rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, 0);
+      zoomBy(Math.exp((e.clientY - bgSwipe.lastY) * 0.004));
+    } else rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, (e.clientY - bgSwipe.lastY) * 0.005);
     bgSwipe.lastX = e.clientX;
     bgSwipe.lastY = e.clientY;
     return;
@@ -1199,6 +1219,7 @@ canvas.addEventListener('pointermove', (e) => {
       }
       if (!stroking) return;
     }
+    clothDrag(e, stroking.lastX, stroking.lastY);
     // Ткань и волосы идут за пальцем непрерывно, пока ведёшь (а не только раз в «тик»).
     if (stroking.moved > 18 && performance.now() - lastDragPoke > 70) {
       lastDragPoke = performance.now();
@@ -1219,6 +1240,7 @@ canvas.addEventListener('pointermove', (e) => {
     const hit = zoneAt(e);
     if (hit) { character.poke(hit.point, raycaster.ray.direction, 0.4); pieceWardrobe.poke(hit.point, raycaster.ray.direction, 0.4, character.scale); }
   }
+  clothDrag(e, petting.lastX, petting.lastY);
   const dx = e.clientX - petting.lastX;
   const dy = e.clientY - petting.lastY;
   petting.dist += Math.hypot(dx, dy);
@@ -1294,8 +1316,27 @@ function checkFlick(e) {
   lastFlick = { dir, t: now };
 }
 
+let autoTap = null;
 function endPointer(e) {
   if (e.type === 'pointerup') checkFlick(e);
+  // «Авто»: двойной тап по ней — переодевается сама; двойной тап по фону — крупно / в полный рост.
+  if (autoMode && e.type === 'pointerup' && touches.size === 1) {
+    const bgTap = bgSwipe && Math.hypot(e.clientX - bgSwipe.sx, e.clientY - bgSwipe.sy) < 12;
+    const herTap = (stroking && stroking.moved <= 18) || (petting && petting.ticks === 0);
+    if (bgTap || herTap) {
+      const now = performance.now();
+      if (autoTap && now - autoTap.t < 340 && autoTap.her === !!herTap && Math.hypot(e.clientX - autoTap.x, e.clientY - autoTap.y) < 48) {
+        autoTap = null;
+        if (herTap) {
+          if (unlocked('wardrobe') && PIECE_SOURCES.length) { selfDressTimer = 0; showToast('👗 Переодевается…'); }
+          else showToast('🔒 Гардероб откроется позже');
+        } else {
+          setFullBody(!fullBody);
+          showToast(fullBody ? 'В полный рост' : 'Крупный план');
+        }
+      } else autoTap = { t: now, x: e.clientX, y: e.clientY, her: !!herTap };
+    } else autoTap = null;
+  }
   activeHandle = null;
   snapAnchor = null;
   touches.delete(e.pointerId);
@@ -4175,13 +4216,34 @@ function setAutoMode(on) {
     autoCooldown = 3;
     autoTouchAt = performance.now();
     wishTimer = Math.min(wishTimer, 25);
-    showToast('✨ Авто: гладь её · веди по ней вверх-вниз — сесть/встать · по фону — камера');
+    showAutoHint();
   } else {
     stopAuto();
     wakeUi();
     showToast('Обычный режим');
   }
 }
+// Шпаргалка по жестам — при входе в режим (первые несколько раз подольше).
+const autoHint = document.createElement('div');
+autoHint.id = 'auto-hint';
+autoHint.hidden = true;
+autoHint.innerHTML = '<b>✨ Авто — всё одним пальцем</b>'
+  + '<span>👆 Тап и поглаживание — как обычно</span>'
+  + '<span>↕️ Вести по ней вверх-вниз — сесть / лечь / встать</span>'
+  + '<span>👗 Двойной тап по ней — переоденется</span>'
+  + '<span>↔️ По фону вбок — камера вокруг</span>'
+  + '<span>🔍 По фону вверх-вниз — ближе / дальше</span>'
+  + '<span>⤢ Двойной тап по фону — крупно / в полный рост</span>';
+document.body.appendChild(autoHint);
+let autoHintTimer = 0;
+function showAutoHint() {
+  let n = 0;
+  try { n = Number(localStorage.getItem('waifu-autohint')) || 0; localStorage.setItem('waifu-autohint', String(n + 1)); } catch { /* ignore */ }
+  autoHint.hidden = false;
+  clearTimeout(autoHintTimer);
+  autoHintTimer = setTimeout(() => { autoHint.hidden = true; }, n < 3 ? 6500 : 3000);
+}
+window.addEventListener('pointerdown', () => { if (!autoHint.hidden && performance.now() - autoTouchAt > 900) autoHint.hidden = true; }, { capture: true, passive: true });
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());

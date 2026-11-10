@@ -1524,3 +1524,11 @@ body.automode #wish { bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
 @keyframes popIn { from { transform: translate(-50%, -46%) scale(0.92); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
 .girl-chip, .closet-tabs button, #piece-list button, .chip, .panel-big { transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease; }
 .girl-chip:active, .closet-tabs button:active, #piece-list button:active, .chip:active, .panel-big:active { transform: scale(0.95); }
+
+/* Шпаргалка по жестам в режиме «Авто» */
+#auto-hint { position: fixed; left: 50%; bottom: calc(36px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 31; width: min(330px, calc(100vw - 28px));
+  display: flex; flex-direction: column; gap: 5px; padding: 13px 15px; border-radius: 18px; background: rgba(30, 20, 48, 0.82); backdrop-filter: blur(10px);
+  color: #fff; font-size: 13px; line-height: 1.3; pointer-events: none; animation: fadeIn 0.3s ease; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35); }
+#auto-hint[hidden] { display: none; }
+#auto-hint b { font-size: 14.5px; margin-bottom: 2px; }
+#auto-hint span { opacity: 0.92; }

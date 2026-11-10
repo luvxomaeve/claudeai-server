@@ -35,6 +35,38 @@ function indexVrm(vrm) {
   return { pieces, skins, skinMap: skinMat?.map ?? null };
 }
 
+// ---------- Ткань идёт за пальцем (для любой одежды, даже без «пружинок») ----------
+// Вершины одежды рядом с точкой касания сдвигаются в шейдере: упруго, с затухающим
+// покачиванием. Тело не трогаем — только материалы одежды. Одна пара uniform на все вещи.
+const CLOTH_POKE = { pos: { value: new THREE.Vector3(0, -99, 0) }, dir: { value: new THREE.Vector3() }, r: { value: 0.13 } };
+const clothSim = { x: new THREE.Vector3(), v: new THREE.Vector3(), target: new THREE.Vector3(0, -99, 0) };
+function installClothPoke(mesh) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m || m.userData.clothPoke) continue;
+    m.userData.clothPoke = true;
+    const prevCompile = m.onBeforeCompile;
+    m.onBeforeCompile = (shader, renderer) => {
+      prevCompile?.call(m, shader, renderer);
+      if (!shader.vertexShader.includes('#include <project_vertex>')) return;
+      shader.uniforms.uPokePos = CLOTH_POKE.pos;
+      shader.uniforms.uPokeDir = CLOTH_POKE.dir;
+      shader.uniforms.uPokeR = CLOTH_POKE.r;
+      shader.vertexShader = 'uniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      {
+        vec4 pkW = modelMatrix * vec4( transformed, 1.0 );
+        vec3 pkD = pkW.xyz - uPokePos;
+        float pkK = exp( -dot( pkD, pkD ) / ( uPokeR * uPokeR ) );
+        pkW.xyz += uPokeDir * pkK;
+        mvPosition = viewMatrix * pkW;
+        gl_Position = projectionMatrix * mvPosition;
+      }`);
+    };
+    const prevKey = m.customProgramCacheKey?.bind(m);
+    m.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|clothPoke`;
+    m.needsUpdate = true;
+  }
+}
+
 export class PieceWardrobe {
   constructor(scene) {
     this.scene = scene;
@@ -44,6 +76,49 @@ export class PieceWardrobe {
 
   attachBase(vrm) {
     this.base = { vrm, ...indexVrm(vrm) };
+    for (const list of Object.values(this.base.pieces)) list.forEach(installClothPoke);
+  }
+
+  // Палец ведёт ткань: point — где касание (мир), dir — куда ведут (мир), power — сила толчка.
+  clothPush(point, dir, power = 1, scale = 1) {
+    CLOTH_POKE.r.value = 0.13 * scale;
+    // Точка идёт за пальцем; далеко перескочил (и ткань уже успокоилась) — начинаем с новой точки.
+    if (clothSim.target.distanceTo(point) > 0.25 * scale && clothSim.x.length() < 0.004) clothSim.target.copy(point);
+    else clothSim.target.lerp(point, 0.6);
+    clothSim.v.addScaledVector(dir, 0.22 * power * scale);
+    if (clothSim.v.length() > 0.45 * scale) clothSim.v.setLength(0.45 * scale);
+  }
+
+  updateCloth(dt) {
+    const h = Math.min(dt, 0.033);
+    // Пружина с затуханием: ткань уходит за пальцем и пару раз качнётся обратно.
+    clothSim.v.addScaledVector(clothSim.x, -150 * h).multiplyScalar(Math.exp(-8.5 * h));
+    clothSim.x.addScaledVector(clothSim.v, h);
+    const lim = 0.032 * (CLOTH_POKE.r.value / 0.13);
+    if (clothSim.x.length() > lim) clothSim.x.setLength(lim);
+    CLOTH_POKE.pos.value.copy(clothSim.target);
+    CLOTH_POKE.dir.value.copy(clothSim.x);
+  }
+
+  // Вещи с другой девушки: у неё другие пропорции (длина рук, ног, шеи). Подгоняем скелет
+  // донора под текущую девушку — иначе его тело и одежда «съезжают» (двойные руки, ноги).
+  fitToBase(vrm) {
+    if (!this.base) return;
+    const bh = this.base.vrm.humanoid;
+    const h = vrm.humanoid;
+    let moved = false;
+    for (const name of Object.keys(bh.humanBones)) {
+      if (name === 'hips') continue; // таз двигается вместе с её тазом каждый кадр
+      const a = bh.getRawBoneNode(name);
+      const b = h.getRawBoneNode(name);
+      if (!a || !b) continue;
+      if (a.position.distanceToSquared(b.position) > 1e-10) { b.position.copy(a.position); moved = true; }
+    }
+    if (moved) {
+      vrm.scene.updateMatrixWorld(true);
+      vrm.springBoneManager?.setInitState?.();
+      vrm.springBoneManager?.reset?.();
+    }
   }
 
   hasSource(id) { return id === 'base' || this.sources.has(id); }
@@ -70,7 +145,9 @@ export class PieceWardrobe {
     vrm.scene.traverse((o) => { if (o.isMesh && !pieceSet.has(o)) o.visible = false; });
     vrm.scene.visible = false;
     this.scene.add(vrm.scene);
+    this.fitToBase(vrm);
     this.sources.set(id, { vrm, ...idx, active: false });
+    for (const list of Object.values(idx.pieces)) list.forEach(installClothPoke);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
     this.skinCache?.clear();
@@ -407,7 +484,8 @@ export class PieceWardrobe {
   // Каждый кадр: доноры повторяют её позу (нормализованные кости), затем считают свою физику.
   sync(dt) {
     if (!this.base) return;
-    this.restorePokes();
+    this.restorePokes(dt);
+    this.updateCloth(dt);
     const bh = this.base.vrm.humanoid;
     for (const [, s] of this.sources) {
       if (!s.active) continue;
@@ -461,13 +539,13 @@ export class PieceWardrobe {
   }
 
   // Касание толкает одежду с физикой и на вещах из шкафа (у них свои «пружинки»).
+  // Толчок плавный: добавляется к «тяжести» и мягко затухает — вещь пружинит, а не дёргается.
   poke(point, dir, strength = 1, scale = 1) {
     const push = new THREE.Vector3(dir.x, 0, dir.z);
     if (push.lengthSq() < 1e-6) return;
     push.normalize();
     const radius = 0.24 * scale;
     const pos = new THREE.Vector3();
-    const now = performance.now();
     this.poked ??= new Set();
     for (const [, s] of this.sources) {
       if (!s.active) continue;
@@ -477,25 +555,32 @@ export class PieceWardrobe {
         const d = pos.distanceTo(point);
         if (d > radius) continue;
         j.userData ??= {};
-        if (!j.userData.poke) j.userData.poke = { power: j.settings.gravityPower, dir: j.settings.gravityDir.clone() };
+        if (!j.userData.poke) j.userData.poke = { power: j.settings.gravityPower, dir: j.settings.gravityDir.clone(), vec: new THREE.Vector3() };
         const k = (1 - d / radius) * strength;
-        j.settings.gravityDir.copy(push);
-        j.settings.gravityPower = Math.max(j.settings.gravityPower, 1.6 * k);
-        j.userData.pokeUntil = now + 240;
+        j.userData.poke.vec.addScaledVector(push, 0.55 * k);
+        if (j.userData.poke.vec.length() > 0.85) j.userData.poke.vec.setLength(0.85);
         this.poked.add(j);
       }
     }
   }
 
-  restorePokes() {
+  restorePokes(dt = 0.016) {
     if (!this.poked?.size) return;
-    const now = performance.now();
+    const decay = Math.exp(-Math.min(dt, 0.05) * 4.5);
+    const g = this._pokeG ??= new THREE.Vector3();
     for (const j of this.poked) {
-      if (now < j.userData.pokeUntil) continue;
-      j.settings.gravityPower = j.userData.poke.power;
-      j.settings.gravityDir.copy(j.userData.poke.dir);
-      j.userData.poke = null;
-      this.poked.delete(j);
+      const pk = j.userData.poke;
+      pk.vec.multiplyScalar(decay);
+      if (pk.vec.length() < 0.012) {
+        j.settings.gravityPower = pk.power;
+        j.settings.gravityDir.copy(pk.dir);
+        j.userData.poke = null;
+        this.poked.delete(j);
+        continue;
+      }
+      g.copy(pk.dir).multiplyScalar(pk.power).add(pk.vec);
+      j.settings.gravityPower = g.length();
+      if (j.settings.gravityPower > 1e-5) j.settings.gravityDir.copy(g).normalize();
     }
   }
 
