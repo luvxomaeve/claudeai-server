@@ -1804,6 +1804,7 @@ let poseTabState = null; // поза во вкладке «Позы» (возв�
 let poseDrag = null; // { kind: 'hand' | 'head' | 'spine' | 'hips', side, plane, lastX, lastY }
 
 function setPoseMode(on) {
+  if (on !== poseMode) interstitial(); // пауза: переход между «Главной» и «Позами» (лимит — в ads.js)
   if (on && cameraMode) setCameraMode(false);
   if (on && currentMocap) stopMocap(); // позу выставляем на «живом» скелете, без записи
   // Вкладки разные: дома — обычная живая она (без выставленной позы), во вкладке «Позы» —
@@ -4017,6 +4018,13 @@ onAdPause((on) => {
   try { if (on) window.speechSynthesis?.cancel(); } catch { /* ignore */ }
   for (const a of document.querySelectorAll('audio')) { if (on) a.pause(); }
   try { if (on) window.__waifuAudio?.suspend?.(); else window.__waifuAudio?.resume?.(); } catch { /* ignore */ }
+});
+// Вернулся в игру после перерыва больше минуты — пауза для рекламы (лимит — в ads.js).
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 60000) setTimeout(() => interstitial(), 800);
+  hiddenAt = 0;
 });
 function tick() {
   requestAnimationFrame(tick);

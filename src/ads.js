@@ -6,8 +6,9 @@
 let ysdk = null;
 let pauseHook = () => {};
 const native = typeof window !== 'undefined' ? window.WaifuAndroid : null;
-// В приложении первая полноэкранная — не сразу после запуска, а через 3 минуты.
-let lastFullscreen = native ? Date.now() : 0;
+// Полноэкранная — не чаще раза в 6 минут; в приложении первая — не раньше чем через 5 минут.
+const FULLSCREEN_GAP = 6 * 60000;
+let lastFullscreen = native ? Date.now() - FULLSCREEN_GAP + 5 * 60000 : 0;
 
 // «Без рекламы» (покупка): полноэкранной рекламы нет, реклама за награду — по желанию.
 const NOADS_KEY = 'waifu-noads';
@@ -56,6 +57,7 @@ if (native) {
     pauseHook(false);
     nativeCb = null;
     if (!cb) return;
+    lastFullscreen = Math.max(lastFullscreen, Date.now()); // сразу после ролика — без полноэкранной
     if (ev === 'close' && cb.got) cb.onReward();
     else if (ev === 'error') cb.onReward(); // реклама не загрузилась — не мучаем, даём награду
     else cb.onFail();
@@ -78,18 +80,18 @@ export function rewarded(onReward, onFail = () => {}) {
     callbacks: {
       onOpen: () => pauseHook(true),
       onRewarded: () => { got = true; },
-      onClose: () => { pauseHook(false); if (got) onReward(); else onFail(); },
+      onClose: () => { pauseHook(false); lastFullscreen = Math.max(lastFullscreen, Date.now()); if (got) onReward(); else onFail(); },
       onError: () => { pauseHook(false); onFail(); },
     },
   });
 }
 
-// Полноэкранная реклама — не чаще раза в 3 минуты, только в паузах (не посреди действия).
+// Полноэкранная реклама — не чаще раза в 6 минут, только в паузах (не посреди действия).
 export function interstitial() {
   if (noAds()) return;
   if (!ysdk && !native) return;
   const now = Date.now();
-  if (now - lastFullscreen < 180000) return;
+  if (now - lastFullscreen < FULLSCREEN_GAP) return;
   lastFullscreen = now;
   if (native) {
     try { native.showInterstitial(); } catch { /* ignore */ }
