@@ -2961,32 +2961,18 @@ async function updateSelfDress(dt) {
   suggestTimer = Math.max(suggestTimer, 180); // не вместе с предложением
   selfDressing = true;
   try {
-    const r = Math.random();
-    let kind;
-    if (r < 0.85) {
-      // Одна вещь (чаще всего).
-      const opts = [];
-      for (const c of PIECE_CATS) {
-        for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && (wear[c.id] ?? 'base') !== src.id) opts.push({ cat: c.id, id: src.id });
-        if ((wear[c.id] ?? 'base') !== 'base' && c.id !== 'acc') opts.push({ cat: c.id, id: 'base' });
-      }
-      if (!opts.length) return;
-      const o = opts[Math.floor(Math.random() * opts.length)];
-      kind = o.cat;
-      await pickPiece(o.cat, o.id, true);
-    } else if (r < 0.95) {
-      // Целый наряд (редко) из одного комплекта.
-      const src = PIECE_SOURCES[Math.floor(Math.random() * PIECE_SOURCES.length)];
-      kind = 'outfit';
-      for (const c of PIECE_CATS) {
-        if (src.cats.includes(c.id)) await pickPiece(c.id, src.id, true);
-        else if (c.id === 'acc') await pickPiece('acc', 'none', true);
-      }
-    } else {
-      // Обратно в свой базовый образ.
-      kind = 'base';
-      for (const c of PIECE_CATS) await pickPiece(c.id, 'base', true);
-    }
+    // Весь образ вразнобой: верх, низ, чулки и обувь — каждое из случайного комплекта.
+    const kind = 'outfit';
+    const rnd = (cat) => {
+      const cur = wear[cat] ?? 'base';
+      const opts = ['base', ...PIECE_SOURCES.filter((x) => x.cats.includes(cat)).map((x) => x.id)].filter((id) => id !== cur);
+      return opts.length ? opts[Math.floor(Math.random() * opts.length)] : cur;
+    };
+    const top = rnd('tops');
+    await pickPiece('tops', top, true);
+    if (!isDress(top)) await pickPiece('bottoms', rnd('bottoms'), true);
+    await pickPiece('legs', rnd('legs'), true);
+    await pickPiece('shoes', rnd('shoes'), true);
     character.react({ expression: 'happy', motion: 'sway' });
     say(pick(SELF_DRESS_LINES[kind] ?? SELF_DRESS_LINES.outfit), 'happy');
   } finally {

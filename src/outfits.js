@@ -51,7 +51,9 @@ function installClothPoke(mesh) {
       shader.uniforms.uPokePos = CLOTH_POKE.pos;
       shader.uniforms.uPokeDir = CLOTH_POKE.dir;
       shader.uniforms.uPokeR = CLOTH_POKE.r;
-      shader.vertexShader = 'uniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      shader.uniforms.uTuck = (m.userData.tuck ??= { value: 0 });
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed -= normalize( normal ) * ( aTuck * uTuck );');
+      shader.vertexShader = 'attribute float aTuck;\nuniform float uTuck;\nuniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
       {
         vec4 pkW = modelMatrix * vec4( transformed, 1.0 );
         vec3 pkD = pkW.xyz - uPokePos;
@@ -67,6 +69,31 @@ function installClothPoke(mesh) {
   }
 }
 
+// «Заправить» низ под чужой верх: часть низа, что сидит на торсе (высокая талия, платье-комбинезон),
+// чуть утягивается внутрь, чтобы не пробивалась сквозь верх от другого наряда.
+const TUCK_BONES = { spine: 0.022, chest: 0.045, upperChest: 0.05, neck: 0.05, leftShoulder: 0.05, rightShoulder: 0.05, leftUpperArm: 0.05, rightUpperArm: 0.05 };
+function installTuck(vrm, mesh) {
+  const g = mesh.geometry;
+  if (!mesh.isSkinnedMesh || g.getAttribute('aTuck') || !g.getAttribute('skinIndex')) return;
+  const amount = new Map();
+  for (const [name, a] of Object.entries(TUCK_BONES)) {
+    const node = vrm.humanoid?.getRawBoneNode(name);
+    const i = node ? mesh.skeleton.bones.indexOf(node) : -1;
+    if (i >= 0) amount.set(i, a);
+  }
+  const si = g.getAttribute('skinIndex'), sw = g.getAttribute('skinWeight');
+  const arr = new Float32Array(si.count);
+  for (let v = 0; v < si.count; v++) {
+    let t = 0;
+    for (let k = 0; k < 4; k++) t += (amount.get(si.getComponent(v, k)) ?? 0) * sw.getComponent(v, k);
+    arr[v] = t;
+  }
+  g.setAttribute('aTuck', new THREE.BufferAttribute(arr, 1));
+}
+function setTuck(mesh, on) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) if (m) (m.userData.tuck ??= { value: 0 }).value = on ? 1 : 0;
+}
+
 export class PieceWardrobe {
   constructor(scene) {
     this.scene = scene;
@@ -77,6 +104,7 @@ export class PieceWardrobe {
   attachBase(vrm) {
     this.base = { vrm, ...indexVrm(vrm) };
     for (const list of Object.values(this.base.pieces)) list.forEach(installClothPoke);
+    for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
   }
 
   // Палец ведёт ткань: point — где касание (мир), dir — куда ведут (мир), power — сила толчка.
@@ -148,6 +176,7 @@ export class PieceWardrobe {
     this.fitToBase(vrm);
     this.sources.set(id, { vrm, ...idx, active: false });
     for (const list of Object.values(idx.pieces)) list.forEach(installClothPoke);
+    for (const m of idx.pieces.bottoms ?? []) installTuck(vrm, m);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
     this.skinCache?.clear();
@@ -165,6 +194,11 @@ export class PieceWardrobe {
       for (const m of this.base.pieces[cat.id] ?? []) m.visible = choice === 'base' || (choice !== 'none' && !this.sources.has(choice));
       for (const [id, s] of this.sources) for (const m of s.pieces[cat.id] ?? []) m.visible = choice === id;
     }
+    // Низ под верхом от другого наряда — заправляем.
+    const topC = wear.tops ?? 'base', botC = wear.bottoms ?? 'base';
+    const tuck = topC !== 'none' && topC !== botC;
+    for (const m of this.base.pieces.bottoms ?? []) setTuck(m, tuck);
+    for (const [, s] of this.sources) for (const m of s.pieces.bottoms ?? []) setTuck(m, tuck);
     for (const [, s] of this.sources) {
       s.active = PIECE_CATS.some((c) => !c.skin && (s.pieces[c.id] ?? []).some((m) => m.visible));
       s.vrm.scene.visible = s.active;
