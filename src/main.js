@@ -1213,6 +1213,8 @@ canvas.addEventListener('pointermove', (e) => {
     if (ay > 22 && ay > ax * 1.5) {
       // «Авто»: потянул за грудь/плечи/лицо — наклон вперёд или прогиб назад; за живот и ноги — сесть/встать.
       const upper = autoMode && !poseMode && ['body', 'arm', 'face'].includes(stroking.hit.zone);
+      // «Авто»: идёт повтор, а ты снова взялся двигать её — повтор уступает, запомню новое движение.
+      if (autoMode && !poseMode && reps.home.on) { setRepeat(false); renderAutoRep(); }
       stroking = null;
       poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now() };
       showLabel(upper ? 'Ниже — наклон вперёд, выше — прогиб назад' : 'Ниже — сесть / лечь, выше — встать');
@@ -2526,6 +2528,7 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
+  if (autoMode && !poseMode && (poseDrag.kind === 'benddrag' || poseDrag.kind === 'sitdrag')) autoRecNote();
   if (poseDrag.kind === 'benddrag') {
     // Полная амплитуда наклона и прогиба, как у левой полосы во вкладке «Позы».
     lastOnHerAt = performance.now();
@@ -4228,6 +4231,7 @@ document.body.appendChild(autoExit);
 function setAutoMode(on) {
   if (on && poseMode) setPoseMode(false);
   autoMode = on;
+  autoRec = null; autoRepOffer = null; renderAutoRep();
   if (character) character.autoSleep = on;
   if (!on && character && !poseMode) {
     // Вышел из «Авто» — наклон/прогиб плавно возвращается в ровное положение.
@@ -4279,6 +4283,66 @@ autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoExit.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(false); });
+// ---------- «Авто»: подвигал её туда-сюда — всплывает «Повторить?» ----------
+// Запоминаем, как ты её двигал (наклон/прогиб, сесть/встать). Отпустил — 6 секунд висит кнопка:
+// нажал — она сама повторяет это движение по кругу, пока не нажмёшь «Стоп» или не возьмёшься двигать снова.
+let autoRec = null;
+let autoRepOffer = null;
+let autoRepTimer = 0;
+const autoRepBtn = document.createElement('button');
+autoRepBtn.id = 'auto-rep';
+autoRepBtn.hidden = true;
+document.body.appendChild(autoRepBtn);
+for (const ev of ['pointerdown', 'touchstart']) autoRepBtn.addEventListener(ev, (e) => e.stopPropagation());
+function autoRecNote() {
+  const now = performance.now();
+  if (!autoRec || now - autoRec.last > 700) autoRec = { start: now, samples: [] };
+  autoRec.last = now;
+  autoRec.samples.push({ t: (now - autoRec.start) / 1000, ...nowPose() });
+}
+function renderAutoRep() {
+  const playing = autoMode && reps.home.on && reps.home.state === 'play';
+  autoRepBtn.hidden = !(autoMode && (playing || autoRepOffer));
+  autoRepBtn.classList.toggle('active', playing);
+  autoRepBtn.classList.toggle('offer', !playing && !!autoRepOffer);
+  autoRepBtn.textContent = playing ? '⏹ Стоп' : '🔁 Повторить?';
+}
+window.addEventListener('pointerup', () => {
+  if (!autoMode || !autoRec || reps.home.on) return;
+  const rec = autoRec;
+  // Ждём чуть-чуть: вдруг это пауза между рывками одного движения.
+  setTimeout(() => {
+    if (autoRec !== rec || pointerActive || performance.now() - rec.last < 250 || reps.home.on || !autoMode) return;
+    autoRec = null;
+    const S = rec.samples;
+    if (S.length < 5) return;
+    const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
+    if (S[S.length - 1].t < 0.45 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
+    autoRepOffer = rec;
+    renderAutoRep();
+    clearTimeout(autoRepTimer);
+    autoRepTimer = setTimeout(() => { autoRepOffer = null; renderAutoRep(); }, 6000);
+  }, 300);
+}, { capture: true, passive: true });
+autoRepBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const r = reps.home;
+  if (r.on) { setRepeat(false); renderAutoRep(); return; }
+  const rec = autoRepOffer;
+  if (!rec) return;
+  autoRepOffer = null;
+  clearTimeout(autoRepTimer);
+  stopAuto(true);
+  Object.assign(r, { on: true, state: 'play', samples: rec.samples, dur: rec.samples[rec.samples.length - 1].t, blendFrom: null,
+    ptsTrack: null, ptsRec: null, sitFree: false, bendOff: 0, sitOff: 0, midFor: null, life: 0 });
+  r.t = r.dur;
+  r.movedPts = movedPoints(r.samples);
+  r.sitMoved = sitMovedIn(r.samples);
+  renderRep();
+  renderAutoRep();
+  character.react({ expression: 'happy' });
+  say(pick(['Вот так? Хи~', 'Запомнила! Смотри~', 'Повторяю ♥', 'Так нравится?~']), 'happy');
+});
 window.addEventListener('pointerdown', () => { autoTouchAt = performance.now(); }, { capture: true, passive: true });
 // Камера плавно покачивается вокруг неё, пока её не трогают (и ещё 3 секунды после).
 function updateAutoCam(dt) {
