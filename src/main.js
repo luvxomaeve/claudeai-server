@@ -4353,6 +4353,7 @@ let autoLoopT = performance.now();
     camEase.yaw *= 1 - a; camEase.pitch *= 1 - a;
   }
   autoRepCheck(now);
+  autoLife(now);
   if (!autoRepBtn.hidden && character.bones?.head) {
     const v = character.bones.head.getWorldPosition(new THREE.Vector3());
     v.y += 0.2 * (character.scale ?? 1);
@@ -4369,6 +4370,63 @@ function renderAutoRep() {
   autoRepBtn.classList.toggle('active', playing);
   autoRepBtn.classList.toggle('offer', !playing && !!autoRepOffer);
   autoRepBtn.textContent = playing ? '✕ отмена' : '🔁 Повторить';
+}
+// Живые мелочи: во сне над головой плывут 💤, проснулась сама — зевает; на повторе — искорки и фразы;
+// глубокий наклон или прогиб — комментирует.
+const screenOf = (bone, up = 0) => {
+  const v = bone.getWorldPosition(new THREE.Vector3());
+  v.y += up * (character.scale ?? 1);
+  v.project(camera);
+  return { x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight, ok: v.z < 1 };
+};
+const life = { zzz: 0, asleep: false, spark: 0, line: 0, bendSaid: 0, bendZone: 0 };
+function autoLife(now) {
+  const head = character.bones?.head;
+  if (!head) return;
+  const sl = character.sleep ?? 0;
+  if (sl > 0.8) {
+    life.asleep = true;
+    if (now - life.zzz > 1500) {
+      life.zzz = now;
+      const p = screenOf(head, 0.16);
+      if (p.ok) fxParticle(p.x + 14, p.y - 6, Math.random() < 0.35 ? '💤' : Math.random() < 0.5 ? 'z' : 'Z',
+        { dx: 22 + Math.random() * 26, dy: -64 - Math.random() * 36, size: 18 + Math.random() * 14, color: '#ffffff', dur: 2.8, rot: 14 });
+    }
+  } else if (life.asleep && sl < 0.3) {
+    life.asleep = false;
+    // Проснулась сама (не от касания) — сонно зевает.
+    if (!pointerActive && now - lastOnHerAt > 1500) {
+      character.setExpression('relaxed', 0.6, 2.6);
+      say(pick(['Ммм… я задремала~ 🥱', '*зевает* Доброе утро…', 'Ой… я уснула? 😳', 'Так сладко спалось~']));
+    }
+  }
+  // Повтор в «Авто»: искорки в такт и редкие довольные фразы.
+  if (autoMode && reps.home.on && reps.home.state === 'play') {
+    const chest = character.bones.chest ?? character.bones.spine ?? head;
+    if (now - life.spark > 2200) {
+      life.spark = now;
+      const p = screenOf(chest);
+      if (p.ok) fxSpark(p.x + (Math.random() - 0.5) * 90, p.y + (Math.random() - 0.5) * 70, 2);
+    }
+    if (now - life.line > 11000 && sl < 0.3) {
+      if (life.line) { character.setExpression('happy', 0.6, 2.2); say(pick(['Ещё? ♥', 'Не устану~', 'Хи, мне нравится~', 'Смотришь? 😏', 'Вот так… да~', 'Долго так могу ♥'])); }
+      life.line = now;
+    }
+  } else life.line = 0;
+  // Ведёшь наклон: дошёл до глубокого наклона или сильного прогиба — отзывается (не чаще раза в 7 с).
+  if (autoMode && autoBendTarget != null && poseDrag) {
+    const b = character.bodyOffset.hipsRotX;
+    const zone = b > 1.15 ? 1 : b < -0.55 ? -1 : Math.abs(b) < 0.4 ? 0 : life.bendZone;
+    if (zone !== life.bendZone) {
+      life.bendZone = zone;
+      if (zone && now - life.bendSaid > 7000) {
+        life.bendSaid = now;
+        character.setExpression(zone > 0 ? 'happy' : 'relaxed', 0.5, 2);
+        say(pick(zone > 0 ? ['Ой, так низко~', 'Растяжка! Хи~', 'Смотри, какая я гибкая ♥', 'Уф… достала до пола!']
+          : ['Ух, потянулась~', 'Спинка хрустнула… хи', 'Так красиво? ♥', 'Ммм, как хорошо тянется~']));
+      }
+    }
+  }
 }
 // Двойной тап по фону в «Авто»: всё плавно возвращается как было — она встаёт и выпрямляется,
 // камера снова «приклеена» к ней в обычном виде спереди.
