@@ -498,7 +498,6 @@ async function loadModel(source) {
     buildHitboxes();
     frameCamera();
     $('loading').classList.add('done');
-    setTimeout(() => maybeDaily(), 1800); // подарок дня — раз в день при входе
     if (firstLoad) {
       gameReady();
       greetOnLoad();
@@ -744,10 +743,6 @@ function renderLoveCard() {
       + (items ? `<ul>${items}</ul>` : '');
     lmList.appendChild(row);
   });
-  {
-    const ds = dailyState();
-    lmHead.insertAdjacentHTML('beforeend', `<small class="lm-daily">🎁 Подарок дня: ${ds.ready ? 'ждёт тебя!' : `получен · серия ${ds.streak} из 7 · следующий завтра`}</small>`);
-  }
   lmDev.hidden = !!window.WAIFU_RELEASE; // в версии для магазина «Макс» и «Сброс» скрыты
 }
 let devSuppressClick = false;
@@ -833,64 +828,6 @@ $('love-reset').addEventListener('click', (e) => { e.stopPropagation(); reachedL
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#affection, #love-menu')) $('love-menu').hidden = true; });
 renderAffection();
 // В релизе (Яндекс Игры) кнопки «Макс» нет — симпатию надо заработать.
-// ---------- Подарок дня ----------
-// Раз в день при входе: симпатия в подарок. Серия 7 дней, с каждым днём больше;
-// пропустил день — серия заново. «x2 за рекламу» — по желанию.
-const DAILY_KEY = 'waifu-daily';
-const DAILY_GIFTS = [15, 20, 25, 30, 40, 50, 100];
-const dayNum = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 86400000);
-let daily = { day: 0, streak: 0 };
-try {
-  const d = JSON.parse(localStorage.getItem(DAILY_KEY) || 'null');
-  if (d && Number.isFinite(d.day) && Number.isFinite(d.streak)) daily = d;
-} catch { /* ignore */ }
-function dailyState() {
-  const today = dayNum();
-  if (daily.day === today) return { ready: false, streak: daily.streak };
-  return { ready: true, streak: daily.day === today - 1 ? (daily.streak % 7) + 1 : 1 };
-}
-let dailyPop = null;
-function maybeDaily() {
-  if (!character || love >= LOVE_MAX) return;
-  const st = dailyState();
-  if (!st.ready || (dailyPop && !dailyPop.hidden)) return;
-  if (!dailyPop) {
-    dailyPop = document.createElement('div');
-    dailyPop.id = 'daily-pop';
-    dailyPop.innerHTML = '<div class="dp-title">🎁 Подарок дня</div><div class="dp-text"></div><div class="dp-days"></div>'
-      + '<div class="dp-btns"><button class="dp-x2 primary"></button><button class="dp-take"></button></div>';
-    document.body.appendChild(dailyPop);
-    for (const ev of ['pointerdown', 'click']) dailyPop.addEventListener(ev, (e) => e.stopPropagation());
-  }
-  const gift = DAILY_GIFTS[st.streak - 1];
-  dailyPop.querySelector('.dp-text').textContent = st.streak > 1
-    ? `Ты заходишь ${st.streak}-й день подряд — она рада! Заходи каждый день: подарок растёт 💗`
-    : 'Она ждала тебя! Заходи каждый день — подарок растёт 💗';
-  dailyPop.querySelector('.dp-days').innerHTML = DAILY_GIFTS.map((g, i) =>
-    `<span class="${i + 1 < st.streak ? 'done' : i + 1 === st.streak ? 'cur' : ''}"><b>${i + 1 < st.streak ? '✓' : `+${g}`}</b><i>день ${i + 1}</i></span>`).join('');
-  const x2 = dailyPop.querySelector('.dp-x2');
-  const take = dailyPop.querySelector('.dp-take');
-  x2.hidden = !hasAds();
-  x2.textContent = `▶ Забрать x2: +${gift * 2} ♥ (реклама)`;
-  take.textContent = `Забрать +${gift} ♥`;
-  take.classList.toggle('primary', !hasAds());
-  take.onclick = () => claimDaily(1);
-  x2.onclick = () => adsRewarded(() => claimDaily(2), () => showToast('Реклама не досмотрена — забери обычный подарок'));
-  dailyPop.hidden = false;
-}
-function claimDaily(mult) {
-  const st = dailyState();
-  if (dailyPop) dailyPop.hidden = true;
-  if (!st.ready) return;
-  const gift = DAILY_GIFTS[st.streak - 1] * mult;
-  daily = { day: dayNum(), streak: st.streak };
-  try { localStorage.setItem(DAILY_KEY, JSON.stringify(daily)); } catch { /* ignore */ }
-  setLove(love + gift);
-  for (let i = 0; i < 7; i++) setTimeout(() => floatHeart(window.innerWidth * (0.3 + Math.random() * 0.4), window.innerHeight * 0.45), i * 110);
-  showToast(`🎁 +${gift} симпатии · день ${st.streak} из 7`);
-  character?.react({ expression: 'happy', motion: 'tiltHead' });
-  say(pick(['Ты пришёл! Я ждала ♥', 'Это мне? Спасибо~ ♥', 'Хи, ты про меня не забыл!', 'Приходи завтра тоже, ладно? ♥']), 'happy');
-}
 // «Макс» в релизе — только в режиме разработчика (см. окошко прогресса).
 initPlatform();
 
