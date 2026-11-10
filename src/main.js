@@ -14,7 +14,14 @@ import { REACTIONS, STROKES, IDLE_LINES, pick } from './dialogue.js';
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
 // положи файл рядом, например models/waifu.vrm, и укажи путь здесь,
 // или просто перетащи .vrm в окно / добавь через 👗 Гардероб.
-const DEFAULT_MODEL = window.WAIFU_MODEL_URL ??
+// Девушки: window.WAIFU_GIRLS = [{ id, name, url, baseNames, baseLegs, cats, lvl }]. Первая — по умолчанию.
+// Выбранная запоминается; у каждой свой набор надетых вещей и цветов. Одежда остальных — в общем шкафу.
+const GIRLS = Array.isArray(window.WAIFU_GIRLS) && window.WAIFU_GIRLS.length ? window.WAIFU_GIRLS : null;
+let girlId = null;
+try { girlId = localStorage.getItem('waifu-girl'); } catch { /* ignore */ }
+const GIRL = GIRLS ? (GIRLS.find((g) => g.id === girlId) ?? GIRLS[0]) : null;
+const girlKey = (k) => (GIRL && GIRL !== GIRLS[0] ? `${k}@${GIRL.id}` : k);
+const DEFAULT_MODEL = GIRL?.url ?? window.WAIFU_MODEL_URL ??
   'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v3.1.0/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm';
 
 const $ = (id) => document.getElementById(id);
@@ -589,6 +596,7 @@ const FEATURES = [
   { id: 'flow', lvl: 5, name: '«Повтор движения»', ids: ['cam-auto'] },
 ];
 // Фича открывается навсегда: уровнем симпатии или сразу — за рекламу.
+for (const g of GIRLS ?? []) if (g.lvl) FEATURES.push({ id: `girl_${g.id}`, lvl: g.lvl, name: `Девушка «${g.name}»`, ids: [] });
 const UNLOCK_KEY = 'waifu-unlocked2';
 const AD_UNLOCK_FOREVER = 8.64e15; // «навсегда» (максимальная дата)
 let adUnlocked = {}; // id → до какого времени открыто
@@ -637,6 +645,7 @@ function showLock(f) {
       try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(adUnlocked)); } catch { /* ignore */ }
       lockSig = FEATURES.map((x) => (unlocked(x.id) ? 1 : 0)).join('');
       renderLocks();
+      if (!$('wardrobe').classList.contains('hidden')) renderGirls();
       showToast(`🔓 Открыто: ${f.name}`);
     }, () => showToast('Реклама не досмотрена — ничего страшного'));
   };
@@ -842,7 +851,7 @@ let lastSpokeAt = 0;
 function legwear() {
   try {
     const id = wear.legs || 'base';
-    if (id === 'base') return window.WAIFU_BASE_LEGS ?? 'tights';
+    if (id === 'base') return GIRL?.baseLegs ?? window.WAIFU_BASE_LEGS ?? 'tights';
     return PIECE_SOURCES.find((x) => x.id === id)?.legsKind ?? 'stockings';
   } catch { return 'tights'; } // ещё не загрузилось
 }
@@ -2660,12 +2669,12 @@ const look = { hair: 'original', stockings: 'off', dark: false };
 // у другой — свои цвета.
 function loadLookFor(id) {
   Object.assign(look, { hair: 'original', stockings: 'off', dark: false, cloth: 'original' });
-  try { Object.assign(look, JSON.parse(localStorage.getItem(`waifu-look:${id}`) || '{}')); } catch { /* ignore */ }
+  try { Object.assign(look, JSON.parse(localStorage.getItem(girlKey(`waifu-look:${id}`)) || '{}')); } catch { /* ignore */ }
   clothColor = look.cloth;
 }
 const saveLook = () => {
   look.cloth = clothColor;
-  try { localStorage.setItem(`waifu-look:${currentOutfit}`, JSON.stringify(look)); } catch { /* ignore */ }
+  try { localStorage.setItem(girlKey(`waifu-look:${currentOutfit}`), JSON.stringify(look)); } catch { /* ignore */ }
 };
 
 function tintMaterials(test, colorHex, shadeK) {
@@ -2690,10 +2699,16 @@ function tintMaterials(test, colorHex, shadeK) {
 // ---------- Одежда по частям ----------
 // Источники — та же девушка в других нарядах (.vrm из VRoid). В артефакте список задаёт страница
 // (window.WAIFU_OUTFITS), модели лежат только там. cats — какие вещи есть; dress — верх это платье.
-const PIECE_SOURCES = window.WAIFU_OUTFITS ?? [];
+const PIECE_SOURCES = [
+  ...(window.WAIFU_OUTFITS ?? []),
+  // Базовые наряды остальных девушек — тоже вещи в шкафу.
+  ...(GIRLS ?? []).filter((g) => g !== GIRL).map((g) => ({
+    id: `g_${g.id}`, name: g.name, url: g.url, cats: g.cats ?? ['tops', 'bottoms', 'shoes', 'legs'], names: g.baseNames ?? {}, legsKind: g.baseLegs ?? 'stockings',
+  })),
+];
 const pieceWardrobe = new PieceWardrobe(scene);
 window.__pw = pieceWardrobe; // для отладки
-const WEAR_KEY = 'waifu-wear';
+const WEAR_KEY = girlKey('waifu-wear');
 let wear = {};
 try { wear = JSON.parse(localStorage.getItem(WEAR_KEY) || '{}'); } catch { wear = {}; }
 const pieceLoading = new Map();
@@ -2753,7 +2768,7 @@ const TINTS = [
   { name: 'Изумруд', hex: 0x2f9e7a },
   { name: 'Шоколад', hex: 0x6b4434 },
 ];
-const TINT_KEY = 'waifu-wear-tint';
+const TINT_KEY = girlKey('waifu-wear-tint');
 let wearTint = {};
 try { wearTint = JSON.parse(localStorage.getItem(TINT_KEY) || '{}'); } catch { wearTint = {}; }
 function cycleTint(cat, id) {
@@ -2792,7 +2807,7 @@ async function pickPiece(cat, id, quiet = false) {
 }
 // Гардероб-шкаф: вкладки по частям (верх, низ, обувь, аксессуары, ноги) и карточки вещей с названиями.
 const PIECE_ICONS = { tops: '👚', bottoms: '🩳', shoes: '👠', acc: '🎀', legs: '🧦' };
-const BASE_NAMES = window.WAIFU_BASE_NAMES ?? {};
+const BASE_NAMES = GIRL?.baseNames ?? window.WAIFU_BASE_NAMES ?? {};
 let closetTab = 'tops';
 function pieceName(srcId, cat) {
   if (srcId === 'none') return { shoes: 'Босиком', acc: 'Без аксессуара', bottoms: 'Без низа (платье)' }[cat] ?? 'Без';
@@ -3014,7 +3029,37 @@ function renderSwatches(boxId, items, current, onPick) {
   }
 }
 
+// Выбор девушки — вверху гардероба. Смена — перезапуск сцены с другой моделью.
+function renderGirls() {
+  if (!GIRLS || GIRLS.length < 2) return;
+  let box = $('girl-pick');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'girl-pick';
+    const head = document.createElement('div');
+    head.className = 'editor-group';
+    head.textContent = 'Девушка';
+    $('goth-preset').before(head, box);
+  }
+  box.innerHTML = '';
+  for (const g of GIRLS) {
+    const open = !g.lvl || unlocked(`girl_${g.id}`);
+    const b = document.createElement('button');
+    b.className = 'girl-chip' + (g === GIRL ? ' active' : '') + (open ? '' : ' closed');
+    b.innerHTML = `<span class="gc-ico">${g.icon ?? '💗'}</span><span class="gc-name">${g.name}</span>${open ? '' : '<span class="gc-lock">🔒</span>'}`;
+    b.addEventListener('click', () => {
+      if (g === GIRL) return;
+      if (!open) { showLock(FEATURES.find((f) => f.id === `girl_${g.id}`)); return; }
+      try { localStorage.setItem('waifu-girl', g.id); } catch { /* ignore */ }
+      $('flash')?.classList.add('on');
+      showToast(`💗 ${g.name} уже идёт…`);
+      setTimeout(() => location.reload(), 350);
+    });
+    box.appendChild(b);
+  }
+}
 function renderWardrobe() {
+  renderGirls();
   renderPieces();
   const list = $('outfit-list');
   list.innerHTML = '';

@@ -1450,3 +1450,12 @@ body.posing #wish { bottom: calc(136px + env(safe-area-inset-bottom, 0px)); }
 @keyframes wishBob { 50% { transform: translateY(-2px) scale(1.12); } }
 body.love-open #wish { opacity: 0; pointer-events: none; }
 #love-menu .lm-head .lm-wishes { color: var(--ink); opacity: 0.75; font-weight: 600; }
+
+/* Выбор девушки в гардеробе */
+#girl-pick { display: flex; gap: 8px; margin-bottom: 10px; }
+#girl-pick .girl-chip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: 2px solid transparent;
+  border-radius: 14px; background: rgba(255, 255, 255, 0.7); color: var(--ink); font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; }
+#girl-pick .girl-chip.active { border-color: var(--pink); background: linear-gradient(135deg, rgba(255, 179, 209, 0.5), rgba(199, 125, 255, 0.3)); }
+#girl-pick .girl-chip.closed { opacity: 0.65; }
+#girl-pick .gc-ico { font-size: 17px; }
+#girl-pick .gc-lock { font-size: 12px; }
