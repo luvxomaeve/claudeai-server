@@ -287,9 +287,11 @@ function applyOrbit() {
 // Для отладки и записи кадров.
 window.__setYaw = (y, pitch) => { camYaw = y; if (pitch != null) camPitch = pitch; applyOrbit(); };
 
+var autoCentered = false; // «Авто»: камера уже возвращена по центру двойным тапом (сдвинул сам — сбрасывается)
 let lastCamMove = 0; // когда последний раз крутили камеру — точки не ловят палец
 function rotateBy(delta, dPitch = 0) {
   lastCamMove = performance.now();
+  autoCentered = false;
   if (freeCam) {
     // Свободная камера: палец по фону — оглядеться.
     freeCam.yaw += delta * 0.6;
@@ -304,6 +306,7 @@ function rotateBy(delta, dPitch = 0) {
 }
 
 function zoomBy(factor) {
+  autoCentered = false;
   if (!freeCam && touches.size === 2) {
     enterManualCam();
     // Приближаем к точке между пальцами (а не к центру экрана).
@@ -1377,7 +1380,10 @@ function endPointer(e) {
           if (unlocked('wardrobe') && PIECE_SOURCES.length) { selfDressTimer = 0; showToast('👗 Переодевается…'); }
           else showToast('🔒 Гардероб откроется позже');
         } else {
-          autoReturn();
+          // Первый двойной тап — камера возвращается по центру (она продолжает, что делала);
+          // второй подряд — всё возвращается: она встаёт ровно, повтор снимается.
+          if (!autoCentered) { camEase.yaw = 0; camEase.pitch = 0; resetView(); autoCentered = true; }
+          else { autoReturn(); autoCentered = false; }
         }
       } else autoTap = { t: now, x: e.clientX, y: e.clientY, her: !!herTap };
     } else autoTap = null;
@@ -4354,7 +4360,7 @@ autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
   + '<span>🔁 Подвигал туда-сюда — предложит повторить</span>'
   + '<span>🎥 По фону — камера вокруг неё; двумя пальцами — ближе/дальше и сдвиг</span>'
   + '<span>👗 Двойной тап по ней — переоденется</span>'
-  + '<span>↩️ Двойной тап по фону — всё вернётся как было</span>';
+  + '<span>🎯 Двойной тап по фону — камера по центру; ещё раз — она встаёт как была</span>';
 document.body.appendChild(autoHint);
 let autoHintTimer = 0;
 // Подсказка сама показывается только в самый первый раз; дальше — по кнопке «?» рядом с крестиком.
@@ -4552,7 +4558,6 @@ function autoReturn() {
   if (character.sit > 0.01) sitBy(-character.sit / 0.004);
   autoBendTarget = 0;
   resetView();
-  showToast('↩️ Как было');
 }
 // Свайп-команда в «Авто». dir: +1 — вниз, −1 — вверх.
 // По груди/плечам/лицу — наклон вперёд ↔ прогиб назад (по ступенькам); по животу и ногам — ниже ↔ выше

@@ -268,11 +268,16 @@ function skinFill(d, w, h, need) {
   for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
     const i = (y * w + x) * 4;
     if (need[i >> 2] || !isSkin(i)) continue;
+    // Образец — только чистая кожа: рядом с краем ткани (чулка, майки) она затемнена и даёт полосы.
+    const E = 10;
+    if (x < E || y < E || x >= w - E || y >= h - E) continue;
+    if (!isSkin(i - E * 4) || !isSkin(i + E * 4) || !isSkin(i - E * w * 4) || !isSkin(i + E * w * 4)
+      || need[(i >> 2) - E] || need[(i >> 2) + E] || need[(i >> 2) - E * w] || need[(i >> 2) + E * w]) continue;
     const k = ((y * L / h) | 0) * L + ((x * L / w) | 0);
     r[k] += d[i]; g[k] += d[i + 1]; b[k] += d[i + 2]; c[k]++;
   }
   let ok = new Uint8Array(n), any = false;
-  for (let k = 0; k < n; k++) if (c[k] >= 3) { r[k] /= c[k]; g[k] /= c[k]; b[k] /= c[k]; ok[k] = 1; any = true; } else { r[k] = g[k] = b[k] = 0; }
+  for (let k = 0; k < n; k++) if (c[k] >= 2) { r[k] /= c[k]; g[k] /= c[k]; b[k] /= c[k]; ok[k] = 1; any = true; } else { r[k] = g[k] = b[k] = 0; }
   if (!any) return;
   const src = ok.slice(); // настоящая кожа — её не трогаем
   for (let it = 0; it < 300; it++) {
@@ -292,7 +297,7 @@ function skinFill(d, w, h, need) {
     if (!left) break;
   }
   // Сглаживаем дорисованное (несколько проходов), настоящую кожу оставляем как есть.
-  for (let it = 0; it < 10; it++) for (let y = 1; y < L - 1; y++) for (let x = 1; x < L - 1; x++) {
+  for (let it = 0; it < 90; it++) for (let y = 1; y < L - 1; y++) for (let x = 1; x < L - 1; x++) {
     const k = y * L + x;
     if (src[k]) continue;
     r[k] = (r[k - 1] + r[k + 1] + r[k - L] + r[k + L]) / 4; g[k] = (g[k - 1] + g[k + 1] + g[k - L] + g[k + L]) / 4; b[k] = (b[k - 1] + b[k + 1] + b[k - L] + b[k + L]) / 4;
