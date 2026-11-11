@@ -275,7 +275,8 @@ export class Character {
 
   react({ expression, motion, side, strength = 1 }) {
     if (expression) this.setExpression(expression, strength);
-    if (motion) this.playMotion(motion, side);
+    // «Спит» и «Замри»: на касание отвечает только лицом — тело не двигается.
+    if (motion && !this.forceSleep && !this.frozen) this.playMotion(motion, side);
   }
 
   wink(side = Math.random() < 0.5 ? 'left' : 'right') {
@@ -622,7 +623,7 @@ export class Character {
     // Живая плавная пластика: медленные несинхронные волны в корпусе, плечах и голове —
     // она будто дышит всем телом, ни на секунду не замирая (небольшая амплитуда).
     {
-      const aw = (1 - 0.92 * (this.sleep ?? 0)) * (this.posing ? 0.6 : 1);
+      const aw = (1 - 0.92 * (this.sleep ?? 0)) * (this.posing ? 0.6 : 1) * (this.frozen ? 0.12 : 1); // «Замри» — только дыхание
       const n = (a, b, c) => Math.sin(t * a + b) * 0.6 + Math.sin(t * a * 2.17 + c) * 0.4;
       pose.spineZ += n(0.29, 0.3, 1.7) * 0.035 * aw;
       pose.spineY += n(0.21, 2.1, 0.4) * 0.04 * aw;
@@ -748,7 +749,8 @@ export class Character {
         watched = toCam.dot(fwd) > 0.2;
       }
       // Смотришь в лицо — засыпает позже, но всё равно засыпает.
-      const want = lying && this.wakeT <= 0 && this.lieT > (watched || this.autoSleep ? 22 : 10) ? 1 : 0;
+      // forceSleep — состояние «Спит»: спит, пока сам не разбудишь; касания её не будят.
+      const want = (this.forceSleep && lying) || (lying && this.wakeT <= 0 && this.lieT > (watched || this.autoSleep ? 22 : 10)) ? 1 : 0;
       // Засыпает медленно (веки тяжелеют), просыпается быстрее.
       this.sleep += (want - this.sleep) * (1 - Math.exp(-dt * (want ? 0.7 : 1.5))); // просыпается без рывка
       this.sleepJoy = Math.max(0, (this.sleepJoy ?? 0) - dt * 0.25);
@@ -1250,7 +1252,7 @@ export class Character {
           return this.lastIdleMotion;
         };
         const lying = this.sitS > 1.05;
-        if (this.dancing || this.loop || (this.upper && !this.upper.stopping && this.sitS < 0.2) || (this.sleep ?? 0) > 0.3) { /* занята или спит */ }
+        if (this.frozen || this.dancing || this.loop || (this.upper && !this.upper.stopping && this.sitS < 0.2) || (this.sleep ?? 0) > 0.3) { /* замерла, занята или спит */ }
         else if (lying) {
           // Лёжа: изредка поворачивает голову, вздыхает, потягивается корпусом.
           if (r < 0.6) this.playMotion(pickFresh(['lookAround', 'sigh', 'tiltHead', 'lieTurn']));

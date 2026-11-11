@@ -1685,3 +1685,21 @@ body.ui-hidden #auto-exit, body.ui-hidden #auto-help { opacity: 0.35; transition
 body:has(#auto-menu:not([hidden])) #hint, body:has(#love-menu:not([hidden])) #hint { opacity: 0 !important; }
 /* всплывающая надпись — выше середины, не на ней и не на кнопках */
 #toast:not(#_) { top: 24%; max-width: 78vw; font-size: 14px; padding: 9px 16px; }
+
+/* Простой вид: значки состояний внизу */
+#auto-states { display: none; }
+body.automode #auto-states { display: flex; gap: 8px; position: fixed; z-index: 29; left: 50%; transform: translateX(-50%);
+  bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 4px); transition: opacity 0.6s ease; }
+#auto-states button { display: flex; align-items: center; gap: 0; height: 42px; min-width: 42px; padding: 0 11px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+#auto-states button i { font-style: normal; font-size: 18px; }
+#auto-states button span { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width 0.25s ease, margin 0.25s ease; }
+#auto-states button.active span { max-width: 90px; margin-left: 6px; }
+body.ui-hidden #auto-states { opacity: 0.3; }
+body:has(.panel:not(.hidden)) #auto-states, body:has(#auto-menu:not([hidden])) #auto-states { opacity: 0; pointer-events: none; }
+body.automode #wish:not(#_) { z-index: 8; }
+/* Чистый экран: только она */
+body.cleanscreen #hud, body.cleanscreen #auto-exit, body.cleanscreen #auto-help, body.cleanscreen #auto-states, body.cleanscreen #wish,
+body.cleanscreen #bubble, body.cleanscreen #toast, body.cleanscreen #auto-rep, body.cleanscreen #hint, body.cleanscreen #auto-hint,
+body.cleanscreen #poses, body.cleanscreen #sit-slider, body.cleanscreen #sit-slider2, body.cleanscreen #cam-controls, body.cleanscreen #handles,
+body.cleanscreen .float-heart, body.cleanscreen .fx-banner, body.cleanscreen #suggest { display: none !important; }
+body.cleanscreen #hud:not(#_):not(#__), body.cleanscreen .fx-p { display: none !important; }

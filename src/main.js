@@ -1012,6 +1012,10 @@ canvas.addEventListener('pointerdown', (e) => {
 
   // Два пальца в любом режиме — щипок: приблизить/отдалить.
   if (touches.size === 2) {
+    // Двойной тап двумя пальцами — чистый экран: пропадает весь интерфейс, остаётся только она. Ещё раз — вернуть.
+    const n2 = performance.now();
+    if (n2 - (window.__twoTapAt ?? 0) < 420) { window.__twoTapAt = 0; setCleanScreen(!document.body.classList.contains('cleanscreen')); }
+    else window.__twoTapAt = n2;
     pinchDist = pinchDistance();
     poseDrag = null;
     orbitDrag = null;
@@ -1057,7 +1061,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (touches.size > 2) return;
 
   // Открыт гардероб — палец по экрану только крутит камеру (её не гладим и не двигаем): удобно разглядывать наряд.
-  const dressing = !$('wardrobe').classList.contains('hidden');
+  const dressing = !$('wardrobe').classList.contains('hidden') || (autoMode && camOnly); // и режим «Камера»: её не задеваем
   const hit = dressing ? null : zoneAt(e, true);
   if (hit) touchRipple(e.clientX, e.clientY);
   if (!hit) {
@@ -1240,6 +1244,7 @@ canvas.addEventListener('pointermove', (e) => {
       else autoLayerDrag = null;
       stopAuto(true);
       stroking = null;
+      if (autoState === 'sleep') setAutoState('live'); // взялся её двигать — просыпается
       poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now(), auto: true, dir: 0, run: 0, turns: 0 };
       try { navigator.vibrate?.(8); } catch { /* ignore */ } // лёгкий отклик: «взял её»
       showLabel(upper ? 'Ниже — наклон, выше — прогиб' : 'Ниже — сесть / лечь, выше — встать');
@@ -3877,7 +3882,7 @@ function updateAuto(dt) {
     return;
   }
   autoCooldown -= dt;
-  const calm = (autoMoves || autoMode) && !poseMode && autoIdle > (autoMode ? 2.5 : 5) && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
+  const calm = (autoMoves || autoMode) && !(autoMode && autoState !== 'live') && !poseMode && autoIdle > (autoMode ? 2.5 : 5) && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
     && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
@@ -4394,6 +4399,8 @@ function setAutoMode(on) {
   autoSmoothCam = on;
   if (!on) autoHint.hidden = true;
   autoMenu.hidden = true;
+  if (!on) { camOnly = false; setAutoState('live'); document.body.classList.remove('cleanscreen'); }
+  renderAutoStates();
   try { localStorage.setItem('waifu-ui', on ? 'min' : 'classic'); } catch { /* ignore */ }
   autoRec = null; autoRepOffer = null; renderAutoRep();
   if (character) character.autoSleep = on;
@@ -4432,7 +4439,9 @@ autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
   + '<span>🙇 Ведёшь вверх-вниз по груди и лицу — наклон / прогиб</span>'
   + '<span>🔁 Подвигал туда-сюда — предложит повторить</span>'
   + '<span>🎥 По фону — камера вокруг неё; двумя пальцами — ближе/дальше и сдвиг</span>'
-  + '<span>🎯 Двойной тап по фону — камера по центру; ещё раз — она встаёт как была</span>';
+  + '<span>🎯 Двойной тап по фону — камера по центру; ещё раз — она встаёт как была</span>'
+  + '<span>🧍😴🤫🎥 Значки внизу — живая / спит / замри / только камера</span>'
+  + '<span>✌️ Двойной тап двумя пальцами — чистый экран</span>';
 document.body.appendChild(autoHint);
 let autoHintTimer = 0;
 // Подсказка сама показывается только в самый первый раз; дальше — по кнопке «?» рядом с крестиком.
@@ -4455,7 +4464,49 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 121;
+const WAIFU_BUILD = 122;
+// ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
+// 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
+// сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
+var autoState = 'live';
+var camOnly = false;
+const autoStates = document.createElement('div');
+autoStates.id = 'auto-states';
+document.body.appendChild(autoStates);
+for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, (e) => e.stopPropagation());
+function renderAutoStates() {
+  autoStates.innerHTML = '';
+  for (const [id, icon, name] of [['live', '🧍', 'Живая'], ['sleep', '😴', 'Спит'], ['freeze', '🤫', 'Замри'], ['cam', '🎥', 'Камера']]) {
+    const b = document.createElement('button');
+    const on = id === 'cam' ? camOnly : autoState === id;
+    b.className = on ? 'active' : '';
+    b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (id === 'cam') { camOnly = !camOnly; renderAutoStates(); showToast(camOnly ? '🎥 Палец крутит камеру — её не задеваешь' : '👆 Снова можно гладить'); return; }
+      setAutoState(autoState === id && id !== 'live' ? 'live' : id);
+    });
+    autoStates.appendChild(b);
+  }
+}
+function setAutoState(st) {
+  autoState = st;
+  if (!character) return;
+  character.forceSleep = st === 'sleep';
+  character.frozen = st === 'freeze';
+  if (st !== 'live') stopAuto(true);
+  if (st === 'sleep') {
+    if (reps.home.on) { setRepeat(false, true); renderAutoRep(); }
+    autoBendTarget = 0;
+    character.sitRate = 1;
+    if (character.sit < sitMax() - 0.02) sitBy((sitMax() - character.sit) / 0.004);
+  } else if (st === 'live') character.wake?.(1);
+  renderAutoStates();
+}
+function setCleanScreen(on) {
+  document.body.classList.toggle('cleanscreen', on);
+  if (on) { autoMenu.hidden = true; autoHint.hidden = true; }
+}
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
@@ -4560,7 +4611,7 @@ let autoLoopT = performance.now();
   // и наклон/прогиб лёжа почти не действует); взялся вести спящую — просыпается.
   if (autoMode && (pointerActive || reps.home.on || now - lastOnHerAt < 9000)) {
     character.lieT = 0;
-    if (poseDrag?.auto && character.sleep > 0.05) character.wake?.(4);
+    if (poseDrag?.auto && character.sleep > 0.05 && autoState !== 'sleep') character.wake?.(4);
   }
   // Просьба-желание держится рядом с ней (слева от головы) и двигается вместе с ней.
   if (!wishEl.hidden && character.bones?.head) {
@@ -5003,6 +5054,7 @@ function tick() {
     if (idleTime > 18) {
       idleTime = 0;
       if (character.sleep > 0.3) say(pick(['zzz…', '*тихо сопит*', 'Ммм… 😴']));
+      else if (autoMode && autoState === 'freeze') { /* замерла — молчит и не двигается */ }
       else if (Math.random() < 0.6) idleEmote();
       else say(pick(IDLE_LINES[tier()]), tier() === 2 ? 'relaxed' : 'sad');
     }
