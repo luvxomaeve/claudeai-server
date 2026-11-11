@@ -4537,7 +4537,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 129;
+const WAIFU_BUILD = 130;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4550,13 +4550,19 @@ for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, 
 function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
-  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера']]) {
+  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', '']]) {
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = on ? 'active' : '';
     b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
     b.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (id === 'gaze') {
+        // Взгляд по кругу: за пальцем → на тебя → глаза закрыты (та же кнопка, что в ручном виде).
+        $('btn-gaze').click();
+        showAutoStates(3500);
+        return;
+      }
       if (id === 'home') {
         // Домик, как в ручном виде: камера спереди, она встаёт ровно; сон, «замри» и повтор снимаются.
         camOnly = false; setAutoState('live'); autoReturn(); autoCentered = false; showAutoStates(900);
