@@ -501,6 +501,7 @@ export class PieceWardrobe {
     this.scene = scene;
     this.base = null; // { vrm, pieces, skins, skinMap }
     this.sources = new Map(); // id -> { vrm, pieces, skinMap, active }
+    this.skinDonors = new Map(); // id → { skinMap: { image } }: одна картинка кожи (без загрузки всей модели)
     this.paints = new Map(); // id «нарисованной» облегающей вещи → { tops|bottoms|legs: вид ткани }
   }
 
@@ -636,12 +637,14 @@ export class PieceWardrobe {
           ? (x, y, z) => body(x, y, z) && (y < T.hem + TW || (T.sl != null && ax(x) > T.sl - TW) || (base !== 'polo' && nk(x, y, z) < T.r + TW))
           : body;
       } else if (lo != null) {
-        const topY = base === 'under' ? hipJ.y + leg * 0.2 : waist; // бельё — та же форма шортиков, что была, только ровная
+        const under = base === 'under';
+        const topY = under ? hipJ.y + leg * 0.2 : waist; // бельё — та же форма шортиков, что была, только ровная
         const body = (x, y) => y < topY && y > lo;
+        const tw = under ? 0.009 : TW; // у шортиков резинки тоньше
         inside = trim === 'seam'
-          // тонкие декоративные швы: по бокам и по центру
-          ? (x, y, z) => body(x, y) && y < topY - TW * 1.6 && y > lo + TW && (Math.abs(z - hips.z) < 0.0035 && ax(x) > 0.05 || ax(x) < 0.003)
-          : trim ? (x, y) => body(x, y) && (y > topY - TW * 1.6 || y < lo + TW) : body;
+          // тонкий боковой шов (лосины, шорты)
+          ? (x, y, z) => body(x, y) && y < topY - tw * 1.6 && y > lo + tw && Math.abs(z - hips.z) < 0.0045 && ax(x) > 0.05
+          : trim ? (x, y) => body(x, y) && (y > topY - tw * (under ? 1 : 1.6) || y < lo + tw) : body;
       } else inside = {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
@@ -758,7 +761,7 @@ export class PieceWardrobe {
   bareLegs(map) {
     if (!map?.image || !this.base) return map;
     this.paintTexCache ??= new Map();
-    const donors = [...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
+    const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
     const key = `${map.uuid}|bare|${donors.map(([id]) => id).join(',')}`;
     if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
     const img = map.image, w = img.width, h = img.height;
@@ -837,7 +840,7 @@ export class PieceWardrobe {
   paintLayers(map, layers) {
     if (!map?.image || !this.base || !layers.length) return map;
     this.paintTexCache ??= new Map();
-    const donors = [...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
+    const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
     const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
     if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
     const img = map.image, w = img.width, h = img.height;
@@ -974,7 +977,7 @@ export class PieceWardrobe {
       const hex = wear.legsDark ? 0x17151c : (wear.legsTint ?? 0xf4a9c4);
       const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255, lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
       const light = (c) => Math.round(c + (255 - c) * (lum > 0.3 ? 0.72 : 0.3)); // кант светлее ткани
-      layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex: (light(r) << 16) | (light(g) << 8) | light(b) }, { kind: 'under:seam', hex: (light(r) << 16) | (light(g) << 8) | light(b) });
+      layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex: (light(r) << 16) | (light(g) << 8) | light(b) });
     }
     if (kt) {
       const hex = wear.topHex ?? 0xf1edf6;
@@ -987,7 +990,7 @@ export class PieceWardrobe {
     }
     if (kb) {
       const hex = wear.leggingsHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
-      layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
+      layers.push({ kind: kb, hex, keep }, { kind: `${kb}:seam`, hex: trimOf(hex), keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     map = this.paintLayers(map, layers);
     this.setSkin(map);

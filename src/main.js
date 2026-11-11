@@ -2923,6 +2923,18 @@ for (const c of Object.keys(wear)) {
   const src = PIECE_SOURCES.find((x) => x.id === wear[c]);
   if (wear[c] !== 'base' && wear[c] !== 'none' && (!src || !src.cats.includes(c))) { wear[c] = 'base'; if (c === 'tops' && wear.bottoms === 'none') wear.bottoms = 'base'; }
 }
+// Картинки настоящей кожи (ноги — из модели без чулок, руки и плечи — из наряда с открытыми руками).
+let skinDonorsP = null;
+function loadSkinDonors() {
+  skinDonorsP ??= Promise.all((window.WAIFU_SKINS ?? ['models/skin-o6.png', 'models/skin-o3.png']).map((url) => new Promise((res) => {
+    const img = new Image();
+    img.onload = () => { pieceWardrobe.skinDonors.set(url, { skinMap: { image: img } }); res(); };
+    img.onerror = () => res();
+    img.src = url;
+  })));
+  return skinDonorsP;
+}
+setTimeout(loadSkinDonors, 4000); // подгружаем заранее, в фоне
 const pieceLoading = new Map();
 function loadPieceSource(id) {
   if (pieceWardrobe.hasSource(id)) return Promise.resolve();
@@ -2970,8 +2982,7 @@ function applyWear() {
 }
 function preloadWornSources() {
   const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
-  if (isPaint(wear.tops)) for (const x of PIECE_SOURCES) if (x.url && (x.id === 'o3' || x.bare)) ids.add(x.id);
-  if (wear.legs === 'p_bare') { const bareSrc = PIECE_SOURCES.filter((x) => x.url && x.bare); for (const x of (bareSrc.length ? bareSrc : PIECE_SOURCES.filter((y) => y.url && y.cats.includes('legs')))) ids.add(x.id); }
+  if (isPaint(wear.tops) || wear.legs === 'p_bare') loadSkinDonors().then(applyWear);
   for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
 }
 // Цвета вещей: тап по уже надетой вещи — следующий цвет.
@@ -3013,32 +3024,12 @@ async function pickPiece(cat, id, quiet = false) {
   wear[cat] = id;
   try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
   renderPieces();
-  // Нарисованный верх открывает руки и плечи: настоящую кожу берём из наряда с открытыми руками (o3) — подгружаем.
-  if (cat === 'tops' && isPaint(id)) {
-    const need = PIECE_SOURCES.filter((x) => x.url && (x.id === 'o3' || x.bare) && !pieceWardrobe.hasSource(x.id));
-    if (need.length) {
-      $('flash').classList.add('on');
-      await Promise.all(need.map((x) => loadPieceSource(x.id).catch(() => {})));
-      $('flash').classList.remove('on');
-    }
-  }
-  // «Без чулок»: настоящую кожу ног берём из нарядов с короткими чулками/гольфами — подгружаем их текстуры.
-  if (cat === 'legs' && id === 'p_bare') {
-    // Есть наряд, сохранённый без чулок (bare) — берём кожу только из него; иначе ищем по всем.
-    const bareSrc = PIECE_SOURCES.filter((x) => x.url && x.bare);
-    const need = (bareSrc.length ? bareSrc : PIECE_SOURCES.filter((x) => x.url && x.cats.includes('legs'))).filter((x) => !pieceWardrobe.hasSource(x.id));
-    if (need.length) {
-      showToast('Снимаю чулки…');
-      $('flash').classList.add('on');
-      await Promise.all(need.map((x) => loadPieceSource(x.id).catch(() => {})));
-      $('flash').classList.remove('on');
-    }
-  }
+  // Нарисованный верх открывает руки и плечи, «без чулок» — ноги: нужна настоящая кожа из других нарядов.
+  // Это две лёгкие картинки (а не целые модели) — грузятся заранее, здесь обычно уже готовы.
+  if ((cat === 'tops' && isPaint(id)) || (cat === 'legs' && id === 'p_bare')) await loadSkinDonors();
   if (id !== 'base' && id !== 'none' && !pieceWardrobe.hasSource(id)) {
-    showToast('Загружаю вещь… (первый раз — пару секунд)');
-    $('flash').classList.add('on');
+    showToast('⏳ Загружаю вещь…'); // без вспышки на весь экран — она «залипала», пока грузится
     try { await loadPieceSource(id); } catch (e) { console.error(e); say('Не получилось загрузить вещь…', 'sad'); }
-    $('flash').classList.remove('on');
   }
   applyWear();
   if (quiet) return;
@@ -4429,7 +4420,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 105;
+const WAIFU_BUILD = 106;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
