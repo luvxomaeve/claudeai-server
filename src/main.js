@@ -4354,7 +4354,7 @@ function renderAutoMenu() {
     ['✏️', 'Позы и точки', () => { if (autoMode) setAutoMode(false); $('btn-tab-pose').click(); }],
     ['📷', 'Фото', () => $('cam-photo').click()],
     [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
-    ['👁', $('btn-gaze').classList.contains('active') ? 'Смотрит на тебя: да' : 'Смотрит на тебя: нет', () => $('btn-gaze').click(), true],
+    ['👁', { follow: 'Взгляд: за пальцем', me: 'Взгляд: на тебя', closed: 'Взгляд: глаза закрыты' }[gazeMode] ?? 'Взгляд', () => $('btn-gaze').click(), true],
     ['↩️', 'Вернуть как было', () => (autoMode ? autoReturn() : resetView())],
     autoMode ? ['🎛', 'Ручное управление (полосы и кнопки)', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],
   ];

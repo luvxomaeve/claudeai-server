@@ -888,6 +888,7 @@ export class Character {
         pose.spineZ -= (0.5 * up - 0.06 * (1 - up)) * p4;
         pose.spineY += 0.2 * p4 * up;
         pose.headZ -= (0.55 * up - 0.3 * (1 - up)) * p4;
+        pose.hipsY -= 0.11 * (1 - up) * p4 * this.scale; // легла с локтя — таз опускается на пол, а не висит
         pose.headX += 0.05 * p4;
       }
       const { c3, c4 } = this.sitPhases(s);
