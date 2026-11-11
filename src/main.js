@@ -4537,7 +4537,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 130;
+const WAIFU_BUILD = 131;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4554,7 +4554,9 @@ function renderAutoStates() {
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = on ? 'active' : '';
-    b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
+    // Без подписей: что включено, видно по самому значку (он меняется) и подсветке.
+    b.innerHTML = id === 'lie' ? `<svg viewBox="0 0 24 24" aria-hidden="true">${LIE_ICONS[lieMode] ?? LIE_ICONS.side}</svg>` : `<i>${icon}</i>`;
+    b.title = name;
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       if (id === 'gaze') {
@@ -4574,6 +4576,7 @@ function renderAutoStates() {
         if (!unlocked('lieStyles')) lieMode = 'side';
         try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
         renderLieToggle();
+        showToast({ side: '🛏 Ляжет на бок', belly: '🛏 Ляжет на живот', back: '🛏 Ляжет на спину' }[lieMode]);
         showAutoStates(3500);
         return;
       }

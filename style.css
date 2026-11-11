@@ -1718,3 +1718,9 @@ body.automode #auto-states.show:not(#_) { opacity: 1; pointer-events: auto; tran
 #auto-states button span:empty { display: none; }
 #auto-states button:not(.active) span { max-width: 0; margin-left: 0; }
 #auto-states button:nth-child(3) span { max-width: 90px; margin-left: 6px; }
+
+/* значки состояний: только иконки, одинаковые кружки, всегда влезают в экран */
+#auto-states:not(#_) { gap: 8px !important; max-width: calc(100vw - 16px); }
+#auto-states button:not(#_) { width: 46px; min-width: 0; height: 46px; padding: 0; justify-content: center; flex: 0 1 46px; }
+#auto-states button i { font-size: 21px; }
+#auto-states button svg { width: 24px; height: 24px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
