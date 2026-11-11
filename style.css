@@ -1616,3 +1616,9 @@ button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item
 /* «Авто» — круглая кнопка справа, рядом со звёздочкой: не закрывает кнопку точек */
 #poses #btn-automode { left: auto; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 56px); width: 44px; padding: 0; justify-content: center; border-radius: 50%; }
 #poses #btn-automode span { font-size: 19px; }
+
+/* «Авто»: кнопка «?» — показать, как управлять */
+#auto-help { display: none; }
+body.automode #auto-help { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(56px + env(safe-area-inset-right, 0px));
+  width: 36px; height: 36px; border-radius: 50%; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer; }

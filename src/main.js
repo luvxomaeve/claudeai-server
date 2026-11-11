@@ -4254,6 +4254,7 @@ function setAutoMode(on) {
   if (on && poseMode) setPoseMode(false);
   autoMode = on;
   autoSmoothCam = on;
+  if (!on) autoHint.hidden = true;
   autoRec = null; autoRepOffer = null; renderAutoRep();
   if (character) character.autoSleep = on;
   if (!on && character && !poseMode) {
@@ -4295,14 +4296,23 @@ autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
   + '<span>↩️ Двойной тап по фону — всё вернётся как было</span>';
 document.body.appendChild(autoHint);
 let autoHintTimer = 0;
+// Подсказка сама показывается только в самый первый раз; дальше — по кнопке «?» рядом с крестиком.
 function showAutoHint() {
   let n = 0;
   try { n = Number(localStorage.getItem('waifu-autohint')) || 0; localStorage.setItem('waifu-autohint', String(n + 1)); } catch { /* ignore */ }
+  if (n > 0) return;
   autoHint.hidden = false;
   clearTimeout(autoHintTimer);
-  autoHintTimer = setTimeout(() => { autoHint.hidden = true; }, n < 3 ? 6500 : 3000);
+  autoHintTimer = setTimeout(() => { autoHint.hidden = true; }, 7000);
 }
-window.addEventListener('pointerdown', () => { if (!autoHint.hidden && performance.now() - autoTouchAt > 900) autoHint.hidden = true; }, { capture: true, passive: true });
+const autoHelp = document.createElement('button');
+autoHelp.id = 'auto-help';
+autoHelp.title = 'Как управлять';
+autoHelp.textContent = '?';
+document.body.appendChild(autoHelp);
+for (const ev of ['pointerdown', 'touchstart']) autoHelp.addEventListener(ev, (e) => e.stopPropagation());
+autoHelp.addEventListener('click', (e) => { e.stopPropagation(); clearTimeout(autoHintTimer); autoHint.hidden = !autoHint.hidden; });
+window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !autoHint.hidden && performance.now() - autoTouchAt > 900) autoHint.hidden = true; }, { capture: true, passive: true });
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
