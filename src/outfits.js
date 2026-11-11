@@ -835,6 +835,45 @@ export class PieceWardrobe {
     return m;
   }
 
+  // Карта светотени тела: в картинках кожи художником нарисованы мягкие тени (под грудью, на животе, у коленей,
+  // между ног, на сгибах). Собираем её из всех картинок настоящей кожи — и кладём на нарисованную ткань,
+  // чтобы она не была плоской заливкой, а лежала по формам. 128 = без изменений.
+  shadeRef(w, h, donors) {
+    this.shadeCache ??= new Map();
+    const key = `${w}|${donors.map(([id]) => id).join(',')}`;
+    if (this.shadeCache.has(key)) return this.shadeCache.get(key);
+    const ref = new Uint8Array(w * h); // 0 = нет данных
+    const imgs = [...donors.map(([, x]) => x.skinMap.image), this.base.skinMap?.image].filter(Boolean);
+    for (const img of imgs) {
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const c = cv.getContext('2d', { willReadFrequently: true });
+      c.drawImage(img, 0, 0, w, h);
+      const q = c.getImageData(0, 0, w, h).data;
+      const qs = (i) => q[i + 3] >= 250 && q[i] > q[i + 1] && q[i + 1] >= q[i + 2] && q[i] - q[i + 2] > 18 && q[i] - q[i + 2] < 95 && q[i] > 150;
+      let sum = 0, n = 0;
+      for (let i = 0; i < q.length; i += 4 * 5) if (qs(i)) { sum += q[i] * 0.3 + q[i + 1] * 0.59 + q[i + 2] * 0.11; n++; }
+      if (n < 500) continue;
+      const mean = sum / n, E = 6 * 4, EW = 6 * w * 4;
+      for (let y = 6; y < h - 6; y++) for (let x = 6; x < w - 6; x++) {
+        const p = y * w + x;
+        if (ref[p]) continue;
+        const i = p * 4;
+        if (!qs(i) || !qs(i - E) || !qs(i + E) || !qs(i - EW) || !qs(i + EW)) continue; // только чистая кожа, не у края ткани
+        ref[p] = Math.max(1, Math.min(255, Math.round(((q[i] * 0.3 + q[i + 1] * 0.59 + q[i + 2] * 0.11) / mean) * 128)));
+      }
+    }
+    // Пустые места — нейтральные; затем лёгкое размытие, чтобы тени были мягкими.
+    for (let p = 0; p < ref.length; p++) if (!ref[p]) ref[p] = 128;
+    const tmp = new Uint8Array(ref.length);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let y = 0; y < h; y++) for (let x = 2; x < w - 2; x++) { const p = y * w + x; tmp[p] = (ref[p - 2] + ref[p - 1] + ref[p] + ref[p + 1] + ref[p + 2]) / 5; }
+      for (let y = 2; y < h - 2; y++) for (let x = 0; x < w; x++) { const p = y * w + x; ref[p] = (tmp[p - 2 * w] + tmp[p - w] + tmp[p] + tmp[p + w] + tmp[p + 2 * w]) / 5; }
+    }
+    this.shadeCache.set(key, ref);
+    return ref;
+  }
+
   // Красим все слои ткани за один проход по текстуре (раньше — по проходу на слой: смена наряда подтормаживала).
   // layers: [{ kind, hex, keep }]; keep — чулки остаются поверх: ниже белья красим только голую кожу.
   paintLayers(map, layers) {
@@ -855,9 +894,11 @@ export class PieceWardrobe {
       const u = this.zoneMask('upper', w, h);
       const need = new Uint8Array(w * h);
       let any = false;
-      for (let p = 0; p < need.length; p++) if (u[p] >= 128 && d[p * 4 + 3] < 250) { need[p] = 1; any = true; }
+      // Нужна кожа везде, где её нет: и в прозрачных местах, и там, где нарисованы манжеты/бретельки своего наряда.
+      for (let p = 0; p < need.length; p++) if (u[p] >= 128 && (d[p * 4 + 3] < 250 || !isSkin(p * 4))) { need[p] = 1; any = true; }
       if (any) { this.realSkin(d, w, h, need, donors); skinFill(d, w, h, need); } // сперва настоящая кожа рук и плеч, остаток — дорисовка
     }
+    const shade = this.shadeRef(w, h, donors);
     for (const { kind, hex, keep } of layers) {
       const m = this.clothMask(kind, w, h);
       const zone = keep ? this.zoneMask('minishorts', w, h) : null;
@@ -867,7 +908,10 @@ export class PieceWardrobe {
         if (mv < 8) continue;
         if (zone && zone[p] < 128 && !isSkin(i)) continue;
         const al = mv / 255; // на краю ткань плавно сходит на нет
-        d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
+        // Тень по формам тела: темнее в складках, чуть светлее на выпуклостях. Тень слегка «холодная».
+        const f = Math.min(1.12, Math.max(0.62, 1 + (shade[p] / 128 - 1) * 2.4));
+        const fr = f < 1 ? f * (0.97 + 0.03 * f) : f;
+        d[i] = d[i] * (1 - al) + Math.min(255, R * fr) * al; d[i + 1] = d[i + 1] * (1 - al) + Math.min(255, G * fr) * al; d[i + 2] = d[i + 2] * (1 - al) + Math.min(255, Bl * (f < 1 ? f + (1 - f) * 0.12 : f)) * al; d[i + 3] = 255;
       }
     }
     ctx.putImageData(data, 0, 0);
