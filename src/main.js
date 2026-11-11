@@ -3911,6 +3911,7 @@ function setFlowDance(on) {
     if (character.sit > 0.05) sitBy(-character.sit / 0.004);
     auto = null;
     say(pick(['Смотри, как плавно~', 'Этот танец — для тебя ♥', 'Потанцуем медленно~']), 'happy');
+    wishEvent('dance');
   } else if (auto?.dance) stopAuto();
   renderAnims();
 }
@@ -4534,7 +4535,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 125;
+const WAIFU_BUILD = 126;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4945,25 +4946,25 @@ const WISHES = [
     ask: ['Поиграешь с моими волосами?', 'Потрогай хвостики, они мягкие~', 'Хочу, чтобы ты погладил мои волосы…'] },
   { id: 'hand', need: 1, text: 'Возьми меня за руку', hint: 'Коснись её ладони',
     ask: ['Возьмёшь меня за руку?', 'Дай руку… пожалуйста~', 'Хочу подержаться за руки ♥'] },
-  { id: 'sit', text: 'Давай присядем', hint: 'Потяни левый ползунок вниз',
+  { id: 'sit', text: 'Давай присядем', hint: 'Потяни левый ползунок вниз', hintA: 'Веди пальцем вниз по её ногам или животу',
     ok: () => character.sitS < 0.15, check: () => character.sitS > 0.35,
     ask: ['Давай присядем?', 'Ножки устали… присядем?', 'Хочу присесть на минутку~'] },
-  { id: 'stand', text: 'Помоги мне встать', hint: 'Потяни левый ползунок вверх',
+  { id: 'stand', text: 'Помоги мне встать', hint: 'Потяни левый ползунок вверх', hintA: 'Веди пальцем вверх по её ногам или животу',
     ok: () => character.sitS > 0.5, check: () => character.sitS < 0.1,
     ask: ['Поможешь встать?', 'Засиделась… хочу размяться!', 'Давай встанем~'] },
-  { id: 'lie', text: 'Хочу прилечь', hint: 'Потяни левый ползунок в самый низ',
+  { id: 'lie', text: 'Хочу прилечь', hint: 'Потяни левый ползунок в самый низ', hintA: 'Веди пальцем вниз по её ногам до конца — или долгий тап по ней → 😴',
     ok: () => unlocked('floor') && allowLie && character.sitS < 0.9, check: () => character.sitS > 1.1,
     ask: ['Хочу прилечь… можно?', 'Давай полежим немножко~', 'Уложишь меня?'] },
-  { id: 'wear', text: 'Переодень меня', hint: 'Открой гардероб (вешалка сверху) и выбери вещь',
+  { id: 'wear', text: 'Переодень меня', hint: 'Меню ☰ → Гардероб → выбери вещь',
     ok: () => unlocked('wardrobe') && PIECE_SOURCES.length > 0,
     ask: ['Хочу переодеться! Выберешь мне что-нибудь?', 'Надоел этот наряд… переоденешь?', 'Подбери мне что-нибудь красивое~'] },
-  { id: 'tint', text: 'Смени цвет моей одежды', hint: 'В гардеробе тапни надетую вещь ещё раз',
+  { id: 'tint', text: 'Смени цвет моей одежды', hint: 'Меню ☰ → Гардероб → кружки цвета под вещами',
     ok: () => unlocked('wardrobe'),
     ask: ['Хочу другой цвет! Перекрасишь что-нибудь?', 'А в другом цвете мне пойдёт?', 'Давай поменяем цвет одежды~'] },
-  { id: 'dance', text: 'Хочу потанцевать!', hint: 'Нажми на нотку сверху и выбери танец',
+  { id: 'dance', text: 'Хочу потанцевать!', hint: 'Меню ☰ → Анимации и танцы → «Танцевать» или «Плавный танец»',
     ok: () => unlocked('dance') && MOCAP.some((m) => !m.idle),
     ask: ['Хочу потанцевать! Включишь?', 'Так и тянет двигаться… потанцуем?', 'Включи мне танец~'] },
-  { id: 'photo', text: 'Сфотографируй меня', hint: 'Камера 🎥 внизу → кнопка фото',
+  { id: 'photo', text: 'Сфотографируй меня', hint: 'Меню ☰ → Фото',
     ok: () => unlocked('photo'),
     ask: ['Сфоткаешь меня? Я сегодня красивая~', 'Хочу фото на память!', 'Щёлкни меня, пожалуйста ♥'] },
 ];
@@ -4983,7 +4984,7 @@ wishEl.hidden = true;
 wishEl.innerHTML = '<span class="w-ico">💭</span><span class="w-text"></span><i class="w-bar"></i>';
 document.body.appendChild(wishEl);
 wishEl.addEventListener('pointerdown', (e) => e.stopPropagation());
-wishEl.addEventListener('click', (e) => { e.stopPropagation(); if (wish) showToast(`💡 ${wish.def.hint}`); });
+wishEl.addEventListener('click', (e) => { e.stopPropagation(); if (wish) showToast(`💡 ${(autoMode && wish.def.hintA) || wish.def.hint}`); });
 function wishEvent(id) {
   if (!wish || wish.def.id !== id || wish.def.check) return;
   wish.progress++;
