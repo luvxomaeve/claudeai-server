@@ -3741,12 +3741,12 @@ function updateAuto(dt) {
     if (auto.t >= end) {
       if (auto.pose && character.poseName === auto.pose) character.setPose('stand');
       auto = null;
-      autoCooldown = 6 + Math.random() * 7;
+      autoCooldown = autoMode ? 2 + Math.random() * 4 : 6 + Math.random() * 7; // в «Авто» двигается сама чаще
     }
     return;
   }
   autoCooldown -= dt;
-  const calm = (autoMoves || autoMode) && !poseMode && autoIdle > 5 && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
+  const calm = (autoMoves || autoMode) && !poseMode && autoIdle > (autoMode ? 2.5 : 5) && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
     && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
     && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
@@ -4243,7 +4243,7 @@ let autoTouchAt = 0;
 const autoBtn = document.createElement('button');
 autoBtn.id = 'btn-automode';
 autoBtn.title = 'Режим «Авто»: только она, управление жестами';
-autoBtn.innerHTML = '<span>✨</span>Авто';
+autoBtn.innerHTML = '<span>✨</span>';
 $('poses').appendChild(autoBtn);
 const autoExit = document.createElement('button');
 autoExit.id = 'auto-exit';

@@ -1612,3 +1612,7 @@ button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item
 @keyframes autoRepPulse { 0%, 100% { box-shadow: var(--glass-edge), 0 0 0 0 rgba(255, 255, 255, 0.55); } 50% { box-shadow: var(--glass-edge), 0 0 0 10px rgba(255, 255, 255, 0); } }
 .panel .editor-group:not(#_) { color: rgba(255, 255, 255, 0.72) !important; }
 #love-menu .lm-n:not(#_) { background: rgba(255, 255, 255, 0.28); color: #fff; }
+
+/* «Авто» — круглая кнопка справа, рядом со звёздочкой: не закрывает кнопку точек */
+#poses #btn-automode { left: auto; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 56px); width: 44px; padding: 0; justify-content: center; border-radius: 50%; }
+#poses #btn-automode span { font-size: 19px; }
