@@ -2884,9 +2884,13 @@ const PIECE_SOURCES = [
   ...(GIRLS ?? []).filter((g) => g !== GIRL).map((g) => ({
     id: `g_${g.id}`, name: g.name, url: g.url, cats: g.cats ?? ['tops', 'bottoms', 'shoes', 'legs'], names: g.baseNames ?? {}, legsKind: g.baseLegs ?? 'stockings',
   })),
+  // Облегающий комплект: ткань нарисована по телу (без своей модели) — сидит точно по фигуре.
+  { id: 'p_fit', name: 'Облегающее', paint: true, cats: ['tops', 'legs'], names: { tops: 'Облегающая кофточка', legs: 'Лосины' }, legsKind: 'tights' },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
 ].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x));
 const pieceWardrobe = new PieceWardrobe(scene);
+for (const x of PIECE_SOURCES) if (x.paint) pieceWardrobe.paints.add(x.id);
+const isPaint = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.paint;
 window.__pw = pieceWardrobe; // для отладки
 const WEAR_KEY = girlKey('waifu-wear');
 let wear = {};
@@ -2920,8 +2924,10 @@ function applyWear() {
   }
   // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
   const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
-  if (lt?.name === 'Глубокий чёрный') w.legsDark = 0.8;
+  if (isPaint(w.legs)) { if (lt?.hex != null) w.legsHex = lt.hex; } // лосины: цвет — прямо цвет ткани
+  else if (lt?.name === 'Глубокий чёрный') w.legsDark = 0.8;
   else if (lt?.hex != null) w.legsTint = lt.hex;
+  if (isPaint(w.tops)) { const tt = TINTS[wearTint[`tops:${w.tops}`] ?? 0]; if (tt?.hex != null) w.topHex = tt.hex; }
   pieceWardrobe.apply(w, (map) => {
     stockings?.setBase(map);
     stockings?.apply(look.stockings);
@@ -2973,6 +2979,9 @@ async function pickPiece(cat, id, quiet = false) {
     else if (wear.bottoms === 'none' || wear.bottoms === undefined && isDress(wear.tops)) wear.bottoms = 'base';
   }
   if (cat === 'bottoms' && id !== 'none' && isDress(wear.tops)) wear.tops = 'base';
+  // Лосины носят без юбки (юбку поверх можно надеть потом); сняли лосины — юбка возвращается.
+  if (cat === 'legs' && isPaint(id)) wear.bottoms = 'none';
+  else if (cat === 'legs' && isPaint(wear.legs) && wear.bottoms === 'none') wear.bottoms = 'base';
   wear[cat] = id;
   try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
   renderPieces();
