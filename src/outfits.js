@@ -258,6 +258,127 @@ function installHipKeep(vrm, mesh, cloth) {
   }
 }
 
+// ---------- Облегающая юбка: собираем сетку сами ----------
+// Трубка по форме её тела: на каждой высоте берём контур тела (выпуклую оболочку — она перекрывает
+// промежуток между ног) и чуть отступаем наружу. Привязка: верх — к тазу, низ — к бёдрам, поэтому
+// в приседе и при шаге юбка тянется за ногами, как эластичная ткань.
+function hull2d(pts) {
+  const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of P) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of P.slice().reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+function buildTightSkirt(vrm, skins, clothMat) {
+  const body = skins.find((m) => m.isSkinnedMesh);
+  if (!body) return null;
+  const B = (n) => bindBone(vrm, body, n);
+  const hipJ = B('leftUpperLeg'), hipR = B('rightUpperLeg'), knee = B('leftLowerLeg'), hips = B('hips');
+  if (!hipJ || !hipR || !knee || !hips) return null;
+  const bones = body.skeleton.bones;
+  const bi = (name) => { const node = vrm.humanoid.getRawBoneNode(name); let i = bones.indexOf(node); if (i < 0) i = bones.findIndex((b) => b.name === node?.name); return i; };
+  const iH = bi('hips'), iL = bi('leftUpperLeg'), iR = bi('rightUpperLeg');
+  if (iH < 0 || iL < 0 || iR < 0) return null;
+  const leg = hipJ.y - knee.y;
+  const top = hipJ.y + leg * 0.42, hem = hipJ.y - leg * 0.5; // от талии до середины бедра
+  const cx = (hipJ.x + hipR.x) / 2, cz = hips.z;
+  // Все точки тела в исходной позе (без рук — они далеко в стороны).
+  const pts = [], v = new THREE.Vector3();
+  for (const m of skins) {
+    const pos = m.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.bindMatrix);
+      if (v.y > hem - 0.04 && v.y < top + 0.04 && Math.abs(v.x - cx) < 0.32) pts.push([v.x, v.y, v.z]);
+    }
+  }
+  if (pts.length < 50) return null;
+  const RINGS = 12, SEG = 40, margin = 0.011;
+  const positions = [], skinI = [], skinW = [], uvs = [], hemW = [];
+  const sgn = Math.sign(hipJ.x - cx) || 1;
+  let prevR = null;
+  for (let r = 0; r <= RINGS; r++) {
+    const y = top + (hem - top) * (r / RINGS);
+    const band = pts.filter((p) => Math.abs(p[1] - y) < 0.022).map((p) => [p[0], p[2]]);
+    const H = band.length >= 3 ? hull2d(band) : null;
+    const radii = [];
+    for (let k = 0; k < SEG; k++) {
+      const a = (k / SEG) * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a);
+      let best = 0;
+      if (H) for (let e = 0; e < H.length; e++) {
+        const p = H[e], q = H[(e + 1) % H.length];
+        const ex = q[0] - p[0], ez = q[1] - p[1], den = dx * ez - dz * ex;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((p[0] - cx) * ez - (p[1] - cz) * ex) / den, u = ((p[0] - cx) * dz - (p[1] - cz) * dx) / den;
+        if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.max(best, t);
+      }
+      radii.push(best || (prevR ? prevR[k] : 0.12));
+    }
+    // Юбка книзу не сужается резко: каждое кольцо не уже 96% предыдущего (прямой силуэт, а не «штаны»).
+    if (prevR) for (let k = 0; k < SEG; k++) radii[k] = Math.max(radii[k], prevR[k] * 0.96);
+    prevR = radii;
+    const below = THREE.MathUtils.clamp((hipJ.y + 0.03 - y) / (hipJ.y + 0.03 - hem), 0, 1);
+    const wLeg = 0.92 * Math.pow(below, 0.8);
+    for (let k = 0; k <= SEG; k++) {
+      const kk = k % SEG, a = (kk / SEG) * Math.PI * 2;
+      const rr = radii[kk] + margin;
+      const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr;
+      positions.push(x, y, z);
+      const sL = THREE.MathUtils.smoothstep((x - cx) * sgn, -0.035, 0.035);
+      skinI.push(iH, iL, iR, 0);
+      skinW.push(1 - wLeg, wLeg * sL, wLeg * (1 - sL), 0);
+      uvs.push(k / SEG, r / RINGS);
+      hemW.push(Math.pow(r / RINGS, 1.5));
+    }
+  }
+  const idx = [];
+  for (let r = 0; r < RINGS; r++) for (let k = 0; k < SEG; k++) {
+    const a = r * (SEG + 1) + k, b2 = a + 1, c = a + SEG + 1, d = c + 1;
+    idx.push(a, c, b2, b2, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  // Координаты — в исходной позе (как у тела); в систему сетки возвращаем обратной матрицей привязки.
+  const inv = body.bindMatrix.clone().invert();
+  const pa = new Float32Array(positions);
+  for (let i = 0; i < pa.length; i += 3) { v.set(pa[i], pa[i + 1], pa[i + 2]).applyMatrix4(inv); pa[i] = v.x; pa[i + 1] = v.y; pa[i + 2] = v.z; }
+  g.setAttribute('position', new THREE.BufferAttribute(pa, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
+  g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinI, 4));
+  g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinW, 4));
+  g.setAttribute('aHem', new THREE.BufferAttribute(new Float32Array(hemW), 1));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  // Шов по кругу: первая и последняя точки кольца совпадают — усредняем их нормали, чтобы не было полосы.
+  const nor = g.attributes.normal;
+  for (let r = 0; r <= RINGS; r++) {
+    const a = r * (SEG + 1), b2 = a + SEG;
+    const nx = nor.getX(a) + nor.getX(b2), ny = nor.getY(a) + nor.getY(b2), nz = nor.getZ(a) + nor.getZ(b2), l = Math.hypot(nx, ny, nz) || 1;
+    nor.setXYZ(a, nx / l, ny / l, nz / l); nor.setXYZ(b2, nx / l, ny / l, nz / l);
+  }
+  // Проверка, что сетка вывернута наружу: если нормаль смотрит к оси — переворачиваем треугольники.
+  v.fromBufferAttribute(g.attributes.position, 0).applyMatrix4(body.bindMatrix);
+  const n0 = new THREE.Vector3().fromBufferAttribute(nor, 0);
+  if (n0.x * (v.x - cx) + n0.z * (v.z - cz) < 0) { for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
+  const mat = clothMat.clone();
+  mat.name = 'Gen_Bottoms_TightSkirt';
+  mat.map = null;
+  if ('shadeMultiplyTexture' in mat) mat.shadeMultiplyTexture = null;
+  if ('matcapTexture' in mat) mat.matcapTexture = null;
+  if ('normalMap' in mat) mat.normalMap = null;
+  mat.side = THREE.DoubleSide;
+  mat.transparent = false;
+  mat.alphaTest = 0;
+  mat.userData = {};
+  mat.needsUpdate = true;
+  const mesh = new THREE.SkinnedMesh(g, mat);
+  mesh.name = 'GenTightSkirt';
+  mesh.frustumCulled = false;
+  mesh.bind(body.skeleton, body.bindMatrix);
+  body.parent.add(mesh);
+  mesh.visible = false;
+  return mesh;
+}
+
 export class PieceWardrobe {
   constructor(scene) {
     this.scene = scene;
@@ -274,6 +395,13 @@ export class PieceWardrobe {
     for (const m of this.base.pieces.bottoms ?? []) installDroop(vrm, m);
     for (const m of this.base.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); }
     for (const m of this.base.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
+    // Облегающая юбка — своя сетка по её телу (материал берём у любой её вещи, без рисунка).
+    try {
+      const donor = [...(this.base.pieces.bottoms ?? []), ...(this.base.pieces.tops ?? []), ...this.base.skins][0];
+      const dm = donor && [].concat(donor.material).find((m) => m && !m.isOutline);
+      this.tightSkirt = dm ? buildTightSkirt(vrm, this.base.skins, dm) : null;
+      if (this.tightSkirt) { installClothPoke(this.tightSkirt); installDroop(vrm, this.tightSkirt); installHipKeep(vrm, this.tightSkirt, true); setLift(this.tightSkirt, 0.014); }
+    } catch (e) { console.warn('tight skirt', e); this.tightSkirt = null; }
   }
 
   // Палец ведёт ткань: point — где касание (мир), dir — куда ведут (мир), power — сила толчка.
@@ -558,6 +686,12 @@ export class PieceWardrobe {
       for (const m of this.base.pieces[cat.id] ?? []) m.visible = choice === 'base' || (choice !== 'none' && !this.sources.has(choice) && !this.paints.has(choice));
       for (const [id, s] of this.sources) for (const m of s.pieces[cat.id] ?? []) m.visible = choice === id;
     }
+    if (this.tightSkirt) {
+      this.tightSkirt.visible = !!this.paints.get(wear.bottoms)?.gen;
+      const m = this.tightSkirt.material, c = wear.bottomHex ?? 0x24222c;
+      m.color?.setHex(c);
+      m.shadeColorFactor?.setHex(c).multiplyScalar(0.62);
+    }
     // Низ под верхом от другого наряда — заправляем.
     const topC = wear.tops ?? 'base', botC = wear.bottoms ?? 'base';
     const tuck = topC !== 'none' && topC !== botC;
@@ -587,6 +721,7 @@ export class PieceWardrobe {
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).
     const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.bottoms)?.bottoms, kl = this.paints.get(wear.legs)?.legs;
+    // (у облегающей юбки рисунка по телу нет — это отдельная сетка, см. tightSkirt)
     if (kl === 'bare') map = this.bareLegs(map);
     if (kt) {
       const hex = wear.topHex ?? 0xf1edf6;
@@ -915,6 +1050,8 @@ export class PieceWardrobe {
     if (!this.base) return;
     this.restorePokes(dt);
     this.updateCloth(dt);
+    // Облегающая юбка: чем сильнее согнуты ноги, тем увереннее рисуется поверх тела (бедро не проглядывает).
+    if (this.tightSkirt?.visible) setLift(this.tightSkirt, 0.022 + 0.05 * SQUAT_FLEX.value);
     const bh = this.base.vrm.humanoid;
     for (const [, s] of this.sources) {
       if (!s.active) continue;
