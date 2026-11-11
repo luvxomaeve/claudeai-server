@@ -648,7 +648,8 @@ export class PieceWardrobe {
       } else inside = {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
-        upper: (x, y) => y > hem, // всё выше пояса (для заливки кожи под снятым верхом)
+        upper: (x, y) => y > hipJ.y + leg * 0.19, // всё выше шортиков (для заливки кожи под снятым верхом)
+        waistgap: (x, y) => y > hipJ.y + leg * 0.19 && y < hipJ.y + leg * 0.5, // над шортиками: тут торчала бы серая резинка модели
         legsall: (x, y) => y < hipJ.y - leg * 0.26, // ноги ниже белья (для «без чулок»)
       }[kind];
       const v = new THREE.Vector3(), idx = g.index, n = idx ? idx.count : pos.count;
@@ -854,8 +855,10 @@ export class PieceWardrobe {
       let sum = 0, n = 0;
       for (let i = 0; i < q.length; i += 4 * 5) if (qs(i)) { sum += q[i] * 0.3 + q[i + 1] * 0.59 + q[i + 2] * 0.11; n++; }
       if (n < 500) continue;
-      const mean = sum / n, E = 6 * 4, EW = 6 * w * 4;
-      for (let y = 6; y < h - 6; y++) for (let x = 6; x < w - 6; x++) {
+      // Отступ от любой ткани побольше: у края белья и чулок на коже нарисована тёмная кайма — она дала бы
+      // на лосинах «силуэт трусов».
+      const mean = sum / n, E = 16 * 4, EW = 16 * w * 4;
+      for (let y = 16; y < h - 16; y++) for (let x = 16; x < w - 16; x++) {
         const p = y * w + x;
         if (ref[p]) continue;
         const i = p * 4;
@@ -863,8 +866,26 @@ export class PieceWardrobe {
         ref[p] = Math.max(1, Math.min(255, Math.round(((q[i] * 0.3 + q[i + 1] * 0.59 + q[i + 2] * 0.11) / mean) * 128)));
       }
     }
-    // Пустые места — нейтральные; затем лёгкое размытие, чтобы тени были мягкими.
-    for (let p = 0; p < ref.length; p++) if (!ref[p]) ref[p] = 128;
+    // Пустые места (под бельём) — без тени. А чтобы на их границе не было ступеньки («силуэта трусов»),
+    // тень плавно сходит на нет при приближении к ним (на ~4 см).
+    {
+      const L = 256, n2 = L * L, c = new Uint16Array(n2), tot = new Uint16Array(n2);
+      for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) { const k = ((y * L / h) | 0) * L + ((x * L / w) | 0); tot[k]++; if (ref[y * w + x]) c[k]++; }
+      const R = 10, dist = new Uint8Array(n2);
+      for (let k = 0; k < n2; k++) dist[k] = c[k] * 2 > tot[k] ? R : 0;
+      for (let it = 1; it <= R; it++) for (let y = 1; y < L - 1; y++) for (let x = 1; x < L - 1; x++) {
+        const k = y * L + x;
+        if (dist[k] === R && (dist[k - 1] < it - 1 + 1 && dist[k - 1] === it - 1 || dist[k + 1] === it - 1 || dist[k - L] === it - 1 || dist[k + L] === it - 1)) dist[k] = it;
+      }
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        if (!ref[p]) { ref[p] = 128; continue; }
+        const fx = Math.min(L - 1.001, Math.max(0, (x + 0.5) * L / w - 0.5)), fy = Math.min(L - 1.001, Math.max(0, (y + 0.5) * L / h - 0.5));
+        const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0, k = y0 * L + x0;
+        const wgt = ((dist[k] * (1 - tx) + dist[k + 1] * tx) * (1 - ty) + (dist[k + L] * (1 - tx) + dist[k + L + 1] * tx) * ty) / R;
+        ref[p] = Math.round(128 + (ref[p] - 128) * wgt * wgt * (3 - 2 * wgt));
+      }
+    }
     const tmp = new Uint8Array(ref.length);
     for (let pass = 0; pass < 2; pass++) {
       for (let y = 0; y < h; y++) for (let x = 2; x < w - 2; x++) { const p = y * w + x; tmp[p] = (ref[p - 2] + ref[p - 1] + ref[p] + ref[p + 1] + ref[p + 2]) / 5; }
@@ -872,6 +893,20 @@ export class PieceWardrobe {
     }
     this.shadeCache.set(key, ref);
     return ref;
+  }
+
+  // Готовим заготовки заранее, по одной за раз, чтобы первая смена одежды не подвисала.
+  warm() {
+    const img = this.base?.skinMap?.image;
+    if (!img || this.warmed) return;
+    this.warmed = true;
+    const w = img.width, h = img.height;
+    const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
+    const jobs = [() => this.shadeRef(w, h, donors), () => this.zoneMask('upper', w, h), () => this.zoneMask('waistgap', w, h), () => this.zoneMask('legsall', w, h), () => this.zoneMask('minishorts', w, h),
+      ...['under', 'under:trim', 'leggings', 'leggings:trim', 'shorts', 'shorts:trim', 'minishorts', 'minishorts:trim', 'capri', 'capri:trim',
+        'top', 'top:trim', 'crop', 'crop:trim', 'tank', 'tank:trim', 'longcrop', 'longcrop:trim', 'tee', 'tee:trim', 'polo', 'polo:trim', 'polocollar'].map((k) => () => this.clothMask(k, w, h))];
+    const step = () => { const j = jobs.shift(); if (!j) return; try { j(); } catch { /* ignore */ } setTimeout(step, 120); };
+    setTimeout(step, 300);
   }
 
   // Красим все слои ткани за один проход по текстуре (раньше — по проходу на слой: смена наряда подтормаживала).
@@ -890,8 +925,9 @@ export class PieceWardrobe {
     const data = ctx.getImageData(0, 0, w, h), d = data.data;
     const isSkin = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
     // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи) — дорисовываем её от соседней кожи.
-    if (layers.some((l) => ['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(l.kind))) {
-      const u = this.zoneMask('upper', w, h);
+    {
+      // Кожа нужна: над шортиками (серая резинка модели) — всегда; выше пояса — когда надет нарисованный верх.
+      const u = layers.some((l) => ['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(l.kind)) ? this.zoneMask('upper', w, h) : this.zoneMask('waistgap', w, h);
       const need = new Uint8Array(w * h);
       let any = false;
       // Нужна кожа везде, где её нет: и в прозрачных местах, и там, где нарисованы манжеты/бретельки своего наряда.
@@ -909,7 +945,7 @@ export class PieceWardrobe {
         if (zone && zone[p] < 128 && !isSkin(i)) continue;
         const al = mv / 255; // на краю ткань плавно сходит на нет
         // Тень по формам тела: темнее в складках, чуть светлее на выпуклостях. Тень слегка «холодная».
-        const f = Math.min(1.12, Math.max(0.62, 1 + (shade[p] / 128 - 1) * 2.4));
+        const f = Math.min(1.2, Math.max(0.42, 1 + (shade[p] / 128 - 1) * 5.2));
         const fr = f < 1 ? f * (0.97 + 0.03 * f) : f;
         d[i] = d[i] * (1 - al) + Math.min(255, R * fr) * al; d[i + 1] = d[i + 1] * (1 - al) + Math.min(255, G * fr) * al; d[i + 2] = d[i + 2] * (1 - al) + Math.min(255, Bl * (f < 1 ? f + (1 - f) * 0.12 : f)) * al; d[i + 3] = 255;
       }
@@ -1001,7 +1037,7 @@ export class PieceWardrobe {
     const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : this.sources.get(id))?.skinMap ?? this.base.skinMap;
     const topId = wear.tops ?? 'base';
     let map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
-    map = this.recolorShorts(map, wear.legsDark ? null : (wear.legsTint ?? null), !wear.legsDark && wear.legsTint == null);
+    // (старую перекраску шортиков убрали: теперь их целиком рисует слой «under» — это было самое медленное место)
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).

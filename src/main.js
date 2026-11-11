@@ -2934,7 +2934,7 @@ function loadSkinDonors() {
   })));
   return skinDonorsP;
 }
-setTimeout(loadSkinDonors, 4000); // подгружаем заранее, в фоне
+setTimeout(() => loadSkinDonors().then(() => { applyWear(); pieceWardrobe.warm(); }), 3000); // подгружаем заранее, в фоне, и готовим заготовки вещей
 const pieceLoading = new Map();
 function loadPieceSource(id) {
   if (pieceWardrobe.hasSource(id)) return Promise.resolve();
@@ -4420,7 +4420,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 108;
+const WAIFU_BUILD = 109;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
