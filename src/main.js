@@ -1056,15 +1056,17 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   if (touches.size > 2) return;
 
-  const hit = zoneAt(e, true);
+  // Открыт гардероб — палец по экрану только крутит камеру (её не гладим и не двигаем): удобно разглядывать наряд.
+  const dressing = !$('wardrobe').classList.contains('hidden');
+  const hit = dressing ? null : zoneAt(e, true);
   if (hit) touchRipple(e.clientX, e.clientY);
   if (!hit) {
     // Пустое место в обычном режиме: свайп крутит камеру (сесть/встать — у левого края).
     bgSwipe = { sy: e.clientY, sx: e.clientX, lastX: e.clientX, lastY: e.clientY, axis: null };
     if (autoMode) {
       // Рядом с ней (в пределах пальца) или сразу после поглаживания — это промах мимо неё, а не жест камерой.
-      bgSwipe.near = performance.now() - lastOnHerAt < 450;
-      for (let a = 0; a < 8 && !bgSwipe.near; a++) {
+      bgSwipe.near = !dressing && performance.now() - lastOnHerAt < 450;
+      for (let a = 0; a < 8 && !bgSwipe.near && !dressing; a++) {
         if (zoneAt({ clientX: e.clientX + Math.cos(a * Math.PI / 4) * 16, clientY: e.clientY + Math.sin(a * Math.PI / 4) * 16 }, true)) bgSwipe.near = true;
       }
     }
@@ -4427,7 +4429,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 104;
+const WAIFU_BUILD = 105;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
@@ -4680,6 +4682,7 @@ window.addEventListener('pointerdown', () => { autoTouchAt = performance.now(); 
 // Камера плавно покачивается вокруг неё, пока её не трогают (и ещё 3 секунды после).
 function updateAutoCam(dt) {
   if (!autoMode || !character || pointerActive || freeCam || faceCam) return;
+  if (document.querySelector('.panel:not(.hidden)')) return; // открыто меню — камера стоит спокойно
   if (performance.now() - autoTouchAt < 3000) return;
   autoPhase += dt * 0.16;
   // Покачивание включается мягко (без рывка после касания).

@@ -638,7 +638,10 @@ export class PieceWardrobe {
       } else if (lo != null) {
         const topY = base === 'under' ? hipJ.y + leg * 0.2 : waist; // бельё — та же форма шортиков, что была, только ровная
         const body = (x, y) => y < topY && y > lo;
-        inside = trim ? (x, y) => body(x, y) && (y > topY - TW * 1.6 || y < lo + TW) : body;
+        inside = trim === 'seam'
+          // тонкие декоративные швы: по бокам и по центру
+          ? (x, y, z) => body(x, y) && y < topY - TW * 1.6 && y > lo + TW && (Math.abs(z - hips.z) < 0.0035 && ax(x) > 0.05 || ax(x) < 0.003)
+          : trim ? (x, y) => body(x, y) && (y > topY - TW * 1.6 || y < lo + TW) : body;
       } else inside = {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
@@ -709,7 +712,7 @@ export class PieceWardrobe {
   // Настоящая кожа из других нарядов. У них одежда и чулки закрывают другие места, поэтому там, где у текущей
   // текстуры кожи нет, у какого-то наряда она есть. Берём её оттуда (раскладка текстуры у всех одна),
   // подгоняя тон под её кожу. need — что нужно заполнить; заполненное из него вычёркивается.
-  realSkin(d, w, h, need, donors) {
+  realSkin(d, w, h, need, donors, zone = null) {
     const skin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
     // Берём один наряд — тот, где настоящей кожи на ногах больше всего (несколько давали бы швы между собой).
     let best = null;
@@ -735,9 +738,14 @@ export class PieceWardrobe {
     }
     if (best && best.cover > 200) {
       const { q, ok, kr, kg, kb } = best;
+      // Донор закрывает почти всё нужное (модель без чулок) — берём у него всю зону целиком, а не только
+      // «дырки»: тогда посреди ноги нет стыка между её кожей и принесённой.
+      let needN = 0;
+      for (let p = 0; p < need.length; p += 9) if (need[p]) needN++;
+      const whole = zone && best.cover > needN * 0.8;
       for (let y = 8; y < h - 8; y++) for (let x = 8; x < w - 8; x++) {
         const p = y * w + x;
-        if (!need[p]) continue;
+        if (!need[p] && !(whole && zone[p] >= 128)) continue;
         const i = p * 4;
         if (!ok(i)) continue;
         d[i] = Math.min(255, q[i] * kr); d[i + 1] = Math.min(255, q[i + 1] * kg); d[i + 2] = Math.min(255, q[i + 2] * kb); d[i + 3] = 255;
@@ -771,7 +779,7 @@ export class PieceWardrobe {
         if (!prev[p] && z[p] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
       }
     }
-    this.realSkin(d, w, h, need, donors);
+    this.realSkin(d, w, h, need, donors, z);
     skinFill(d, w, h, need);
     ctx.putImageData(data, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
@@ -962,8 +970,11 @@ export class PieceWardrobe {
     const layers = [];
     // Бельё (шортики под одеждой): ровная ткань с аккуратным кантом, в тон чулок.
     {
-      const hex = wear.legsDark ? 0x17151c : (wear.legsTint ?? this.legTone(map) ?? 0x24222c);
-      layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex: trimOf(hex) });
+      // По умолчанию нежно-розовые с белым кантом; выбрал цвет чулок вручную — шортики в тон им.
+      const hex = wear.legsDark ? 0x17151c : (wear.legsTint ?? 0xf4a9c4);
+      const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255, lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
+      const light = (c) => Math.round(c + (255 - c) * (lum > 0.3 ? 0.72 : 0.3)); // кант светлее ткани
+      layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex: (light(r) << 16) | (light(g) << 8) | light(b) }, { kind: 'under:seam', hex: (light(r) << 16) | (light(g) << 8) | light(b) });
     }
     if (kt) {
       const hex = wear.topHex ?? 0xf1edf6;
