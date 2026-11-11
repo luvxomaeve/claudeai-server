@@ -313,6 +313,67 @@ function skinFill(d, w, h, need) {
   }
 }
 
+// Сглаживание тела. У модели мало треугольников, поэтому на сгибах и по контуру видны «грани».
+// Каждый треугольник тела делим на четыре, а новые точки ставим не на плоскость, а на округлую
+// поверхность (по нормалям соседних вершин). Веса костей у новых точек — среднее от соседей,
+// поэтому и сгибается кожа плавнее. Форма в вершинах модели не меняется.
+function subdivideSkin(mesh) {
+  const g = mesh.geometry;
+  if (!mesh.isSkinnedMesh || g.userData.smoothed || !g.attributes.normal || !g.attributes.skinIndex) return;
+  if (Object.keys(g.morphAttributes ?? {}).length) return;
+  const pos = g.attributes.position, nor = g.attributes.normal, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+  const n0 = pos.count;
+  if (n0 > 40000) return; // и так плотная
+  const index = g.index ? Array.from(g.index.array) : Array.from({ length: n0 }, (_, i) => i);
+  const others = Object.entries(g.attributes).filter(([k]) => !['position', 'normal', 'skinIndex', 'skinWeight'].includes(k));
+  const P = Array.from(pos.array), N = Array.from(nor.array), SI = Array.from(si.array), SW = Array.from(sw.array);
+  const O = others.map(([, a]) => ({ size: a.itemSize, arr: Array.from(a.array) }));
+  const mids = new Map();
+  const ALPHA = 0.7;
+  const mid = (a, b) => {
+    const key = a < b ? a * 1e6 + b : b * 1e6 + a;
+    let m = mids.get(key);
+    if (m != null) return m;
+    m = P.length / 3;
+    const ax = P[a * 3], ay = P[a * 3 + 1], az = P[a * 3 + 2], bx = P[b * 3], by = P[b * 3 + 1], bz = P[b * 3 + 2];
+    const nax = N[a * 3], nay = N[a * 3 + 1], naz = N[a * 3 + 2], nbx = N[b * 3], nby = N[b * 3 + 1], nbz = N[b * 3 + 2];
+    const mx = (ax + bx) / 2, my = (ay + by) / 2, mz = (az + bz) / 2;
+    // Проекции середины на касательные плоскости в обеих вершинах → точка на «округлой» поверхности.
+    const da = (mx - ax) * nax + (my - ay) * nay + (mz - az) * naz, db = (mx - bx) * nbx + (my - by) * nby + (mz - bz) * nbz;
+    const qx = mx - (da * nax + db * nbx) / 2, qy = my - (da * nay + db * nby) / 2, qz = mz - (da * naz + db * nbz) / 2;
+    P.push(mx + (qx - mx) * ALPHA, my + (qy - my) * ALPHA, mz + (qz - mz) * ALPHA);
+    let nx = nax + nbx, ny = nay + nby, nz = naz + nbz; const l = Math.hypot(nx, ny, nz) || 1;
+    N.push(nx / l, ny / l, nz / l);
+    // Веса костей: объединяем, берём четыре самых сильных.
+    const w = new Map();
+    for (const v of [a, b]) for (let k = 0; k < 4; k++) { const wt = SW[v * 4 + k]; if (wt > 0) w.set(SI[v * 4 + k], (w.get(SI[v * 4 + k]) ?? 0) + wt * 0.5); }
+    const top = [...w.entries()].sort((x, y) => y[1] - x[1]).slice(0, 4);
+    const sum = top.reduce((t, e) => t + e[1], 0) || 1;
+    for (let k = 0; k < 4; k++) { SI.push(top[k]?.[0] ?? 0); SW.push((top[k]?.[1] ?? 0) / sum); }
+    for (const o of O) for (let k = 0; k < o.size; k++) o.arr.push((o.arr[a * o.size + k] + o.arr[b * o.size + k]) / 2);
+    mids.set(key, m);
+    return m;
+  };
+  const out = [];
+  for (let t = 0; t < index.length; t += 3) {
+    const a = index[t], b = index[t + 1], c = index[t + 2];
+    const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a);
+    out.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+  }
+  const ng = new THREE.BufferGeometry();
+  ng.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  ng.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  ng.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(SI, 4));
+  ng.setAttribute('skinWeight', new THREE.Float32BufferAttribute(SW, 4));
+  others.forEach(([k, a], i) => ng.setAttribute(k, new THREE.BufferAttribute(new a.array.constructor(O[i].arr), a.itemSize, a.normalized)));
+  ng.setIndex(out);
+  for (const gr of g.groups) ng.addGroup(gr.start * 4, gr.count * 4, gr.materialIndex);
+  ng.boundingBox = g.boundingBox; ng.boundingSphere = g.boundingSphere;
+  ng.userData = { ...g.userData, smoothed: true };
+  mesh.geometry = ng;
+  g.dispose();
+}
+
 // ---------- Облегающая юбка: собираем сетку сами ----------
 // Трубка по форме её тела: на каждой высоте берём контур тела (выпуклую оболочку — она перекрывает
 // промежуток между ног) и чуть отступаем наружу. Привязка: верх — к тазу, низ — к бёдрам, поэтому
@@ -444,6 +505,8 @@ export class PieceWardrobe {
 
   attachBase(vrm) {
     this.base = { vrm, ...indexVrm(vrm) };
+    // Тело сглаживаем первым делом — всё остальное (правки, юбки, рисунок одежды) строится уже по гладкому.
+    try { for (const m of this.base.skins) subdivideSkin(m); } catch (e) { console.warn('smooth skin', e); }
     for (const list of Object.values(this.base.pieces)) list.forEach(installClothPoke);
     for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(this.base.pieces);
@@ -599,6 +662,9 @@ export class PieceWardrobe {
 
   // Маска области на текстуре (грубо, по треугольникам).
   zoneMask(kind, w, h) {
+    this.zoneCache ??= new Map();
+    const key = `${kind}|${w}`;
+    if (this.zoneCache.has(key)) return this.zoneCache.get(key);
     const z = this.paintTris(kind);
     const cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
@@ -607,7 +673,11 @@ export class PieceWardrobe {
     c.beginPath();
     for (const list of [z.fast, ...z.slow.map((x) => x.U)]) for (let i = 0; i < list.length; i += 6) { c.moveTo(list[i] * w, list[i + 1] * h); c.lineTo(list[i + 2] * w, list[i + 3] * h); c.lineTo(list[i + 4] * w, list[i + 5] * h); c.closePath(); }
     c.fill(); c.stroke();
-    return c.getImageData(0, 0, w, h).data;
+    const rgba = c.getImageData(0, 0, w, h).data;
+    const out = new Uint8Array(w * h);
+    for (let p = 0; p < out.length; p++) out[p] = rgba[p * 4];
+    this.zoneCache.set(key, out);
+    return out;
   }
 
   // «Без чулок»: ткань на ногах (чулки, колготки, носки) заменяем цветом её же кожи.
@@ -625,13 +695,13 @@ export class PieceWardrobe {
     const z = this.zoneMask('legsall', w, h);
     const skin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
     const need = new Uint8Array(w * h);
-    for (let i = 0, p = 0; i < d.length; i += 4, p++) if (z[i] >= 128 && !skin(i)) need[p] = 1;
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) if (z[p] >= 128 && !skin(i)) need[p] = 1;
     // Край чулка полупрозрачный и похож на кожу — захватываем ещё несколько точек вокруг, чтобы не осталось следа.
     for (let pass = 0; pass < 16; pass++) {
       const prev = need.slice();
       for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
         const p = y * w + x;
-        if (!prev[p] && z[p * 4] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
+        if (!prev[p] && z[p] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
       }
     }
     skinFill(d, w, h, need);
@@ -644,18 +714,12 @@ export class PieceWardrobe {
   }
 
   // keep: чулки остаются поверх — ниже белья красим только голую кожу, ткань чулок не трогаем.
-  paintCloth(map, kind, hex, keep = false) {
-    if (!map?.image || !this.base) return map;
-    this.paintTexCache ??= new Map();
-    const key = `${map.uuid}|${kind}|${hex}|${keep}`;
-    if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
+  // Точная маска вещи (0..255 на точку), со сглаженным краем. Считается один раз на вид вещи.
+  clothMask(kind, w, h) {
+    this.maskCache ??= new Map();
+    const key = `${kind}|${w}`;
+    if (this.maskCache.has(key)) return this.maskCache.get(key);
     const { fast: T, slow } = this.paintTris(kind);
-    if (!T.length) return map;
-    const img = map.image, w = img.width, h = img.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0, w, h);
     const mask = document.createElement('canvas');
     mask.width = w; mask.height = h;
     const mc = mask.getContext('2d', { willReadFrequently: true });
@@ -663,7 +727,9 @@ export class PieceWardrobe {
     mc.beginPath();
     for (let i = 0; i < T.length; i += 6) { mc.moveTo(T[i] * w, T[i + 1] * h); mc.lineTo(T[i + 2] * w, T[i + 3] * h); mc.lineTo(T[i + 4] * w, T[i + 5] * h); mc.closePath(); }
     mc.fill(); mc.stroke();
-    const m = mc.getImageData(0, 0, w, h).data;
+    const rgba = mc.getImageData(0, 0, w, h).data;
+    const m = new Uint8Array(w * h);
+    for (let p = 0; p < m.length; p++) m[p] = rgba[p * 4];
     // Края (пояс, ворот, манжеты, щиколотки): по каждой точке считаем, где она на теле, — линия ровная.
     for (const { U, P, Z, inside } of slow) {
       const x0 = U[0] * w, y0 = U[1] * h, x1 = U[2] * w, y1 = U[3] * h, x2 = U[4] * w, y2 = U[5] * h;
@@ -683,27 +749,46 @@ export class PieceWardrobe {
           tot++;
           if (inside(a * P[0] + b2 * P[2] + c * P[4], a * P[1] + b2 * P[3] + c * P[5], a * Z[0] + b2 * Z[1] + c * Z[2])) hit++;
         }
-        if (tot) { const k = (y * w + x) * 4; m[k] = Math.max(m[k], Math.round(255 * hit / tot)); }
+        if (tot) { const k = y * w + x; m[k] = Math.max(m[k], Math.round(255 * hit / tot)); }
       }
     }
+    this.maskCache.set(key, m);
+    return m;
+  }
+
+  // Красим все слои ткани за один проход по текстуре (раньше — по проходу на слой: смена наряда подтормаживала).
+  // layers: [{ kind, hex, keep }]; keep — чулки остаются поверх: ниже белья красим только голую кожу.
+  paintLayers(map, layers) {
+    if (!map?.image || !this.base || !layers.length) return map;
+    this.paintTexCache ??= new Map();
+    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}`;
+    if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
+    const img = map.image, w = img.width, h = img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h), d = data.data;
-    const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
-    // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи). Нарисованный верх их не закрывает
-    // целиком — заливаем такие места цветом кожи, иначе руки «пропадают».
-    if (['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(kind)) { // (кант красится поверх уже залитой кожи)
+    const isSkin = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
+    // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи) — дорисовываем её от соседней кожи.
+    if (layers.some((l) => ['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(l.kind))) {
       const u = this.zoneMask('upper', w, h);
       const need = new Uint8Array(w * h);
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) if (u[i] >= 128 && d[i + 3] < 250) need[p] = 1;
-      skinFill(d, w, h, need);
+      let any = false;
+      for (let p = 0; p < need.length; p++) if (u[p] >= 128 && d[p * 4 + 3] < 250) { need[p] = 1; any = true; }
+      if (any) skinFill(d, w, h, need);
     }
-    const zone = keep ? this.zoneMask('minishorts', w, h) : null;
-    for (let i = 0; i < d.length; i += 4) {
-      if (m[i] < 8) continue;
-      if (zone && zone[i] < 128 && !(d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150)) continue;
-      // Ровная плотная ткань, без просвечивания.
-      const k = 1; // ровный цвет: рисунок чулок и белья под тканью не проступает (тени даёт освещение)
-      const al = m[i] / 255; // на краю ткань плавно сходит на нет
-      d[i] = d[i] * (1 - al) + Math.min(255, R * k) * al; d[i + 1] = d[i + 1] * (1 - al) + Math.min(255, G * k) * al; d[i + 2] = d[i + 2] * (1 - al) + Math.min(255, Bl * k) * al; d[i + 3] = 255;
+    for (const { kind, hex, keep } of layers) {
+      const m = this.clothMask(kind, w, h);
+      const zone = keep ? this.zoneMask('minishorts', w, h) : null;
+      const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
+      for (let p = 0, i = 0; p < m.length; p++, i += 4) {
+        const mv = m[p];
+        if (mv < 8) continue;
+        if (zone && zone[p] < 128 && !isSkin(i)) continue;
+        const al = mv / 255; // на краю ткань плавно сходит на нет
+        d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
+      }
     }
     ctx.putImageData(data, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
@@ -805,21 +890,21 @@ export class PieceWardrobe {
       const f = (c) => Math.round(lum > 0.45 ? c * 0.8 : c + (255 - c) * 0.2);
       return (f(r) << 16) | (f(g) << 8) | f(b);
     };
+    const layers = [];
     if (kt) {
       const hex = wear.topHex ?? 0xf1edf6;
-      map = this.paintCloth(map, kt, hex);
-      map = this.paintCloth(map, `${kt}:trim`, trimOf(hex));
+      layers.push({ kind: kt, hex }, { kind: `${kt}:trim`, hex: trimOf(hex) });
       if (kt === 'polo') {
         // Воротник — светлый на тёмном поло и тёмный на светлом.
         const lum = (((hex >> 16) & 255) * 0.3 + ((hex >> 8) & 255) * 0.59 + (hex & 255) * 0.11) / 255;
-        map = this.paintCloth(map, 'polocollar', lum > 0.72 ? 0x2b2530 : 0xf6f3fa);
+        layers.push({ kind: 'polocollar', hex: lum > 0.72 ? 0x2b2530 : 0xf6f3fa });
       }
     }
     if (kb) {
       const hex = wear.bottomHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
-      map = this.paintCloth(map, kb, hex, keep);
-      map = this.paintCloth(map, `${kb}:trim`, trimOf(hex), keep);
+      layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
+    map = this.paintLayers(map, layers);
     this.setSkin(map);
     onSkin?.(map);
   }

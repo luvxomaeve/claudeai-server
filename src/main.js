@@ -2403,7 +2403,7 @@ for (const ev of ['pointerup', 'pointercancel']) {
 }
 
 // Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
-const BEND_MIN = -0.8; // прогиб назад — побольше
+const BEND_MIN = -0.95; // прогиб назад — побольше
 const BEND_MAX = 1.9; // наклон вперёд поглубже
 const BEND_RANGE = BEND_MAX - BEND_MIN;
 // Сколько изгиба берёт спина: вперёд — мягкая дуга, назад — глубокий прогиб (S-линия).
@@ -2905,7 +2905,9 @@ const PIECE_SOURCES = [
   // «Без чулок»: голые ноги (под лосины, шорты и юбки).
   { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
-].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x));
+].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x))
+  // Чёрная плиссе из отдельных полосок («дырявая» при наклонах) тоже убрана.
+  .map((x) => (x.id === 'o2' ? { ...x, cats: x.cats.filter((c) => c !== 'bottoms') } : x));
 const pieceWardrobe = new PieceWardrobe(scene);
 for (const x of PIECE_SOURCES) if (x.paint) pieceWardrobe.paints.set(x.id, x.paint);
 const isPaint = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.paint;
