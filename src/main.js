@@ -1240,12 +1240,16 @@ canvas.addEventListener('pointermove', (e) => {
       const dk = upper ? 'bend' : 'sit';
       const layering = reps.home.on && reps.home.state === 'play';
       if (reps.home.on && !layering) { setRepeat(false, true); autoLayer = null; renderAutoRep(); }
-      if (layering) { autoLayerDrag = dk; autoRec = null; if (dk === 'bend') { reps.home.layerBend ??= character.bodyOffset.hipsRotX; autoBendTarget = reps.home.layerBend; } }
+      // Это движение уже повторяется (в основном повторе или вторым слоем) — повтор НЕ останавливаем и не
+      // перехватываем: она продолжает повторять, а палец лишь сдвигает движение (глубже/выше).
+      const repeatsIt = layering && (autoLayer?.kind === dk || reps.home.autoKind === dk || reps.home.autoKind === 'both');
+      var dragShift = repeatsIt;
+      if (layering && !repeatsIt) { autoLayerDrag = dk; autoRec = null; if (dk === 'bend') { reps.home.layerBend ??= character.bodyOffset.hipsRotX; autoBendTarget = reps.home.layerBend; } }
       else autoLayerDrag = null;
       stopAuto(true);
       stroking = null;
       if (autoState === 'sleep') setAutoState('live'); // взялся её двигать — просыпается
-      poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now(), auto: true, dir: 0, run: 0, turns: 0 };
+      poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now(), auto: true, dir: 0, run: 0, turns: 0, shift: dragShift };
       try { navigator.vibrate?.(8); } catch { /* ignore */ } // лёгкий отклик: «взял её»
       showLabel(upper ? 'Ниже — наклон, выше — прогиб' : 'Ниже — сесть / лечь, выше — встать');
       return;
@@ -2577,6 +2581,23 @@ function poseDragMove(e) {
     if (Math.sign(d) && Math.sign(d) !== poseDrag.dir) { if (poseDrag.dir && poseDrag.run > 24) poseDrag.turns++; poseDrag.dir = Math.sign(d); poseDrag.run = 0; }
     poseDrag.run += Math.abs(d);
     if (autoRec) autoRec.turns = Math.max(autoRec.turns ?? 0, poseDrag.turns);
+  }
+  if (poseDrag.shift && reps.home.on) {
+    // Повтор идёт и продолжает идти — палец только сдвигает его.
+    const r = reps.home, dy = e.clientY - poseDrag.y;
+    poseDrag.y = e.clientY;
+    if (poseDrag.kind === 'benddrag') {
+      const dv = (dy / (window.innerHeight * 0.5)) * BEND_RANGE;
+      if (autoLayer?.kind === 'bend') autoLayer.off = THREE.MathUtils.clamp((autoLayer.off ?? 0) + dv, -1.6, 1.6);
+      else { repRanges(r); r.bendOff = THREE.MathUtils.clamp((r.bendOff ?? 0) + dv, BEND_MIN - r.bendLo, BEND_MAX - r.bendHi); }
+      showLabel(dy > 0 ? 'Повтор: наклон глубже' : 'Повтор: наклон выше');
+    } else {
+      const dv = (dy / (window.innerHeight * 0.38)) * sitMax();
+      if (autoLayer?.kind === 'sit') autoLayer.off = THREE.MathUtils.clamp((autoLayer.off ?? 0) + dv, -1.3, 1.3);
+      else { repRanges(r); r.sitOff = THREE.MathUtils.clamp((r.sitOff ?? 0) + dv, -r.sitLo, Math.max(-r.sitLo, sitMax() - r.sitHi)); }
+      showLabel(dy > 0 ? 'Повтор: ниже' : 'Повтор: выше');
+    }
+    return;
   }
   if (poseDrag.kind === 'benddrag') {
     // Полная амплитуда наклона и прогиба, как у левой полосы во вкладке «Позы».
@@ -4464,7 +4485,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 123;
+const WAIFU_BUILD = 124;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4617,8 +4638,8 @@ let autoLoopT = performance.now();
     const tri = L.t < L.dur ? L.t / L.dur : 2 - L.t / L.dur;
     const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * L.dur;
     let i = 0; while (i < L.S.length - 2 && L.S[i + 1][0] < u) i++;
-    const a = L.S[i], b = L.S[i + 1], k = THREE.MathUtils.clamp((u - a[0]) / Math.max(1e-4, b[0] - a[0]), 0, 1), v = a[1] + (b[1] - a[1]) * k;
-    if (L.kind === 'bend') reps.home.layerBend = v;
+    const a = L.S[i], b = L.S[i + 1], k = THREE.MathUtils.clamp((u - a[0]) / Math.max(1e-4, b[0] - a[0]), 0, 1), v = a[1] + (b[1] - a[1]) * k + (L.off ?? 0);
+    if (L.kind === 'bend') reps.home.layerBend = THREE.MathUtils.clamp(v, BEND_MIN, BEND_MAX);
     else { reps.home.sitFree = true; character.sit = THREE.MathUtils.clamp(v, 0, sitMax()); character.sitRate = Math.max(character.sitRate, 1.2); character.slideHold = 3; }
   }
   // Камера: палец задаёт поворот, камера доезжает плавно и чуть «докатывается».
