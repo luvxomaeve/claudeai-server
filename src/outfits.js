@@ -922,27 +922,8 @@ export class PieceWardrobe {
       const bz = this.zoneMask('bust', w, h);
       for (let p = 0; p < ref.length; p++) if (bz[p] >= 128) ref[p] = 128;
     }
-    // Оставляем только мелкие детали формы (пупок, ложбинки, линии сгибов): из карты вычитаем её же сильно
-    // размытую копию. Крупные тёмные области при этом исчезают — цвет ткани остаётся ровным.
-    {
-      const L = 96, n2 = L * L, sum = new Float32Array(n2), cnt = new Float32Array(n2);
-      for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) { const k = ((y * L / h) | 0) * L + ((x * L / w) | 0); sum[k] += ref[y * w + x]; cnt[k]++; }
-      for (let k = 0; k < n2; k++) sum[k] = cnt[k] ? sum[k] / cnt[k] : 128;
-      const t2 = new Float32Array(n2);
-      for (let it = 0; it < 3; it++) {
-        for (let y = 0; y < L; y++) for (let x = 0; x < L; x++) { const k = y * L + x; t2[k] = (sum[k - (x > 0)] + sum[k] + sum[k + (x < L - 1)]) / 3; }
-        for (let y = 0; y < L; y++) for (let x = 0; x < L; x++) { const k = y * L + x; sum[k] = (t2[k - (y > 0 ? L : 0)] + t2[k] + t2[k + (y < L - 1 ? L : 0)]) / 3; }
-      }
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const fx = Math.min(L - 1.001, Math.max(0, (x + 0.5) * L / w - 0.5)), fy = Math.min(L - 1.001, Math.max(0, (y + 0.5) * L / h - 0.5));
-        const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0, k = y0 * L + x0;
-        const big = (sum[k] * (1 - tx) + sum[k + 1] * tx) * (1 - ty) + (sum[k + L] * (1 - tx) + sum[k + L + 1] * tx) * ty;
-        const p = y * w + x;
-        ref[p] = Math.max(1, Math.min(255, Math.round(128 + (ref[p] - big))));
-      }
-    }
     const tmp = new Uint8Array(ref.length);
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < 8; pass++) { // сильное размытие: только мягкий объём, без линий и пупка
       for (let y = 0; y < h; y++) for (let x = 2; x < w - 2; x++) { const p = y * w + x; tmp[p] = (ref[p - 2] + ref[p - 1] + ref[p] + ref[p + 1] + ref[p + 2]) / 5; }
       for (let y = 2; y < h - 2; y++) for (let x = 0; x < w; x++) { const p = y * w + x; ref[p] = (tmp[p - 2 * w] + tmp[p - w] + tmp[p] + tmp[p + w] + tmp[p + 2 * w]) / 5; }
     }
@@ -989,7 +970,7 @@ export class PieceWardrobe {
       for (let p = 0; p < need.length; p++) if (u[p] >= 128 && (d[p * 4 + 3] < 250 || !isSkin(p * 4))) { need[p] = 1; any = true; }
       if (any) { this.realSkin(d, w, h, need, donors); skinFill(d, w, h, need); } // сперва настоящая кожа рук и плеч, остаток — дорисовка
     }
-    // На ткань кладём только тонкие линии формы (пупок, ложбинки) — общий цвет остаётся ровным.
+    // На ткань кладём мягкую светотень по форме тела.
     const shade = this.shadeRef(w, h, donors);
     for (const { kind, hex, keep } of layers) {
       const m = this.clothMask(kind, w, h);
@@ -1000,9 +981,8 @@ export class PieceWardrobe {
         if (mv < 8) continue;
         if (zone && zone[p] < 128 && !isSkin(i)) continue;
         const al = mv / 255; // на краю ткань плавно сходит на нет
-        // только заметные линии (мелкую рябь отсекаем порогом), лёгкое затемнение
-        const dv = Math.min(0, shade[p] - 128 + 5);
-        const f = Math.max(0.76, 1 + (dv / 128) * 5.5);
+        // мягкая светотень по форме, как в самом первом варианте, но слабее: без тёмных областей
+        const f = Math.min(1.06, Math.max(0.82, 1 + (shade[p] / 128 - 1) * 2.2));
         d[i] = d[i] * (1 - al) + R * f * al; d[i + 1] = d[i + 1] * (1 - al) + G * f * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * (f + (1 - f) * 0.15) * al; d[i + 3] = 255;
       }
     }
