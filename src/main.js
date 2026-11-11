@@ -3190,6 +3190,7 @@ function renderPieces() {
   }
   box.appendChild(tabs);
   const c = PIECE_CATS.find((x) => x.id === closetTab);
+  tabs.dataset.title = c.name; // название выбранного раздела — строкой под вкладками
   const opts = c.id === 'leggings' ? ['none'] : ['base'];
   for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && src.id !== 'p_bare') opts.push(src.id); // «без чулок» — отдельной кнопкой сверху
   if (c.id === 'shoes' || c.id === 'acc' || c.id === 'bottoms') opts.push('none');
@@ -4454,7 +4455,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 120;
+const WAIFU_BUILD = 121;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';

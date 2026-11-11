@@ -1664,3 +1664,24 @@ body.ui-hidden #auto-exit, body.ui-hidden #auto-help { opacity: 0.35; transition
 @media (max-width: 700px) { #wardrobe.panel:not(#_) { max-height: 52%; } }
 #wardrobe #goth-preset { padding: 7px 10px; font-size: 12.5px; opacity: 0.85; }
 #girl-pick .girl-chip { padding: 7px 8px; }
+
+/* ── Гардероб: сначала вещи, остальное (девушка, готик, волосы, фон) — ниже ── */
+#wardrobe .panel-body { display: flex; flex-direction: column; }
+#wardrobe .panel-body > * { order: 5; flex: none; }
+#wardrobe #piece-list { order: 0; }
+#wardrobe .editor-group:has(+ #piece-list) { display: none; }
+/* вкладки: шесть равных кнопок во всю ширину, ничего не обрезается; подпись — только у выбранной */
+#wardrobe .closet-tabs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; overflow: visible; position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; }
+#wardrobe .closet-tab:not(#_) { justify-content: center; padding: 8px 2px; font-size: 0; gap: 0; min-width: 0; }
+#wardrobe .closet-tab span { font-size: 18px; }
+#wardrobe .closet-tabs::after { content: attr(data-title); grid-column: 1 / -1; font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.72; padding: 2px 2px 0; }
+/* вещи: кружок цвета не налезает на название */
+#wardrobe .closet-item { padding-right: 30px; min-height: 52px; font-size: 12.5px; }
+#wardrobe .closet-item .ci-name { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#wardrobe .closet-item .ci-tint { right: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; }
+#wardrobe .closet-item .ci-icon { font-size: 17px; }
+/* подсказка не лезет на нижние кнопки; при открытом меню не видна */
+#hint:not(#_) { bottom: 84px; font-size: 13px; }
+body:has(#auto-menu:not([hidden])) #hint, body:has(#love-menu:not([hidden])) #hint { opacity: 0 !important; }
+/* всплывающая надпись — выше середины, не на ней и не на кнопках */
+#toast:not(#_) { top: 24%; max-width: 78vw; font-size: 14px; padding: 9px 16px; }

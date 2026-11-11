@@ -12,7 +12,7 @@ export const PIECE_CATS = [
   { id: 'leggings', name: 'Лосины', skin: true }, // нарисованы по телу; носятся и сами, и под юбкой
   { id: 'shoes', name: 'Обувь', re: /_Shoes_/i },
   { id: 'acc', name: 'Аксессуары', re: /_Accessory/i },
-  { id: 'legs', name: 'Чулки / колготки', skin: true },
+  { id: 'legs', name: 'Чулки', skin: true },
 ];
 const SKIN_RE = /Body_00_SKIN/i;
 
