@@ -516,6 +516,8 @@ async function loadModel(source) {
     buildHitboxes();
     frameCamera();
     $('loading').classList.add('done');
+    // Минималистичный вид (только она + меню ☰) — по умолчанию; классический со всеми кнопками — если выбрал его.
+    setTimeout(() => { let ui = null; try { ui = localStorage.getItem('waifu-ui'); } catch { /* ignore */ } if (ui !== 'classic' && !autoMode) setAutoMode(true); }, 0);
     if (firstLoad) {
       gameReady();
       greetOnLoad();
@@ -4242,19 +4244,21 @@ let autoPhase = 0;
 let autoTouchAt = 0;
 const autoBtn = document.createElement('button');
 autoBtn.id = 'btn-automode';
-autoBtn.title = 'Режим «Авто»: только она, управление жестами';
+autoBtn.title = 'Простой вид: только она, управление жестами, всё остальное — в меню ☰';
 autoBtn.innerHTML = '<span>✨</span>';
 $('poses').appendChild(autoBtn);
 const autoExit = document.createElement('button');
 autoExit.id = 'auto-exit';
-autoExit.title = 'Выйти из режима «Авто»';
-autoExit.textContent = '✕';
+autoExit.title = 'Меню';
+autoExit.textContent = '☰';
 document.body.appendChild(autoExit);
 function setAutoMode(on) {
   if (on && poseMode) setPoseMode(false);
   autoMode = on;
   autoSmoothCam = on;
   if (!on) autoHint.hidden = true;
+  autoMenu.hidden = true;
+  try { localStorage.setItem('waifu-ui', on ? 'min' : 'classic'); } catch { /* ignore */ }
   autoRec = null; autoRepOffer = null; renderAutoRep();
   if (character) character.autoSleep = on;
   if (!on && character && !poseMode) {
@@ -4279,7 +4283,7 @@ function setAutoMode(on) {
   } else {
     stopAuto();
     wakeUi();
-    showToast('Обычный режим');
+    showToast('Все кнопки · ✨ — вернуть простой вид');
   }
 }
 // Шпаргалка по жестам — при входе в режим (первые несколько раз подольше).
@@ -4316,7 +4320,33 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-autoExit.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(false); });
+// Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
+const autoMenu = document.createElement('div');
+autoMenu.id = 'auto-menu';
+autoMenu.hidden = true;
+document.body.appendChild(autoMenu);
+for (const ev of ['pointerdown', 'touchstart']) autoMenu.addEventListener(ev, (e) => e.stopPropagation());
+function renderAutoMenu() {
+  const items = [
+    ['👗', 'Гардероб', () => $('btn-wardrobe').click()],
+    ['🎵', 'Анимации и танцы', () => $('btn-anims').click()],
+    ['✏️', 'Позы и точки', () => { setAutoMode(false); $('btn-tab-pose').click(); }],
+    ['📷', 'Фото', () => $('cam-photo').click()],
+    [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
+    ['👁', $('btn-gaze').classList.contains('active') ? 'Смотрит на тебя: да' : 'Смотрит на тебя: нет', () => $('btn-gaze').click(), true],
+    ['↩️', 'Вернуть как было', () => autoReturn()],
+    ['🎛', 'Все кнопки на экране', () => setAutoMode(false)],
+  ];
+  autoMenu.innerHTML = '';
+  for (const [icon, name, fn, stay] of items) {
+    const b = document.createElement('button');
+    b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
+    b.addEventListener('click', (e) => { e.stopPropagation(); fn(); if (stay) renderAutoMenu(); else autoMenu.hidden = true; });
+    autoMenu.appendChild(b);
+  }
+}
+autoExit.addEventListener('click', (e) => { e.stopPropagation(); autoHint.hidden = true; if (autoMenu.hidden) renderAutoMenu(); autoMenu.hidden = !autoMenu.hidden; });
+window.addEventListener('pointerdown', (e) => { if (!autoMenu.hidden && e.target !== autoExit && !autoMenu.contains(e.target)) autoMenu.hidden = true; }, { capture: true, passive: true });
 // ---------- «Авто»: подвигал её туда-сюда — всплывает «Повторить?» ----------
 // Запоминаем, как ты её двигал (наклон/прогиб, сесть/встать). Отпустил — 6 секунд висит кнопка:
 // нажал — она сама повторяет это движение по кругу, пока не нажмёшь «Стоп» или не возьмёшься двигать снова.

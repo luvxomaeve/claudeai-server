@@ -1622,3 +1622,18 @@ button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item
 body.automode #auto-help { display: grid; place-items: center; position: fixed; z-index: 30;
   top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(56px + env(safe-area-inset-right, 0px));
   width: 36px; height: 36px; border-radius: 50%; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer; }
+
+/* Простой вид: меню ☰ — всё в одном месте */
+#auto-menu { position: fixed; z-index: 31; top: calc(56px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 20px; min-width: 214px; animation: fadeIn 0.18s ease;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.22)); border: 1px solid rgba(255, 255, 255, 0.38);
+  -webkit-backdrop-filter: blur(8px) saturate(1.5); backdrop-filter: blur(8px) saturate(1.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 2px 2px 4px -1px rgba(255, 255, 255, 0.8), 0 16px 44px rgba(0, 0, 0, 0.35); }
+#auto-menu[hidden] { display: none; }
+#auto-menu button { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 14px; font: inherit; font-size: 15px; font-weight: 700; text-align: left; cursor: pointer;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+#auto-menu button i { font-style: normal; font-size: 18px; width: 24px; text-align: center; flex: none; }
+/* сердечко с уровнем остаётся и в простом виде — маленькое, слева вверху */
+body.automode #hud:not(#_) { display: flex !important; }
+body.automode #hud #buttons { display: none !important; }
+body.automode #affection { transform: scale(0.82); transform-origin: left top; }
