@@ -1225,6 +1225,7 @@ canvas.addEventListener('pointermove', (e) => {
       stopAuto(true);
       stroking = null;
       poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now(), auto: true, dir: 0, run: 0, turns: 0 };
+      try { navigator.vibrate?.(8); } catch { /* ignore */ } // лёгкий отклик: «взял её»
       showLabel(upper ? 'Ниже — наклон, выше — прогиб' : 'Ниже — сесть / лечь, выше — встать');
       return;
     }
@@ -4396,6 +4397,13 @@ let autoLoopT = performance.now();
   }
   autoRepCheck(now);
   autoLife(now);
+  // Просьба-желание держится рядом с ней (слева от головы) и двигается вместе с ней.
+  if (!wishEl.hidden && character.bones?.head) {
+    const p = screenOf(character.bones.head, 0.02);
+    const w = wishEl.offsetWidth || 180;
+    wishEl.style.left = `${THREE.MathUtils.clamp(p.x - 40 - w / 2, w / 2 + 8, window.innerWidth - w / 2 - 8).toFixed(1)}px`;
+    wishEl.style.top = `${THREE.MathUtils.clamp(p.y + 46, 110, window.innerHeight - 90).toFixed(1)}px`;
+  }
   if (!autoRepBtn.hidden && character.bones?.head) {
     const v = character.bones.head.getWorldPosition(new THREE.Vector3());
     v.y += 0.2 * (character.scale ?? 1);
@@ -4527,6 +4535,7 @@ function autoRepCheck(now) {
   if (S[S.length - 1].t < 0.6 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
   autoRepOffer = rec;
   renderAutoRep();
+  try { navigator.vibrate?.(12); } catch { /* ignore */ }
   clearTimeout(autoRepTimer);
   autoRepTimer = setTimeout(() => { autoRepOffer = null; renderAutoRep(); }, 6000);
 }
@@ -4623,7 +4632,8 @@ const WISHES = [
 ];
 const WISH_THANKS = ['Спасибо! Ты лучший ♥', 'Ура~ именно этого я и хотела!', 'Хи, ты меня понимаешь ♥', 'Мне так приятно… спасибо~', 'Вот теперь я счастлива ♥'];
 const WISH_MISS = ['Ну вот… ладно, в другой раз.', 'Эх… ты не заметил.', 'Хм… забыл про меня?', 'Ничего, я подожду~'];
-const WISH_TIME = 75; // секунд на исполнение
+const WISH_TIME = 32; // секунд на исполнение (сама просьба видна первые ~10 с, потом гаснет)
+const WISH_SHOW = 10;
 const WISH_BONUS = 8;
 let wish = null; // { def, progress, t }
 let wishTimer = 40; // до первого желания
@@ -4665,6 +4675,7 @@ function updateWishes(dt) {
   if (wish) {
     wish.t -= dt;
     wishEl.style.setProperty('--k', Math.max(0, wish.t / WISH_TIME).toFixed(3));
+    wishEl.classList.toggle('gone', WISH_TIME - wish.t > WISH_SHOW);
     if (wish.def.check?.()) { fulfillWish(); return; }
     if (wish.t <= 0) {
       wish = null;
@@ -4686,6 +4697,7 @@ function updateWishes(dt) {
   wish = { def, progress: 0, t: WISH_TIME };
   wishEl.querySelector('.w-text').textContent = def.text;
   wishEl.style.setProperty('--k', '1');
+  wishEl.classList.remove('gone');
   wishEl.hidden = false;
   character.react({ expression: 'relaxed', motion: 'tiltHead' });
   say(pick(def.ask), 'happy');

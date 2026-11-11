@@ -1646,3 +1646,8 @@ body.automode #affection { transform: scale(0.82); transform-origin: left top; }
 body:not(.automode) #hud #buttons, body:not(.automode) #poses #btn-gaze, body:not(.automode) #poses #btn-automode { display: none !important; }
 body:not(.automode) #poses #btn-handles:not(#_) { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 156px); }
 body.ui-hidden #auto-exit, body.ui-hidden #auto-help { opacity: 0.35; transition: opacity 0.6s ease; }
+
+/* Желание — просьба рядом с ней: появляется у головы, через ~10 секунд тихо гаснет */
+#wish:not(#_) { animation: fadeIn 0.35s ease; bottom: auto; left: 50%; top: 40%; transform: translate(-50%, -50%); padding: 8px 14px; font-size: 14px; transition: opacity 0.9s ease; }
+#wish.gone { opacity: 0; pointer-events: none; }
+#wish .w-bar { display: none; }
