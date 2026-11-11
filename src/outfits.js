@@ -262,13 +262,13 @@ function installHipKeep(vrm, mesh, cloth) {
 // Дорисовать кожу там, где её в текстуре нет (под снятым верхом, под чулками): цвет берём не «средний
 // по телу», а от ближайшей настоящей кожи — он плавно растекается от её краёв, поэтому совпадает по тону
 // и не оставляет прямоугольных заплаток. Считаем на уменьшенной копии (быстро), красим в полном размере.
-function skinFill(d, w, h, need) {
+function skinFill(d, w, h, need, srcMask = null) {
   const L = 256, n = L * L;
   const r = new Float32Array(n), g = new Float32Array(n), b = new Float32Array(n), c = new Float32Array(n);
   const isSkin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
   for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
     const i = (y * w + x) * 4;
-    if (need[i >> 2] || !isSkin(i)) continue;
+    if (need[i >> 2] || !isSkin(i) || (srcMask && srcMask[i >> 2] < 128)) continue; // srcMask: откуда можно брать образец
     // Образец — только чистая кожа: рядом с краем ткани (чулка, майки) она затемнена и даёт полосы.
     const E = 10;
     if (x < E || y < E || x >= w - E || y >= h - E) continue;
@@ -715,7 +715,17 @@ export class PieceWardrobe {
         const ins = P.map((p) => inside(p.x, p.y, p.z));
         const cnt = ins.filter(Boolean).length;
         // Треугольник мог перешагнуть границу целиком мимо вершин (редко) — такие тоже проверяем по точкам.
-        if (!cnt && !inside((P[0].x + P[1].x + P[2].x) / 3, (P[0].y + P[1].y + P[2].y) / 3, (P[0].z + P[1].z + P[2].z) / 3)) continue;
+        // Узкая полоска (кант, резинка) может пройти сквозь треугольник, не задев ни одной вершины —
+        // проверяем сетку точек внутри него, иначе край получался «зубчиками».
+        let any = cnt > 0;
+        if (!any) {
+          const N = 5;
+          for (let a = 0; a <= N && !any; a++) for (let b2 = 0; b2 <= N - a; b2++) {
+            const u = a / N, w2 = b2 / N, c = 1 - u - w2;
+            if (inside(u * P[0].x + w2 * P[1].x + c * P[2].x, u * P[0].y + w2 * P[1].y + c * P[2].y, u * P[0].z + w2 * P[1].z + c * P[2].z)) { any = true; break; }
+          }
+        }
+        if (!any) continue;
         const U = [uv.getX(q[0]), uv.getY(q[0]), uv.getX(q[1]), uv.getY(q[1]), uv.getX(q[2]), uv.getY(q[2])];
         if (cnt === 3) fast.push(...U);
         else slow.push({ U, P: [P[0].x, P[0].y, P[1].x, P[1].y, P[2].x, P[2].y], Z: [P[0].z, P[1].z, P[2].z], inside }); // край ткани — ровно по линии, а не по треугольникам
@@ -990,8 +1000,31 @@ export class PieceWardrobe {
     // Заменяем только ткань (серую/прозрачную). Тёмные места самой кожи — пупок, ложбинки — не трогаем.
     const fleshy = (i) => d0[i] > d0[i + 1] && d0[i + 1] >= d0[i + 2] && d0[i] - d0[i + 2] > 14 && d0[i] > 70;
     for (let p = 0; p < need.length; p++) if (u[p] >= 128 && (d0[p * 4 + 3] < 250 || !fleshy(p * 4))) { need[p] = 1; any = true; }
+    // Тонкие тёмные линии на животе (остаток контура своей кофты): тёмные точки, у которых сверху и снизу
+    // в 4 точках уже нормальная кожа. Пупок толще — он остаётся.
+    const wz = this.zoneMask('waistgap', w, h);
+    {
+      const dark = (i) => d0[i + 3] >= 250 && d0[i] < 168;
+      for (let y = 5; y < h - 5; y++) for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        if (wz[p] < 128 || need[p] || !dark(p * 4)) continue;
+        if (!dark((p - 4 * w) * 4) && !dark((p + 4 * w) * 4)) { need[p] = 1; if (!dark((p - w) * 4)) need[p - w] = 1; if (!dark((p + w) * 4)) need[p + w] = 1; any = true; }
+      }
+    }
     if (!any) { this.prepCache.set(key, map); return map; }
-    this.realSkin(d0, w, h, need, donors); skinFill(d0, w, h, need);
+    // Край резинки шортиков в её текстуре обведён тёмной линией — захватываем ещё 5 точек вокруг, чтобы от неё
+    // не оставался пунктир.
+    for (let pass = 0; pass < 5; pass++) {
+      const prev = need.slice();
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const p = y * w + x;
+        if (!prev[p] && wz[p] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
+      }
+    }
+    this.realSkin(d0, w, h, need, donors);
+    // Остальное продолжаем от её кожи ВЫШЕ пояса (u): кожа бёдер под шортиками теплее по тону, и если брать
+    // образец оттуда, на животе получалась оранжевая полоса.
+    skinFill(d0, w, h, need, u);
     pctx.putImageData(pd, 0, 0);
     const tex = new THREE.CanvasTexture(pc);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];

@@ -1711,3 +1711,10 @@ body.automode #auto-states.show:not(#_) { opacity: 1; pointer-events: auto; tran
 
 /* Анимации: готовые движения-чипы убраны */
 #anims #mocap-list, #anims #mocap-list + .panel-note { display: none !important; }
+
+/* пять значков помещаются: подпись только у «позы сна» и у включённых */
+#auto-states { gap: 6px !important; }
+#auto-states button { padding: 0 10px; }
+#auto-states button span:empty { display: none; }
+#auto-states button:not(.active) span { max-width: 0; margin-left: 0; }
+#auto-states button:nth-child(3) span { max-width: 90px; margin-left: 6px; }

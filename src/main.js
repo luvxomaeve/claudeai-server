@@ -1135,7 +1135,8 @@ function strokeTick(e) {
     lastStrokeLineAt = now;
     // Ноги — про чулки/гольфы/колготки, как при тапе (иногда — обычная фраза).
     const lw = stroking.hit.zone === 'legs' ? LEGS_LINES[legwear()] : null;
-    say(pick(lw && Math.random() < 0.4 ? lw : r.lines[t]));
+    // Спит — отвечает сонно, а не обычной фразой.
+    say(pick(character.sleep > 0.5 ? SLEEP_LINES : lw && Math.random() < 0.4 ? lw : r.lines[t]));
   }
 }
 
@@ -4535,7 +4536,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 127;
+const WAIFU_BUILD = 128;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4547,13 +4548,28 @@ document.body.appendChild(autoStates);
 for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, (e) => e.stopPropagation());
 function renderAutoStates() {
   autoStates.innerHTML = '';
-  for (const [id, icon, name] of [['sleep', '😴', 'Спит'], ['freeze', '🤫', 'Замри'], ['cam', '🎥', 'Камера']]) {
+  const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
+  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', '🤫', 'Замри'], ['cam', '🎥', 'Камера']]) {
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : autoState === id;
     b.className = on ? 'active' : '';
     b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
     b.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (id === 'home') {
+        // Домик, как в ручном виде: камера спереди, она встаёт ровно; сон, «замри» и повтор снимаются.
+        camOnly = false; setAutoState('live'); autoReturn(); autoCentered = false; showAutoStates(900);
+        return;
+      }
+      if (id === 'lie') {
+        // Поза сна по кругу: на бок → на живот → на спину. Если уже лежит — перекладывается.
+        lieMode = { side: 'belly', belly: 'back', back: 'side', off: 'side' }[lieMode];
+        if (!unlocked('lieStyles')) lieMode = 'side';
+        try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
+        renderLieToggle();
+        showAutoStates(3500);
+        return;
+      }
       showAutoStates(1300); // выбрал — значки скоро спрячутся
       if (id === 'cam') { camOnly = !camOnly; renderAutoStates(); showToast(camOnly ? '🎥 Палец крутит камеру — её не задеваешь' : '👆 Снова можно гладить'); return; }
       setAutoState(autoState === id ? 'live' : id); // повторный тап — снова живая
