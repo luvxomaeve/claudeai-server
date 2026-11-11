@@ -2964,6 +2964,7 @@ function applyWear() {
 }
 function preloadWornSources() {
   const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
+  if (isPaint(wear.tops)) for (const x of PIECE_SOURCES) if (x.url && (x.id === 'o3' || x.bare)) ids.add(x.id);
   if (wear.legs === 'p_bare') { const bareSrc = PIECE_SOURCES.filter((x) => x.url && x.bare); for (const x of (bareSrc.length ? bareSrc : PIECE_SOURCES.filter((y) => y.url && y.cats.includes('legs')))) ids.add(x.id); }
   for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
 }
@@ -3007,6 +3008,15 @@ async function pickPiece(cat, id, quiet = false) {
   wear[cat] = id;
   try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
   renderPieces();
+  // Нарисованный верх открывает руки и плечи: настоящую кожу берём из наряда с открытыми руками (o3) — подгружаем.
+  if (cat === 'tops' && isPaint(id)) {
+    const need = PIECE_SOURCES.filter((x) => x.url && (x.id === 'o3' || x.bare) && !pieceWardrobe.hasSource(x.id));
+    if (need.length) {
+      $('flash').classList.add('on');
+      await Promise.all(need.map((x) => loadPieceSource(x.id).catch(() => {})));
+      $('flash').classList.remove('on');
+    }
+  }
   // «Без чулок»: настоящую кожу ног берём из нарядов с короткими чулками/гольфами — подгружаем их текстуры.
   if (cat === 'legs' && id === 'p_bare') {
     // Есть наряд, сохранённый без чулок (bare) — берём кожу только из него; иначе ищем по всем.
@@ -4398,7 +4408,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 102;
+const WAIFU_BUILD = 103;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';

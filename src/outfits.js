@@ -705,34 +705,11 @@ export class PieceWardrobe {
     return out;
   }
 
-  // «Без чулок»: ткань на ногах (чулки, колготки, носки) заменяем цветом её же кожи.
-  bareLegs(map) {
-    if (!map?.image || !this.base) return map;
-    this.paintTexCache ??= new Map();
-    const donors = [...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
-    const key = `${map.uuid}|bare|${donors.map(([id]) => id).join(',')}`;
-    if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
-    const img = map.image, w = img.width, h = img.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h), d = data.data;
-    const z = this.zoneMask('legsall', w, h);
+  // Настоящая кожа из других нарядов. У них одежда и чулки закрывают другие места, поэтому там, где у текущей
+  // текстуры кожи нет, у какого-то наряда она есть. Берём её оттуда (раскладка текстуры у всех одна),
+  // подгоняя тон под её кожу. need — что нужно заполнить; заполненное из него вычёркивается.
+  realSkin(d, w, h, need, donors) {
     const skin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
-    const need = new Uint8Array(w * h);
-    for (let i = 0, p = 0; i < d.length; i += 4, p++) if (z[p] >= 128 && !skin(i)) need[p] = 1;
-    // Край чулка полупрозрачный и похож на кожу — захватываем ещё несколько точек вокруг, чтобы не осталось следа.
-    for (let pass = 0; pass < 16; pass++) {
-      const prev = need.slice();
-      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-        const p = y * w + x;
-        if (!prev[p] && z[p] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
-      }
-    }
-    // Настоящая кожа ног: у других нарядов чулки короче (гольфы, носки) — там на бёдрах и коленях в текстуре
-    // настоящая кожа модели. Берём её оттуда (раскладка текстуры у всех одна), подгоняя тон под её кожу.
-    // Дорисовываем только то, чего нет ни в одном наряде.
     // Берём один наряд — тот, где настоящей кожи на ногах больше всего (несколько давали бы швы между собой).
     let best = null;
     for (const [, src] of donors) {
@@ -766,6 +743,34 @@ export class PieceWardrobe {
         need[p] = 0;
       }
     }
+  }
+
+  // «Без чулок»: ткань на ногах (чулки, колготки, носки) заменяем настоящей кожей.
+  bareLegs(map) {
+    if (!map?.image || !this.base) return map;
+    this.paintTexCache ??= new Map();
+    const donors = [...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
+    const key = `${map.uuid}|bare|${donors.map(([id]) => id).join(',')}`;
+    if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
+    const img = map.image, w = img.width, h = img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h), d = data.data;
+    const z = this.zoneMask('legsall', w, h);
+    const skin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
+    const need = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) if (z[p] >= 128 && !skin(i)) need[p] = 1;
+    // Край чулка полупрозрачный и похож на кожу — захватываем ещё несколько точек вокруг, чтобы не осталось следа.
+    for (let pass = 0; pass < 16; pass++) {
+      const prev = need.slice();
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const p = y * w + x;
+        if (!prev[p] && z[p] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
+      }
+    }
+    this.realSkin(d, w, h, need, donors);
     skinFill(d, w, h, need);
     ctx.putImageData(data, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
@@ -823,7 +828,8 @@ export class PieceWardrobe {
   paintLayers(map, layers) {
     if (!map?.image || !this.base || !layers.length) return map;
     this.paintTexCache ??= new Map();
-    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}`;
+    const donors = [...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
+    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
     if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
     const img = map.image, w = img.width, h = img.height;
     const canvas = document.createElement('canvas');
@@ -838,7 +844,7 @@ export class PieceWardrobe {
       const need = new Uint8Array(w * h);
       let any = false;
       for (let p = 0; p < need.length; p++) if (u[p] >= 128 && d[p * 4 + 3] < 250) { need[p] = 1; any = true; }
-      if (any) skinFill(d, w, h, need);
+      if (any) { this.realSkin(d, w, h, need, donors); skinFill(d, w, h, need); } // сперва настоящая кожа рук и плеч, остаток — дорисовка
     }
     for (const { kind, hex, keep } of layers) {
       const m = this.clothMask(kind, w, h);
