@@ -3669,7 +3669,15 @@ const AUTO_ROUTINES = [
   { name: 'присесть', keys: [[0, {}], [3, { sit: 0.42, bend: 0.25 }], [5, { sit: 0.45, bend: 0.35 }], [8.5, {}]] },
   { name: 'колени', keys: [[0, {}], [4, { sit: 0.8 }], [5.5, { sit: 0.8, bend: -0.35 }], [7.5, { sit: 0.8, bend: 0.5 }], [9, { sit: 0.8 }], [13, {}]] },
   { name: 'наклон-бёдра', keys: [[0, {}], [2.5, { bend: 0.6 }], [4, { bend: 0.6, sway: 1 }], [5.5, { bend: 0.6, sway: -1 }], [7, { bend: 0.5 }], [9.5, {}]] },
+  // Плавные «живые» связки: бёдра и корпус текут вместе, без остановок.
+  { name: 'покачивание', keys: [[0, {}], [1.4, { sway: 0.8, bend: 0.15 }], [2.8, { sway: -0.8, bend: 0.15 }], [4.2, { sway: 0.9, bend: 0.3 }], [5.6, { sway: -0.9, bend: 0.3 }], [7, { sway: 0.5 }], [8.4, {}]] },
+  { name: 'потянулась', keys: [[0, {}], [2, { bend: -0.5 }], [3.2, { bend: -0.55, sway: 0.5 }], [4.4, { bend: -0.5, sway: -0.5 }], [6.5, {}]] },
+  { name: 'присела-покачалась', keys: [[0, {}], [2.5, { sit: 0.45, bend: 0.2 }], [3.8, { sit: 0.45, sway: 0.8, bend: 0.2 }], [5.1, { sit: 0.45, sway: -0.8, bend: 0.2 }], [6.4, { sit: 0.3, bend: 0.4 }], [9, {}]] },
+  { name: 'поклон-волна', keys: [[0, {}], [1.8, { bend: 0.8 }], [3, { bend: 0.3, sway: 0.7 }], [4.2, { bend: 0.7, sway: -0.7 }], [5.4, { bend: 0.1 }], [6.6, { bend: -0.3 }], [8.5, {}]] },
+  { name: 'восьмёрка', keys: [[0, {}], [1.2, { sway: 0.7, bend: 0.25 }], [2.4, { sway: 0, bend: -0.2 }], [3.6, { sway: -0.7, bend: 0.25 }], [4.8, { sway: 0, bend: -0.2 }], [6, { sway: 0.7, bend: 0.25 }], [7.2, { sway: 0, bend: -0.15 }], [8.6, {}]] },
 ];
+// К движению корпуса — жест руками и выражение лица: так она выглядит живой, а не «качается».
+const AUTO_GESTURES = ['touchHair', 'handOnHip', 'tiltHead', 'sway', 'clasp', 'bounce'];
 let autoMoves = true;
 try { autoMoves = localStorage.getItem('waifu-auto') !== '0'; } catch { /* ignore */ }
 let auto = null; // { keys, t, last }
@@ -3774,6 +3782,11 @@ function updateAuto(dt) {
   const r = choices[Math.floor(Math.random() * choices.length)];
   autoLastName = r.name;
   auto = { keys: r.keys, t: 0 };
+  if (Math.random() < 0.6) {
+    const stretchy = /прогиб|потянулась/.test(r.name);
+    setTimeout(() => { if (auto && !pointerActive && character.sleep < 0.3) character.playMotion(stretchy ? 'stretch' : pick(AUTO_GESTURES)); }, 500 + Math.random() * 1500);
+    character.setExpression(Math.random() < 0.6 ? 'happy' : 'relaxed', 0.3 + Math.random() * 0.3, 3.5);
+  }
 }
 // Камеру крутишь — авто не мешаем; трогаешь её саму — авто плавно останавливается.
 window.addEventListener('pointerdown', (e) => {
@@ -4539,7 +4552,8 @@ function autoRepCheck(now) {
   if ((rec.turns ?? 0) < 1 && n < 2) return;
   if (S.length < 8) return;
   const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
-  if (S[S.length - 1].t < 0.6 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
+  // Предлагаем повторить, только если водил её хотя бы 3 секунды — на короткие движения не всплывает.
+  if (S[S.length - 1].t < 3 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
   autoRepOffer = rec;
   renderAutoRep();
   try { navigator.vibrate?.(12); } catch { /* ignore */ }
