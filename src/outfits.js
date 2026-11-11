@@ -516,11 +516,15 @@ function installEdgeShade(mesh, k = 1) {
     float edNV = clamp( dot( normalize( vViewPosition ), normal ), 0.0, 1.0 );
     float edE = smoothstep( 0.0, 1.0, pow( 1.0 - edNV, 2.2 ) ) * ${(0.5 * k).toFixed(3)};
     col *= mix( vec3( 1.0 ), vec3( 0.50, 0.46, 0.64 ), edE );
+    // Мягкий объём: свет сверху-спереди-сбоку (относительно камеры). Поверхности, отвёрнутые от него, плавно
+    // темнеют — изгибы тела читаются гладкой светотенью, без пятен и границ.
+    float edL = dot( normal, normalize( vec3( 0.38, 0.52, 0.76 ) ) );
+    col *= mix( vec3( 0.80, 0.77, 0.90 ), vec3( 1.0 ), smoothstep( -0.25, 0.75, edL ) );
     col += uEdgeRim * pow( 1.0 - edNV, 5.0 );
   }`);
     };
     const pk = m.customProgramCacheKey?.bind(m);
-    m.customProgramCacheKey = () => `${pk ? pk() : ''}|edgeRim${k}`;
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|edgeRimForm${k}`;
     m.needsUpdate = true;
   }
 }
@@ -938,7 +942,7 @@ export class PieceWardrobe {
     this.warmed = true;
     const w = img.width, h = img.height;
     const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
-    const jobs = [() => this.shadeRef(w, h, donors), () => this.zoneMask('upper', w, h), () => this.zoneMask('waistgap', w, h), () => this.zoneMask('legsall', w, h), () => this.zoneMask('minishorts', w, h),
+    const jobs = [() => this.zoneMask('upper', w, h), () => this.zoneMask('waistgap', w, h), () => this.zoneMask('legsall', w, h), () => this.zoneMask('minishorts', w, h),
       ...['under', 'under:trim', 'leggings', 'leggings:trim', 'shorts', 'shorts:trim', 'minishorts', 'minishorts:trim', 'capri', 'capri:trim',
         'top', 'top:trim', 'crop', 'crop:trim', 'tank', 'tank:trim', 'longcrop', 'longcrop:trim', 'tee', 'tee:trim', 'polo', 'polo:trim', 'polocollar'].map((k) => () => this.clothMask(k, w, h))];
     const step = () => { const j = jobs.shift(); if (!j) return; try { j(); } catch { /* ignore */ } setTimeout(step, 120); };
@@ -970,8 +974,7 @@ export class PieceWardrobe {
       for (let p = 0; p < need.length; p++) if (u[p] >= 128 && (d[p * 4 + 3] < 250 || !isSkin(p * 4))) { need[p] = 1; any = true; }
       if (any) { this.realSkin(d, w, h, need, donors); skinFill(d, w, h, need); } // сперва настоящая кожа рук и плеч, остаток — дорисовка
     }
-    // На ткань кладём мягкую светотень по форме тела.
-    const shade = this.shadeRef(w, h, donors);
+    // Нарисованной светотени на ткани нет (давала квадратные пятна) — объём считает шейдер, см. installEdgeShade.
     for (const { kind, hex, keep } of layers) {
       const m = this.clothMask(kind, w, h);
       const zone = keep ? this.zoneMask('minishorts', w, h) : null;
@@ -981,8 +984,7 @@ export class PieceWardrobe {
         if (mv < 8) continue;
         if (zone && zone[p] < 128 && !isSkin(i)) continue;
         const al = mv / 255; // на краю ткань плавно сходит на нет
-        // мягкая светотень по форме, как в самом первом варианте, но слабее: без тёмных областей
-        const f = Math.min(1.06, Math.max(0.82, 1 + (shade[p] / 128 - 1) * 2.2));
+        const f = 1;
         d[i] = d[i] * (1 - al) + R * f * al; d[i + 1] = d[i + 1] * (1 - al) + G * f * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * (f + (1 - f) * 0.15) * al; d[i + 3] = 255;
       }
     }
