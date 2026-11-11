@@ -1703,3 +1703,8 @@ body.cleanscreen #bubble, body.cleanscreen #toast, body.cleanscreen #auto-rep, b
 body.cleanscreen #poses, body.cleanscreen #sit-slider, body.cleanscreen #sit-slider2, body.cleanscreen #cam-controls, body.cleanscreen #handles,
 body.cleanscreen .float-heart, body.cleanscreen .fx-banner, body.cleanscreen #suggest { display: none !important; }
 body.cleanscreen #hud:not(#_):not(#__), body.cleanscreen .fx-p { display: none !important; }
+
+/* Значки состояний: скрыты, появляются по долгому тапу по ней */
+body.automode #auto-states:not(#_) { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(10px); transition: opacity 0.25s ease, transform 0.25s ease; }
+body.automode #auto-states.show:not(#_) { opacity: 1; pointer-events: auto; transform: translateX(-50%); }
+#auto-states button span { max-width: 90px; margin-left: 6px; }

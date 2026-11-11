@@ -4440,7 +4440,7 @@ autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
   + '<span>🔁 Подвигал туда-сюда — предложит повторить</span>'
   + '<span>🎥 По фону — камера вокруг неё; двумя пальцами — ближе/дальше и сдвиг</span>'
   + '<span>🎯 Двойной тап по фону — камера по центру; ещё раз — она встаёт как была</span>'
-  + '<span>🧍😴🤫🎥 Значки внизу — живая / спит / замри / только камера</span>'
+  + '<span>😴🤫🎥 Долгий тап по ней — спит / замри / только камера</span>'
   + '<span>✌️ Двойной тап двумя пальцами — чистый экран</span>';
 document.body.appendChild(autoHint);
 let autoHintTimer = 0;
@@ -4464,7 +4464,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 122;
+const WAIFU_BUILD = 123;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4476,18 +4476,40 @@ document.body.appendChild(autoStates);
 for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, (e) => e.stopPropagation());
 function renderAutoStates() {
   autoStates.innerHTML = '';
-  for (const [id, icon, name] of [['live', '🧍', 'Живая'], ['sleep', '😴', 'Спит'], ['freeze', '🤫', 'Замри'], ['cam', '🎥', 'Камера']]) {
+  for (const [id, icon, name] of [['sleep', '😴', 'Спит'], ['freeze', '🤫', 'Замри'], ['cam', '🎥', 'Камера']]) {
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : autoState === id;
     b.className = on ? 'active' : '';
     b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
     b.addEventListener('click', (e) => {
       e.stopPropagation();
+      showAutoStates(1300); // выбрал — значки скоро спрячутся
       if (id === 'cam') { camOnly = !camOnly; renderAutoStates(); showToast(camOnly ? '🎥 Палец крутит камеру — её не задеваешь' : '👆 Снова можно гладить'); return; }
-      setAutoState(autoState === id && id !== 'live' ? 'live' : id);
+      setAutoState(autoState === id ? 'live' : id); // повторный тап — снова живая
     });
     autoStates.appendChild(b);
   }
+}
+// Значки появляются по долгому тапу по ней и сами прячутся.
+let autoStatesTimer = 0;
+function showAutoStates(ms = 4500) {
+  renderAutoStates();
+  autoStates.classList.add('show');
+  clearTimeout(autoStatesTimer);
+  autoStatesTimer = setTimeout(() => autoStates.classList.remove('show'), ms);
+}
+{
+  let lp = null;
+  const cancel = () => { if (lp) { clearTimeout(lp.t); lp = null; } };
+  window.addEventListener('pointerdown', (e) => {
+    cancel();
+    if (!autoMode || e.target !== canvas || touches.size > 1 || document.body.classList.contains('cleanscreen')) return;
+    const onHer = !!zoneAt(e, true);
+    if (!onHer) return;
+    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } showAutoStates(); }, 480) };
+  }, { capture: true, passive: true });
+  window.addEventListener('pointermove', (e) => { if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel(); }, { capture: true, passive: true });
+  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, cancel, { capture: true, passive: true });
 }
 function setAutoState(st) {
   autoState = st;
