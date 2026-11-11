@@ -3633,6 +3633,8 @@ function renderAnims() {
   renderMocap();
   $('btn-dance').classList.toggle('active', !!character?.dancing && !currentAnim);
   $('btn-dance').textContent = character?.dancing && !currentAnim ? '💃 Танцует — остановить' : '💃 Танцевать';
+  flowBtn.classList.toggle('active', flowDance);
+  flowBtn.textContent = flowDance ? '🌊 Плавный танец — остановить' : '🌊 Плавный танец';
   const loops = $('loop-list');
   loops.innerHTML = '';
   for (const l of LOOPS) {
@@ -3708,8 +3710,14 @@ async function addAnim(file) {
 }
 
 $('btn-anims').addEventListener('click', () => togglePanel('anims', renderAnims));
+const flowBtn = document.createElement('button');
+flowBtn.id = 'btn-flow';
+flowBtn.className = 'panel-big';
+$('btn-dance').after(flowBtn);
+flowBtn.addEventListener('click', () => setFlowDance(!flowDance));
 $('btn-dance').addEventListener('click', () => {
   if (!character) return;
+  flowDance = false;
   if (currentAnim) stopAnim();
   if (currentMocap) stopMocap();
   character.loop = null;
@@ -3878,9 +3886,50 @@ function sliderTakesOver() {
   autoIdle = 0;
   if (auto && !auto.pose && !auto.returning) stopAuto();
 }
+// ---------- «Плавный танец»: одна длинная текучая связка в тех же амплитудах, что и её движения ----------
+// Бёдра, наклон, прогиб и присед перетекают друг в друга без остановок; идёт по кругу, пока не выключишь.
+const FLOW_DANCE = [
+  [0, {}], [1.5, { sway: 0.8 }], [3, { sway: -0.8, bend: 0.2 }], [4.5, { sway: 0.9, bend: 0.45 }], [6, { sway: -0.9, bend: 0.7 }],
+  [7.5, { sway: 0.5, bend: 0.95 }], [9, { sway: -0.4, bend: 0.3 }], [10.5, { sway: 0.3, bend: -0.45 }], [12, { sway: -0.6, bend: -0.55 }],
+  [13.5, { sway: 0.7, bend: -0.2 }], [15, { sit: 0.35, bend: 0.25, sway: -0.7 }], [16.5, { sit: 0.45, bend: 0.3, sway: 0.8 }],
+  [18, { sit: 0.45, bend: 0.5, sway: -0.8 }], [19.5, { sit: 0.3, bend: 0.1, sway: 0.6 }], [21, { bend: -0.35, sway: -0.5 }],
+  [22.5, { bend: 0.5, sway: 0.8 }], [24, { bend: 1.0, sway: -0.5 }], [25.5, { bend: 1.05, sway: 0.6 }], [27, { bend: 0.5, sway: -0.8 }],
+  [28.5, { sway: 0.8 }], [30, { bend: -0.3, sway: -0.7 }], [31.5, { bend: 0.15, sway: 0.5 }], [33, { sway: -0.3 }], [34.5, {}],
+];
+let flowDance = false;
+let flowGestureT = 0;
+function setFlowDance(on) {
+  if (!character) return;
+  flowDance = on;
+  if (on) {
+    if (currentAnim) stopAnim();
+    if (currentMocap) stopMocap();
+    character.loop = null;
+    character.dancing = false;
+    if (reps.home.on) { setRepeat(false, true); renderAutoRep?.(); }
+    if (typeof autoState !== 'undefined' && autoState !== 'live') setAutoState('live');
+    if (character.sit > 0.05) sitBy(-character.sit / 0.004);
+    auto = null;
+    say(pick(['Смотри, как плавно~', 'Этот танец — для тебя ♥', 'Потанцуем медленно~']), 'happy');
+  } else if (auto?.dance) stopAuto();
+  renderAnims();
+}
 function updateAuto(dt) {
   if (!character) return;
   autoIdle += dt;
+  if (flowDance) {
+    // Тронул её — танец на миг уступает и сам продолжается; сел/лёг, включил повтор или позы — выключается.
+    if (poseMode || reps.home.on || character.dancing || character.mixer || character.sitS > 0.75 || (typeof autoState !== 'undefined' && autoState !== 'live')) { flowDance = false; renderAnims(); }
+    else if (!auto && !pointerActive) auto = { keys: FLOW_DANCE, t: 0, dance: true };
+    if (auto?.dance) {
+      flowGestureT -= dt;
+      if (flowGestureT <= 0) {
+        flowGestureT = 4.5 + Math.random() * 3;
+        character.setExpression(Math.random() < 0.7 ? 'happy' : 'relaxed', 0.35 + Math.random() * 0.3, 4);
+        if (character.sitS < 0.25) character.playMotion(pick(['touchHair', 'sway', 'handOnHip', 'stretch', 'tiltHead', 'clasp']));
+      }
+    }
+  }
   if (auto) {
     auto.t += dt;
     const end = auto.keys[auto.keys.length - 1][0];
@@ -4485,7 +4534,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 124;
+const WAIFU_BUILD = 125;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

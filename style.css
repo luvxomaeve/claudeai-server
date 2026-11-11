@@ -1708,3 +1708,6 @@ body.cleanscreen #hud:not(#_):not(#__), body.cleanscreen .fx-p { display: none !
 body.automode #auto-states:not(#_) { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(10px); transition: opacity 0.25s ease, transform 0.25s ease; }
 body.automode #auto-states.show:not(#_) { opacity: 1; pointer-events: auto; transform: translateX(-50%); }
 #auto-states button span { max-width: 90px; margin-left: 6px; }
+
+/* Анимации: готовые движения-чипы убраны */
+#anims #mocap-list, #anims #mocap-list + .panel-note { display: none !important; }
