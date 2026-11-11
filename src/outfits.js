@@ -909,7 +909,7 @@ export class PieceWardrobe {
     this.warmed = true;
     const w = img.width, h = img.height;
     const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
-    const jobs = [() => this.shadeRef(w, h, donors), () => this.zoneMask('upper', w, h), () => this.zoneMask('waistgap', w, h), () => this.zoneMask('legsall', w, h), () => this.zoneMask('minishorts', w, h),
+    const jobs = [() => this.zoneMask('upper', w, h), () => this.zoneMask('waistgap', w, h), () => this.zoneMask('legsall', w, h), () => this.zoneMask('minishorts', w, h),
       ...['under', 'under:trim', 'leggings', 'leggings:trim', 'shorts', 'shorts:trim', 'minishorts', 'minishorts:trim', 'capri', 'capri:trim',
         'top', 'top:trim', 'crop', 'crop:trim', 'tank', 'tank:trim', 'longcrop', 'longcrop:trim', 'tee', 'tee:trim', 'polo', 'polo:trim', 'polocollar'].map((k) => () => this.clothMask(k, w, h))];
     const step = () => { const j = jobs.shift(); if (!j) return; try { j(); } catch { /* ignore */ } setTimeout(step, 120); };
@@ -941,7 +941,7 @@ export class PieceWardrobe {
       for (let p = 0; p < need.length; p++) if (u[p] >= 128 && (d[p * 4 + 3] < 250 || !isSkin(p * 4))) { need[p] = 1; any = true; }
       if (any) { this.realSkin(d, w, h, need, donors); skinFill(d, w, h, need); } // сперва настоящая кожа рук и плеч, остаток — дорисовка
     }
-    const shade = this.shadeRef(w, h, donors);
+    // Нарисованные тени на ткани убраны (затемняли вещи пятнами): объём даёт освещение самой игры.
     for (const { kind, hex, keep } of layers) {
       const m = this.clothMask(kind, w, h);
       const zone = keep ? this.zoneMask('minishorts', w, h) : null;
@@ -951,10 +951,7 @@ export class PieceWardrobe {
         if (mv < 8) continue;
         if (zone && zone[p] < 128 && !isSkin(i)) continue;
         const al = mv / 255; // на краю ткань плавно сходит на нет
-        // Тень по формам тела: темнее в складках, чуть светлее на выпуклостях. Тень слегка «холодная».
-        const f = Math.min(1.2, Math.max(0.42, 1 + (shade[p] / 128 - 1) * 5.2));
-        const fr = f < 1 ? f * (0.97 + 0.03 * f) : f;
-        d[i] = d[i] * (1 - al) + Math.min(255, R * fr) * al; d[i + 1] = d[i + 1] * (1 - al) + Math.min(255, G * fr) * al; d[i + 2] = d[i + 2] * (1 - al) + Math.min(255, Bl * (f < 1 ? f + (1 - f) * 0.12 : f)) * al; d[i + 3] = 255;
+        d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
       }
     }
     ctx.putImageData(data, 0, 0);
