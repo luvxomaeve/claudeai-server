@@ -1637,3 +1637,12 @@ body.automode #auto-help { display: grid; place-items: center; position: fixed; 
 body.automode #hud:not(#_) { display: flex !important; }
 body.automode #hud #buttons { display: none !important; }
 body.automode #affection { transform: scale(0.82); transform-origin: left top; }
+
+/* Меню ☰ — всегда на месте, в обоих видах. В ручном виде на экране только то, чего нет в меню:
+   полосы, дом, позы, камера, точки и список поз. */
+#auto-exit:not(#_) { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+  width: 36px; height: 36px; border-radius: 50%; font-size: 15px; cursor: pointer; }
+body:not(.automode) #hud #buttons, body:not(.automode) #poses #btn-gaze, body:not(.automode) #poses #btn-automode { display: none !important; }
+body:not(.automode) #poses #btn-handles:not(#_) { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 156px); }
+body.ui-hidden #auto-exit, body.ui-hidden #auto-help { opacity: 0.35; transition: opacity 0.6s ease; }

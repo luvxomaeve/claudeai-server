@@ -4283,7 +4283,7 @@ function setAutoMode(on) {
   } else {
     stopAuto();
     wakeUi();
-    showToast('Все кнопки · ✨ — вернуть простой вид');
+    showToast('Ручное управление · ☰ → «Простой вид» — вернуться');
   }
 }
 // Шпаргалка по жестам — при входе в режим (первые несколько раз подольше).
@@ -4330,13 +4330,15 @@ function renderAutoMenu() {
   const items = [
     ['👗', 'Гардероб', () => $('btn-wardrobe').click()],
     ['🎵', 'Анимации и танцы', () => $('btn-anims').click()],
-    ['✏️', 'Позы и точки', () => { setAutoMode(false); $('btn-tab-pose').click(); }],
+    ['✏️', 'Позы и точки', () => { if (autoMode) setAutoMode(false); $('btn-tab-pose').click(); }],
     ['📷', 'Фото', () => $('cam-photo').click()],
     [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
     ['👁', $('btn-gaze').classList.contains('active') ? 'Смотрит на тебя: да' : 'Смотрит на тебя: нет', () => $('btn-gaze').click(), true],
-    ['↩️', 'Вернуть как было', () => autoReturn()],
-    ['🎛', 'Все кнопки на экране', () => setAutoMode(false)],
+    ['↩️', 'Вернуть как было', () => (autoMode ? autoReturn() : resetView())],
+    autoMode ? ['🎛', 'Ручное управление (полосы и кнопки)', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],
   ];
+  // В ручном виде выход в простой — первым пунктом, чтобы не искать.
+  if (!autoMode) items.unshift(items.pop());
   autoMenu.innerHTML = '';
   for (const [icon, name, fn, stay] of items) {
     const b = document.createElement('button');
