@@ -1377,8 +1377,7 @@ function endPointer(e) {
       if (autoTap && now - autoTap.t < 340 && autoTap.her === !!herTap && Math.hypot(e.clientX - autoTap.x, e.clientY - autoTap.y) < 48) {
         autoTap = null;
         if (herTap) {
-          if (unlocked('wardrobe') && PIECE_SOURCES.length) { selfDressTimer = 0; showToast('👗 Переодевается…'); }
-          else showToast('🔒 Гардероб откроется позже');
+          // Двойной тап по ней больше не переодевает: смена наряда подтормаживала и срабатывала случайно.
         } else {
           // Первый двойной тап — камера возвращается по центру (она продолжает, что делала);
           // второй подряд — всё возвращается: она встаёт ровно, повтор снимается.
@@ -4374,7 +4373,6 @@ autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
   + '<span>🙇 Ведёшь вверх-вниз по груди и лицу — наклон / прогиб</span>'
   + '<span>🔁 Подвигал туда-сюда — предложит повторить</span>'
   + '<span>🎥 По фону — камера вокруг неё; двумя пальцами — ближе/дальше и сдвиг</span>'
-  + '<span>👗 Двойной тап по ней — переоденется</span>'
   + '<span>🎯 Двойной тап по фону — камера по центру; ещё раз — она встаёт как была</span>';
 document.body.appendChild(autoHint);
 let autoHintTimer = 0;
@@ -4398,7 +4396,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 100;
+const WAIFU_BUILD = 101;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
