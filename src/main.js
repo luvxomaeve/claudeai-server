@@ -874,6 +874,7 @@ function legwear() {
   } catch { return 'tights'; } // ещё не загрузилось
 }
 const LEGS_LINES = {
+  bare: ['Без чулок тоже неплохо~', 'Ножки отдыхают ♥', 'Так свободнее~'],
   stockings: ['Тебе нравятся мои чулочки? ♥', 'Чулочки — моя слабость~', 'Хи, красивые чулки, правда?', 'Смотришь на мои чулки? 😳', 'Резинка не сползла?..'],
   socks: ['Тебе нравятся мои гольфы? ♥', 'Хи, гольфики~', 'Мило же, да?'],
   tights: ['Нравятся мои колготки? ♥', 'Колготки — классика~', 'Мягкие, правда?', 'Хи, гладкие, да?~'],
@@ -2885,12 +2886,15 @@ const PIECE_SOURCES = [
     id: `g_${g.id}`, name: g.name, url: g.url, cats: g.cats ?? ['tops', 'bottoms', 'shoes', 'legs'], names: g.baseNames ?? {}, legsKind: g.baseLegs ?? 'stockings',
   })),
   // Облегающий комплект: ткань нарисована по телу (без своей модели) — сидит точно по фигуре.
-  { id: 'p_fit', name: 'Облегающее', paint: { tops: 'top', legs: 'leggings' }, cats: ['tops', 'legs'], names: { tops: 'Облегающая кофточка', legs: 'Лосины' }, legsKind: 'tights' },
+  { id: 'p_fit', name: 'Облегающее', paint: { tops: 'top', bottoms: 'leggings' }, cats: ['tops', 'bottoms'], names: { tops: 'Облегающая кофточка', bottoms: 'Лосины' }, colors: { bottoms: 0x1b1a22 } },
   { id: 'p_sport', name: 'Спорт', paint: { tops: 'crop', bottoms: 'shorts' }, cats: ['tops', 'bottoms'], names: { tops: 'Короткий топ', bottoms: 'Шорты-велосипедки' }, colors: { tops: 0xf2a7c3 } },
-  { id: 'p_tank', name: 'Лето', paint: { tops: 'tank', bottoms: 'minishorts', legs: 'capri' }, cats: ['tops', 'bottoms', 'legs'], legsKind: 'tights',
-    names: { tops: 'Майка', bottoms: 'Короткие шорты', legs: 'Лосины-капри' }, colors: { tops: 0x24222c, bottoms: 0x3d5a8a, legs: 0x55525f } },
+  { id: 'p_tank', name: 'Лето', paint: { tops: 'tank', bottoms: 'minishorts' }, cats: ['tops', 'bottoms'], names: { tops: 'Майка без рукавов', bottoms: 'Короткие лосины' }, colors: { tops: 0x24222c, bottoms: 0x3d5a8a } },
+  { id: 'p_capri', name: 'Капри', paint: { bottoms: 'capri' }, cats: ['bottoms'], names: { bottoms: 'Лосины-капри' }, colors: { bottoms: 0x55525f } },
   { id: 'p_long', name: 'Топ', paint: { tops: 'longcrop' }, cats: ['tops'], names: { tops: 'Топ с длинным рукавом' }, colors: { tops: 0xc9b3f5 } },
   { id: 'p_tee', name: 'Футболка', paint: { tops: 'tee' }, cats: ['tops'], names: { tops: 'Облегающая футболка' }, colors: { tops: 0x8fc4ee } },
+  { id: 'p_polo', name: 'Поло', paint: { tops: 'polo' }, cats: ['tops'], names: { tops: 'Облегающее поло' }, colors: { tops: 0x34508c } },
+  // «Без чулок»: голые ноги (под лосины, шорты и юбки).
+  { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
 ].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x));
 const pieceWardrobe = new PieceWardrobe(scene);
@@ -2930,7 +2934,9 @@ function applyWear() {
   // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
   const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
   const defHex = (id, cat) => PIECE_SOURCES.find((x) => x.id === id)?.colors?.[cat];
-  if (isPaint(w.legs)) { w.legsHex = lt?.hex ?? defHex(w.legs, 'legs'); } // лосины: цвет — прямо цвет ткани
+  // Чулки и гольфы остаются поверх лосин; колготки под лосинами не видны.
+  w.keepStockings = !isPaint(w.legs) && legwear() !== 'tights';
+  if (isPaint(w.legs)) { /* «без чулок» — красить нечего */ }
   else if (lt?.name === 'Глубокий чёрный') w.legsDark = 0.8;
   else if (lt?.hex != null) w.legsTint = lt.hex;
   if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
@@ -2984,12 +2990,9 @@ async function pickPiece(cat, id, quiet = false) {
     // Платье — низ не нужен; обычный верх — вернуть низ, если его не было.
     if (isDress(id)) wear.bottoms = 'none';
     // (лосины носят без юбки — её не возвращаем, когда меняешь верх)
-    else if ((wear.bottoms === 'none' && !isPaint(wear.legs)) || wear.bottoms === undefined && isDress(wear.tops)) wear.bottoms = 'base';
+    else if (wear.bottoms === 'none' || wear.bottoms === undefined && isDress(wear.tops)) wear.bottoms = 'base';
   }
   if (cat === 'bottoms' && id !== 'none' && isDress(wear.tops)) wear.tops = 'base';
-  // Лосины носят без юбки (юбку поверх можно надеть потом); сняли лосины — юбка возвращается.
-  if (cat === 'legs' && isPaint(id)) wear.bottoms = 'none';
-  else if (cat === 'legs' && isPaint(wear.legs) && wear.bottoms === 'none') wear.bottoms = 'base';
   wear[cat] = id;
   try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
   renderPieces();

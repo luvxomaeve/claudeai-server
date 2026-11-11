@@ -355,39 +355,90 @@ export class PieceWardrobe {
       // Точка тела (в исходной позе) под тканью?
       const ux = Math.abs(upArm.x - hips.x), ex = Math.abs(elbow.x - hips.x);
       const shortSleeve = ux + (ex - ux) * 0.5; // короткий рукав — до середины плеча
+      const toe = B('leftToes');
+      const front = -(Math.sign(foot.z - (toe?.z ?? foot.z + 0.1)) || -1); // куда смотрит грудь (по оси z)
+      const cx = hips.x, ax = (x) => Math.abs(x - cx);
+      const hem = hipJ.y + leg * 0.3, cropHem = hipJ.y + leg * 0.5;
+      // Поло: вырез-уголок спереди и широкий отложной воротник.
+      const vBottom = neck.y - 0.085;
+      const vOpen = (x, y, z) => (z - hips.z) * front > 0.015 && y > vBottom && ax(x) < (y - vBottom) * 0.55;
       const inside = {
         leggings: (x, y) => y < waist && y > foot.y + 0.03, // от талии до щиколотки
-        shorts: (x, y) => y < waist && y > hipJ.y - leg * 0.4, // велосипедки: от талии до середины бедра
-        top: (x, y) => y > hipJ.y + leg * 0.3 && y < neck.y + 0.008 && Math.abs(x - hips.x) < reach, // до шеи, рукава до запястий
-        crop: (x, y) => y > hipJ.y + leg * 0.5 && y < neck.y - 0.012 && Math.abs(x - hips.x) < shortSleeve, // короткий топ с коротким рукавом
-        tank: (x, y) => y > hipJ.y + leg * 0.5 && y < neck.y - 0.03 && Math.abs(x - hips.x) < ux + 0.012, // майка без рукавов
-        longcrop: (x, y) => y > hipJ.y + leg * 0.5 && y < neck.y + 0.008 && Math.abs(x - hips.x) < reach, // короткий топ с длинным рукавом
-        tee: (x, y) => y > hipJ.y + leg * 0.3 && y < neck.y - 0.012 && Math.abs(x - hips.x) < shortSleeve, // футболка до пояса
-        minishorts: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // короткие шорты
-        capri: (x, y) => y < waist && y > knee.y - (knee.y - foot.y) * 0.5, // капри — до середины икры
-        upper: (x, y) => y > hipJ.y + leg * 0.3, // всё выше пояса (для заливки кожи под снятым верхом)
+        capri: (x, y) => y < waist && y > knee.y - (knee.y - foot.y) * 0.5, // до середины икры
+        shorts: (x, y) => y < waist && y > hipJ.y - leg * 0.4, // велосипедки: до середины бедра
+        minishorts: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // короткие лосины
+        top: (x, y) => y > hem && y < neck.y + 0.008 && ax(x) < reach, // до шеи, рукава до запястий
+        crop: (x, y) => y > cropHem && y < neck.y - 0.012 && ax(x) < shortSleeve, // короткий топ с коротким рукавом
+        tank: (x, y) => y > cropHem && y < neck.y - 0.03 && ax(x) < ux + 0.03, // майка без рукавов
+        longcrop: (x, y) => y > cropHem && y < neck.y + 0.008 && ax(x) < reach, // короткий топ с длинным рукавом
+        tee: (x, y) => y > hem && y < neck.y - 0.012 && ax(x) < shortSleeve, // футболка до пояса
+        polo: (x, y, z) => y > hem && y < neck.y + 0.03 && ax(x) < shortSleeve && !vOpen(x, y, z),
+        polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
+          && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
+        upper: (x, y) => y > hem, // всё выше пояса (для заливки кожи под снятым верхом)
+        legsall: (x, y) => y < hipJ.y - leg * 0.26, // ноги ниже белья (для «без чулок»)
       }[kind];
       const v = new THREE.Vector3(), idx = g.index, n = idx ? idx.count : pos.count;
       const id = (k) => (idx ? idx.getX(k) : k);
       for (let t = 0; t < n; t += 3) {
         const q = [id(t), id(t + 1), id(t + 2)];
         const P = q.map((i) => v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix).clone());
-        const ins = P.map((p) => inside(p.x, p.y));
+        const ins = P.map((p) => inside(p.x, p.y, p.z));
         const cnt = ins.filter(Boolean).length;
         // Треугольник мог перешагнуть границу целиком мимо вершин (редко) — такие тоже проверяем по точкам.
-        if (!cnt && !inside((P[0].x + P[1].x + P[2].x) / 3, (P[0].y + P[1].y + P[2].y) / 3)) continue;
+        if (!cnt && !inside((P[0].x + P[1].x + P[2].x) / 3, (P[0].y + P[1].y + P[2].y) / 3, (P[0].z + P[1].z + P[2].z) / 3)) continue;
         const U = [uv.getX(q[0]), uv.getY(q[0]), uv.getX(q[1]), uv.getY(q[1]), uv.getX(q[2]), uv.getY(q[2])];
         if (cnt === 3) fast.push(...U);
-        else slow.push({ U, P: [P[0].x, P[0].y, P[1].x, P[1].y, P[2].x, P[2].y], inside }); // край ткани — ровно по линии, а не по треугольникам
+        else slow.push({ U, P: [P[0].x, P[0].y, P[1].x, P[1].y, P[2].x, P[2].y], Z: [P[0].z, P[1].z, P[2].z], inside }); // край ткани — ровно по линии, а не по треугольникам
       }
     }
     return (this.paintCache[kind] = { fast, slow });
   }
 
-  paintCloth(map, kind, hex) {
+  // Маска области на текстуре (грубо, по треугольникам).
+  zoneMask(kind, w, h) {
+    const z = this.paintTris(kind);
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const c = cv.getContext('2d', { willReadFrequently: true });
+    c.fillStyle = '#fff'; c.strokeStyle = '#fff'; c.lineWidth = 2;
+    c.beginPath();
+    for (const list of [z.fast, ...z.slow.map((x) => x.U)]) for (let i = 0; i < list.length; i += 6) { c.moveTo(list[i] * w, list[i + 1] * h); c.lineTo(list[i + 2] * w, list[i + 3] * h); c.lineTo(list[i + 4] * w, list[i + 5] * h); c.closePath(); }
+    c.fill(); c.stroke();
+    return c.getImageData(0, 0, w, h).data;
+  }
+
+  // «Без чулок»: ткань на ногах (чулки, колготки, носки) заменяем цветом её же кожи.
+  bareLegs(map) {
     if (!map?.image || !this.base) return map;
     this.paintTexCache ??= new Map();
-    const key = `${map.uuid}|${kind}|${hex}`;
+    const key = `${map.uuid}|bare`;
+    if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
+    const img = map.image, w = img.width, h = img.height;
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h), d = data.data;
+    const z = this.zoneMask('legsall', w, h);
+    const skin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let i = 0; i < d.length; i += 16) if (skin(i)) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+    if (!n) return map;
+    for (let i = 0; i < d.length; i += 4) if (z[i] >= 128 && !skin(i)) { d[i] = r / n; d[i + 1] = g / n; d[i + 2] = b / n; d[i + 3] = 255; }
+    ctx.putImageData(data, 0, 0);
+    const tex = new THREE.CanvasTexture(canvas);
+    for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
+    tex.needsUpdate = true;
+    this.paintTexCache.set(key, tex);
+    return tex;
+  }
+
+  // keep: чулки остаются поверх — ниже белья красим только голую кожу, ткань чулок не трогаем.
+  paintCloth(map, kind, hex, keep = false) {
+    if (!map?.image || !this.base) return map;
+    this.paintTexCache ??= new Map();
+    const key = `${map.uuid}|${kind}|${hex}|${keep}`;
     if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
     const { fast: T, slow } = this.paintTris(kind);
     if (!T.length) return map;
@@ -405,7 +456,7 @@ export class PieceWardrobe {
     mc.fill(); mc.stroke();
     const m = mc.getImageData(0, 0, w, h).data;
     // Края (пояс, ворот, манжеты, щиколотки): по каждой точке считаем, где она на теле, — линия ровная.
-    for (const { U, P, inside } of slow) {
+    for (const { U, P, Z, inside } of slow) {
       const x0 = U[0] * w, y0 = U[1] * h, x1 = U[2] * w, y1 = U[3] * h, x2 = U[4] * w, y2 = U[5] * h;
       const den = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
       if (Math.abs(den) < 1e-9) continue;
@@ -416,14 +467,14 @@ export class PieceWardrobe {
         const b2 = ((y2 - y0) * (x + 0.5 - x2) + (x0 - x2) * (y + 0.5 - y2)) / den;
         const c = 1 - a - b2;
         if (a < -0.03 || b2 < -0.03 || c < -0.03) continue;
-        if (inside(a * P[0] + b2 * P[2] + c * P[4], a * P[1] + b2 * P[3] + c * P[5])) m[(y * w + x) * 4] = 255;
+        if (inside(a * P[0] + b2 * P[2] + c * P[4], a * P[1] + b2 * P[3] + c * P[5], a * Z[0] + b2 * Z[1] + c * Z[2])) m[(y * w + x) * 4] = 255;
       }
     }
     const data = ctx.getImageData(0, 0, w, h), d = data.data;
     const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
     // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи). Нарисованный верх их не закрывает
     // целиком — заливаем такие места цветом кожи, иначе руки «пропадают».
-    if (['top', 'crop', 'tank', 'longcrop', 'tee'].includes(kind)) {
+    if (['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(kind)) {
       const up = this.paintTris('upper');
       const um = document.createElement('canvas');
       um.width = w; um.height = h;
@@ -443,8 +494,10 @@ export class PieceWardrobe {
         d[i] = sr / sn; d[i + 1] = sg / sn; d[i + 2] = sb / sn; d[i + 3] = 255;
       }
     }
+    const zone = keep ? this.zoneMask('minishorts', w, h) : null;
     for (let i = 0; i < d.length; i += 4) {
       if (m[i] < 128) continue;
+      if (zone && zone[i] < 128 && !(d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150)) continue;
       // Ровная плотная ткань, без просвечивания.
       const k = 1; // ровный цвет: рисунок чулок и белья под тканью не проступает (тени даёт освещение)
       d[i] = Math.min(255, R * k); d[i + 1] = Math.min(255, G * k); d[i + 2] = Math.min(255, Bl * k); d[i + 3] = 255;
@@ -534,9 +587,17 @@ export class PieceWardrobe {
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).
     const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.bottoms)?.bottoms, kl = this.paints.get(wear.legs)?.legs;
-    if (kt) map = this.paintCloth(map, kt, wear.topHex ?? 0xf1edf6);
-    if (kl) map = this.paintCloth(map, kl, wear.legsHex ?? 0x1b1a22);
-    if (kb) map = this.paintCloth(map, kb, wear.bottomHex ?? 0x24222c);
+    if (kl === 'bare') map = this.bareLegs(map);
+    if (kt) {
+      const hex = wear.topHex ?? 0xf1edf6;
+      map = this.paintCloth(map, kt, hex);
+      if (kt === 'polo') {
+        // Воротник — светлый на тёмном поло и тёмный на светлом.
+        const lum = (((hex >> 16) & 255) * 0.3 + ((hex >> 8) & 255) * 0.59 + (hex & 255) * 0.11) / 255;
+        map = this.paintCloth(map, 'polocollar', lum > 0.72 ? 0x2b2530 : 0xf6f3fa);
+      }
+    }
+    if (kb) map = this.paintCloth(map, kb, wear.bottomHex ?? 0x24222c, !!wear.keepStockings && (kb === 'leggings' || kb === 'capri'));
     this.setSkin(map);
     onSkin?.(map);
   }
