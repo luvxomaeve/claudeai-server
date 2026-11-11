@@ -1389,7 +1389,7 @@ export class Character {
         return THREE.MathUtils.smoothstep(Math.acos(THREE.MathUtils.clamp(d.dot(down), -1, 1)), 0.3, 1.75);
       };
       // Только возврат объёма, потерянного сеткой при сгибе (см. installHipKeep): стоя — ноль.
-      const amt = 0.03 * (this.scale ?? 1);
+      const amt = 0.038 * (this.scale ?? 1);
       HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
     }

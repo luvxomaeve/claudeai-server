@@ -263,7 +263,7 @@ export class PieceWardrobe {
     this.scene = scene;
     this.base = null; // { vrm, pieces, skins, skinMap }
     this.sources = new Map(); // id -> { vrm, pieces, skinMap, active }
-    this.paints = new Set(); // id «нарисованных» облегающих вещей (без своей модели)
+    this.paints = new Map(); // id «нарисованной» облегающей вещи → { tops|bottoms|legs: вид ткани }
   }
 
   attachBase(vrm) {
@@ -347,14 +347,21 @@ export class PieceWardrobe {
       if (!uv) continue;
       const B = (n) => bindBone(this.base.vrm, mesh, n);
       const hipJ = B('leftUpperLeg'), knee = B('leftLowerLeg'), foot = B('leftFoot'), neck = B('neck'), hand = B('leftHand'), hips = B('hips');
-      if (!hipJ || !knee || !foot || !neck || !hand || !hips) continue;
+      const upArm = B('leftUpperArm'), elbow = B('leftLowerArm');
+      if (!hipJ || !knee || !foot || !neck || !hand || !hips || !upArm || !elbow) continue;
       const leg = hipJ.y - knee.y;
       const waist = hipJ.y + leg * 0.42; // пояс лосин — на талии
       const reach = Math.abs(hand.x - hips.x) - 0.012; // рукав — до запястья
       // Точка тела (в исходной позе) под тканью?
-      const inside = kind === 'leggings'
-        ? (x, y) => y < waist && y > foot.y + 0.03 // от талии до щиколотки
-        : (x, y) => y > hipJ.y + leg * 0.3 && y < neck.y + 0.008 && Math.abs(x - hips.x) < reach; // от пояса до шеи, рукава до запястий
+      const ux = Math.abs(upArm.x - hips.x), ex = Math.abs(elbow.x - hips.x);
+      const shortSleeve = ux + (ex - ux) * 0.5; // короткий рукав — до середины плеча
+      const inside = {
+        leggings: (x, y) => y < waist && y > foot.y + 0.03, // от талии до щиколотки
+        shorts: (x, y) => y < waist && y > hipJ.y - leg * 0.4, // велосипедки: от талии до середины бедра
+        top: (x, y) => y > hipJ.y + leg * 0.3 && y < neck.y + 0.008 && Math.abs(x - hips.x) < reach, // до шеи, рукава до запястий
+        crop: (x, y) => y > hipJ.y + leg * 0.5 && y < neck.y - 0.012 && Math.abs(x - hips.x) < shortSleeve, // короткий топ с коротким рукавом
+        upper: (x, y) => y > hipJ.y + leg * 0.3, // всё выше пояса (для заливки кожи под снятым верхом)
+      }[kind];
       const v = new THREE.Vector3(), idx = g.index, n = idx ? idx.count : pos.count;
       const id = (k) => (idx ? idx.getX(k) : k);
       for (let t = 0; t < n; t += 3) {
@@ -409,6 +416,28 @@ export class PieceWardrobe {
     }
     const data = ctx.getImageData(0, 0, w, h), d = data.data;
     const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
+    // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи). Нарисованный верх их не закрывает
+    // целиком — заливаем такие места цветом кожи, иначе руки «пропадают».
+    if (kind === 'top' || kind === 'crop') {
+      const up = this.paintTris('upper');
+      const um = document.createElement('canvas');
+      um.width = w; um.height = h;
+      const uc = um.getContext('2d', { willReadFrequently: true });
+      uc.fillStyle = '#fff'; uc.strokeStyle = '#fff'; uc.lineWidth = 2;
+      uc.beginPath();
+      for (const list of [up.fast, ...up.slow.map((x) => x.U)]) for (let i = 0; i < list.length; i += 6) { uc.moveTo(list[i] * w, list[i + 1] * h); uc.lineTo(list[i + 2] * w, list[i + 3] * h); uc.lineTo(list[i + 4] * w, list[i + 5] * h); uc.closePath(); }
+      uc.fill(); uc.stroke();
+      const u = uc.getImageData(0, 0, w, h).data;
+      let sr = 0, sg = 0, sb = 0, sn = 0;
+      for (let i = 0; i < d.length; i += 16) { // цвет кожи — средний по её непрозрачным «кожаным» точкам
+        if (u[i] < 128 || d[i + 3] < 250 || !(d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150)) continue;
+        sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; sn++;
+      }
+      if (sn) for (let i = 0; i < d.length; i += 4) {
+        if (u[i] < 128 || d[i + 3] >= 250) continue;
+        d[i] = sr / sn; d[i + 1] = sg / sn; d[i + 2] = sb / sn; d[i + 3] = 255;
+      }
+    }
     for (let i = 0; i < d.length; i += 4) {
       if (m[i] < 128) continue;
       // Ровная плотная ткань: чуть-чуть объёма от исходной светотени, без просвечивания.
@@ -500,8 +529,10 @@ export class PieceWardrobe {
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).
-    if (this.paints.has(wear.tops)) map = this.paintCloth(map, 'top', wear.topHex ?? 0xf1edf6);
-    if (this.paints.has(wear.legs)) map = this.paintCloth(map, 'leggings', wear.legsHex ?? 0x1b1a22);
+    const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.bottoms)?.bottoms, kl = this.paints.get(wear.legs)?.legs;
+    if (kt) map = this.paintCloth(map, kt, wear.topHex ?? 0xf1edf6);
+    if (kl) map = this.paintCloth(map, kl, wear.legsHex ?? 0x1b1a22);
+    if (kb) map = this.paintCloth(map, kb, wear.bottomHex ?? 0x24222c);
     this.setSkin(map);
     onSkin?.(map);
   }

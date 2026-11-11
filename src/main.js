@@ -2885,11 +2885,12 @@ const PIECE_SOURCES = [
     id: `g_${g.id}`, name: g.name, url: g.url, cats: g.cats ?? ['tops', 'bottoms', 'shoes', 'legs'], names: g.baseNames ?? {}, legsKind: g.baseLegs ?? 'stockings',
   })),
   // Облегающий комплект: ткань нарисована по телу (без своей модели) — сидит точно по фигуре.
-  { id: 'p_fit', name: 'Облегающее', paint: true, cats: ['tops', 'legs'], names: { tops: 'Облегающая кофточка', legs: 'Лосины' }, legsKind: 'tights' },
+  { id: 'p_fit', name: 'Облегающее', paint: { tops: 'top', legs: 'leggings' }, cats: ['tops', 'legs'], names: { tops: 'Облегающая кофточка', legs: 'Лосины' }, legsKind: 'tights' },
+  { id: 'p_sport', name: 'Спорт', paint: { tops: 'crop', bottoms: 'shorts' }, cats: ['tops', 'bottoms'], names: { tops: 'Короткий топ', bottoms: 'Шорты-велосипедки' } },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
 ].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x));
 const pieceWardrobe = new PieceWardrobe(scene);
-for (const x of PIECE_SOURCES) if (x.paint) pieceWardrobe.paints.add(x.id);
+for (const x of PIECE_SOURCES) if (x.paint) pieceWardrobe.paints.set(x.id, x.paint);
 const isPaint = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.paint;
 window.__pw = pieceWardrobe; // для отладки
 const WEAR_KEY = girlKey('waifu-wear');
@@ -2928,6 +2929,7 @@ function applyWear() {
   else if (lt?.name === 'Глубокий чёрный') w.legsDark = 0.8;
   else if (lt?.hex != null) w.legsTint = lt.hex;
   if (isPaint(w.tops)) { const tt = TINTS[wearTint[`tops:${w.tops}`] ?? 0]; if (tt?.hex != null) w.topHex = tt.hex; }
+  if (isPaint(w.bottoms)) { const bt = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]; if (bt?.hex != null) w.bottomHex = bt.hex; }
   pieceWardrobe.apply(w, (map) => {
     stockings?.setBase(map);
     stockings?.apply(look.stockings);
