@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { tuneSkirt, shapeHips, HIP_FLEX } from './outfits.js';
+import { tuneSkirt, shapeHips, HIP_FLEX, SQUAT_FLEX } from './outfits.js';
 const HEAD_LEAN_SIGN = -1; // знак наклона головы «к пальцу» (проверено тестом)
 
 const EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
@@ -1388,6 +1388,7 @@ export class Character {
       };
       const amt = 0; // увеличение от позы отключено — форма постоянная
       HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
+      SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
     }
 
     this.finishFrame(dt);

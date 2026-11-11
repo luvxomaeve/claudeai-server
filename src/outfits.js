@@ -153,6 +153,44 @@ function setTuck(mesh, on, y = 0) {
   }
 }
 
+// В глубоком приседе сетка тела между ног собирается в торчащий бугорок (кости бёдер разошлись,
+// а «дно» таза осталось на месте). Чем сильнее согнуты ноги, тем больше утягиваем это место вверх, в таз.
+export const SQUAT_FLEX = { value: 0 };
+function installCrotchFix(vrm, mesh) {
+  const g = mesh.geometry, pos = g.getAttribute('position');
+  if (!mesh.isSkinnedMesh || !pos || g.getAttribute('aCrotch')) return;
+  const bind = (name) => {
+    const node = vrm.humanoid?.getRawBoneNode(name);
+    const i = node ? mesh.skeleton.bones.indexOf(node) : -1;
+    return i >= 0 ? new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(mesh.skeleton.boneInverses[i]).invert()) : null;
+  };
+  const L = bind('leftUpperLeg'), R = bind('rightUpperLeg'), K = bind('leftLowerLeg');
+  if (!L || !R || !K) return;
+  const k0 = Math.max(0.25, L.y - K.y) / 0.4;
+  const C = L.clone().add(R).multiplyScalar(0.5); C.y -= 0.085 * k0;
+  const sigma = 0.075 * k0, lift = 0.12 * k0;
+  const arr = new Float32Array(pos.count), v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
+    const d = v.distanceTo(C) / sigma;
+    arr[i] = d < 2.5 ? Math.exp(-d * d) * lift : 0;
+  }
+  g.setAttribute('aCrotch', new THREE.BufferAttribute(arr, 1));
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m || m.userData.crotchFix) continue;
+    m.userData.crotchFix = true;
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (shader, renderer) => {
+      prev?.call(m, shader, renderer);
+      shader.uniforms.uSquat = SQUAT_FLEX;
+      shader.vertexShader = 'attribute float aCrotch;\nuniform float uSquat;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed.y += aCrotch * uSquat;');
+    };
+    const pk = m.customProgramCacheKey?.bind(m);
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|crotchFix`;
+    m.needsUpdate = true;
+  }
+}
+
 export class PieceWardrobe {
   constructor(scene) {
     this.scene = scene;
@@ -165,6 +203,7 @@ export class PieceWardrobe {
     for (const list of Object.values(this.base.pieces)) list.forEach(installClothPoke);
     for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(this.base.pieces);
+    for (const m of this.base.skins) installCrotchFix(vrm, m);
   }
 
   // Палец ведёт ткань: point — где касание (мир), dir — куда ведут (мир), power — сила толчка.
@@ -254,6 +293,7 @@ export class PieceWardrobe {
     for (const m of idx.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(idx.pieces);
     idx.skins.forEach(patchDonorSkin);
+    for (const m of idx.skins) installCrotchFix(vrm, m);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
     this.skinCache?.clear();
