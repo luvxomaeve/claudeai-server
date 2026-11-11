@@ -496,6 +496,31 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
   return mesh;
 }
 
+// Тень по силуэту: чем сильнее поверхность отвёрнута от камеры (край фигуры, бок, изгиб), тем она чуть
+// темнее и холоднее. Считается на лету в шейдере — идёт точно по контуру тела при любом движении,
+// не оставляет пятен и ничего не стоит по скорости. Одинаково для кожи и нарисованной на ней ткани.
+function installEdgeShade(mesh, k = 1) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m || m.isOutline || m.userData.edgeShade) continue;
+    m.userData.edgeShade = true;
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (shader, renderer) => {
+      prev?.call(m, shader, renderer);
+      const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
+      if (!shader.fragmentShader.includes(at)) return;
+      shader.fragmentShader = shader.fragmentShader.replace(at, `${at}
+  {
+    float edNV = clamp( dot( normalize( vViewPosition ), normal ), 0.0, 1.0 );
+    float edE = smoothstep( 0.0, 1.0, pow( 1.0 - edNV, 2.2 ) ) * ${(0.5 * k).toFixed(3)};
+    col *= mix( vec3( 1.0 ), vec3( 0.50, 0.46, 0.64 ), edE );
+  }`);
+    };
+    const pk = m.customProgramCacheKey?.bind(m);
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|edge${k}`;
+    m.needsUpdate = true;
+  }
+}
+
 export class PieceWardrobe {
   constructor(scene) {
     this.scene = scene;
@@ -513,7 +538,7 @@ export class PieceWardrobe {
     for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(this.base.pieces);
     for (const m of this.base.pieces.bottoms ?? []) installDroop(vrm, m);
-    for (const m of this.base.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); }
+    for (const m of this.base.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); installEdgeShade(m); }
     for (const m of this.base.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
     // Облегающая юбка — своя сетка по её телу (материал берём у любой её вещи, без рисунка).
     try {
@@ -524,7 +549,7 @@ export class PieceWardrobe {
       for (const [kind, kTop, kHem] of [['skirt', 0.42, 0.5], ['mini', 0.34, 0.33], ['minihigh', 0.54, 0.33]]) {
         const m = dm ? buildTightSkirt(vrm, this.base.skins, dm, kTop, kHem) : null;
         if (!m) continue;
-        installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.014);
+        installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.014); installEdgeShade(m);
         this.tightSkirts[kind] = m;
       }
     } catch (e) { console.warn('tight skirt', e); this.tightSkirts = {}; }
@@ -991,7 +1016,7 @@ export class PieceWardrobe {
     installHems(idx.pieces);
     idx.skins.forEach(patchDonorSkin);
     for (const m of idx.pieces.bottoms ?? []) installDroop(vrm, m);
-    for (const m of idx.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); }
+    for (const m of idx.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); installEdgeShade(m); }
     for (const m of idx.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
