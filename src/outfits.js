@@ -325,7 +325,7 @@ function hull2d(pts) {
   for (const p of P.slice().reverse()) { while (up.length >= 2 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
   return lo.slice(0, -1).concat(up.slice(0, -1));
 }
-function buildTightSkirt(vrm, skins, clothMat) {
+function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
   const body = skins.find((m) => m.isSkinnedMesh);
   if (!body) return null;
   const B = (n) => bindBone(vrm, body, n);
@@ -336,7 +336,7 @@ function buildTightSkirt(vrm, skins, clothMat) {
   const iH = bi('hips'), iL = bi('leftUpperLeg'), iR = bi('rightUpperLeg');
   if (iH < 0 || iL < 0 || iR < 0) return null;
   const leg = hipJ.y - knee.y;
-  const top = hipJ.y + leg * 0.42, hem = hipJ.y - leg * 0.5; // от талии до середины бедра
+  const top = hipJ.y + leg * kTop, hem = hipJ.y - leg * kHem; // от талии до середины бедра (по умолчанию)
   const cx = (hipJ.x + hipR.x) / 2, cz = hips.z;
   // Все точки тела в исходной позе (без рук — они далеко в стороны).
   const pts = [], v = new THREE.Vector3();
@@ -454,9 +454,15 @@ export class PieceWardrobe {
     try {
       const donor = [...(this.base.pieces.bottoms ?? []), ...(this.base.pieces.tops ?? []), ...this.base.skins][0];
       const dm = donor && [].concat(donor.material).find((m) => m && !m.isOutline);
-      this.tightSkirt = dm ? buildTightSkirt(vrm, this.base.skins, dm) : null;
-      if (this.tightSkirt) { installClothPoke(this.tightSkirt); installDroop(vrm, this.tightSkirt); installHipKeep(vrm, this.tightSkirt, true); setLift(this.tightSkirt, 0.014); }
-    } catch (e) { console.warn('tight skirt', e); this.tightSkirt = null; }
+      // Три длины: до середины бедра, мини и мини с высокой талией.
+      this.tightSkirts = {};
+      for (const [kind, kTop, kHem] of [['skirt', 0.42, 0.5], ['mini', 0.34, 0.33], ['minihigh', 0.54, 0.33]]) {
+        const m = dm ? buildTightSkirt(vrm, this.base.skins, dm, kTop, kHem) : null;
+        if (!m) continue;
+        installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.014);
+        this.tightSkirts[kind] = m;
+      }
+    } catch (e) { console.warn('tight skirt', e); this.tightSkirts = {}; }
   }
 
   // Палец ведёт ткань: point — где касание (мир), dir — куда ведут (мир), power — сила толчка.
@@ -621,7 +627,7 @@ export class PieceWardrobe {
     const need = new Uint8Array(w * h);
     for (let i = 0, p = 0; i < d.length; i += 4, p++) if (z[i] >= 128 && !skin(i)) need[p] = 1;
     // Край чулка полупрозрачный и похож на кожу — захватываем ещё несколько точек вокруг, чтобы не осталось следа.
-    for (let pass = 0; pass < 4; pass++) {
+    for (let pass = 0; pass < 16; pass++) {
       const prev = need.slice();
       for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
         const p = y * w + x;
@@ -755,9 +761,10 @@ export class PieceWardrobe {
       for (const m of this.base.pieces[cat.id] ?? []) m.visible = choice === 'base' || (choice !== 'none' && !this.sources.has(choice) && !this.paints.has(choice));
       for (const [id, s] of this.sources) for (const m of s.pieces[cat.id] ?? []) m.visible = choice === id;
     }
-    if (this.tightSkirt) {
-      this.tightSkirt.visible = !!this.paints.get(wear.bottoms)?.gen;
-      const m = this.tightSkirt.material, c = wear.bottomHex ?? 0x24222c;
+    for (const [kind, sk] of Object.entries(this.tightSkirts ?? {})) {
+      sk.visible = this.paints.get(wear.bottoms)?.gen === kind;
+      if (!sk.visible) continue;
+      const m = sk.material, c = wear.bottomHex ?? 0x24222c;
       m.color?.setHex(c);
       m.shadeColorFactor?.setHex(c).multiplyScalar(0.62);
     }
@@ -1131,7 +1138,7 @@ export class PieceWardrobe {
     this.restorePokes(dt);
     this.updateCloth(dt);
     // Облегающая юбка: чем сильнее согнуты ноги, тем увереннее рисуется поверх тела (бедро не проглядывает).
-    if (this.tightSkirt?.visible) setLift(this.tightSkirt, 0.022 + 0.05 * SQUAT_FLEX.value);
+    for (const sk of Object.values(this.tightSkirts ?? {})) if (sk.visible) setLift(sk, 0.022 + 0.05 * SQUAT_FLEX.value);
     const bh = this.base.vrm.humanoid;
     for (const [, s] of this.sources) {
       if (!s.active) continue;

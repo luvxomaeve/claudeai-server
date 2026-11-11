@@ -2900,6 +2900,8 @@ const PIECE_SOURCES = [
   { id: 'p_tee', name: 'Футболка', paint: { tops: 'tee' }, cats: ['tops'], names: { tops: 'Облегающая футболка' }, colors: { tops: 0x8fc4ee } },
   { id: 'p_polo', name: 'Поло', paint: { tops: 'polo' }, cats: ['tops'], names: { tops: 'Облегающее поло' }, colors: { tops: 0x34508c } },
   { id: 'p_skirt', name: 'Юбка', paint: { gen: 'skirt' }, cats: ['bottoms'], names: { bottoms: 'Облегающая юбка' }, colors: { bottoms: 0x24222c } },
+  { id: 'p_mini', name: 'Мини', paint: { gen: 'mini' }, cats: ['bottoms'], names: { bottoms: 'Облегающая мини-юбка' }, colors: { bottoms: 0x7a2238 } },
+  { id: 'p_minihigh', name: 'Мини высокая', paint: { gen: 'minihigh' }, cats: ['bottoms'], names: { bottoms: 'Мини с высокой талией' }, colors: { bottoms: 0x2b2530 } },
   // «Без чулок»: голые ноги (под лосины, шорты и юбки).
   { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
