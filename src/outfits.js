@@ -649,6 +649,7 @@ export class PieceWardrobe {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
         upper: (x, y) => y > hipJ.y + leg * 0.19, // всё выше шортиков (для заливки кожи под снятым верхом)
+        bust: (x, y) => { const c = B('chest') ?? B('spine'); return y > (c ? c.y - 0.01 : hipJ.y + leg * 0.75) && y < neck.y - 0.03 && ax(x) < ux + 0.02; }, // грудная клетка: тут тени делаем совсем мягкими
         waistgap: (x, y) => y > hipJ.y + leg * 0.19 && y < hipJ.y + leg * 0.5, // над шортиками: тут торчала бы серая резинка модели
         legsall: (x, y) => y < hipJ.y - leg * 0.26, // ноги ниже белья (для «без чулок»)
       }[kind];
@@ -886,8 +887,14 @@ export class PieceWardrobe {
         ref[p] = Math.round(128 + (ref[p] - 128) * wgt * wgt * (3 - 2 * wgt));
       }
     }
+    // На груди в рисунке кожи тени резкие и вместе с вырезом под бельё дают «силуэт лифчика» — там оставляем
+    // лишь лёгкий намёк на объём.
+    {
+      const bz = this.zoneMask('bust', w, h);
+      for (let p = 0; p < ref.length; p++) if (bz[p] >= 128) ref[p] = 128;
+    }
     const tmp = new Uint8Array(ref.length);
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < 4; pass++) {
       for (let y = 0; y < h; y++) for (let x = 2; x < w - 2; x++) { const p = y * w + x; tmp[p] = (ref[p - 2] + ref[p - 1] + ref[p] + ref[p + 1] + ref[p + 2]) / 5; }
       for (let y = 2; y < h - 2; y++) for (let x = 0; x < w; x++) { const p = y * w + x; ref[p] = (tmp[p - 2 * w] + tmp[p - w] + tmp[p] + tmp[p + w] + tmp[p + 2 * w]) / 5; }
     }
