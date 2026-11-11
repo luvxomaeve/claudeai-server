@@ -3128,12 +3128,24 @@ function renderPieces() {
   box.appendChild(tabs);
   const c = PIECE_CATS.find((x) => x.id === closetTab);
   const opts = ['base'];
-  for (const src of PIECE_SOURCES) if (src.cats.includes(c.id)) opts.push(src.id);
+  for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && src.id !== 'p_bare') opts.push(src.id); // «без чулок» — отдельной кнопкой сверху
   if (c.id === 'shoes' || c.id === 'acc') opts.push('none');
   if (c.id === 'bottoms' && isDress(wear.tops)) opts.push('none');
+  const cur = wear[c.id] ?? 'base';
+  if (c.id === 'legs') {
+    // Одна кнопка: снять чулки / надеть обратно (те, что были).
+    const off = cur === 'p_bare';
+    const tg = document.createElement('button');
+    tg.className = 'panel-big' + (off ? ' active' : '');
+    tg.textContent = off ? '🦵 Чулки сняты — надеть обратно' : '🧦 Снять чулки';
+    tg.addEventListener('click', () => {
+      if (off) { let last = 'base'; try { last = localStorage.getItem(girlKey('waifu-lastlegs')) || 'base'; } catch { /* ignore */ } pickPiece('legs', last === 'p_bare' ? 'base' : last); }
+      else { try { localStorage.setItem(girlKey('waifu-lastlegs'), cur); } catch { /* ignore */ } pickPiece('legs', 'p_bare'); }
+    });
+    box.appendChild(tg);
+  }
   const grid = document.createElement('div');
   grid.className = 'closet-grid';
-  const cur = wear[c.id] ?? 'base';
   for (const id of opts) {
     const b = document.createElement('button');
     b.className = 'closet-item' + (id === cur ? ' active' : '');

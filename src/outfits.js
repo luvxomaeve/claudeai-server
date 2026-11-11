@@ -258,6 +258,56 @@ function installHipKeep(vrm, mesh, cloth) {
   }
 }
 
+// Дорисовать кожу там, где её в текстуре нет (под снятым верхом, под чулками): цвет берём не «средний
+// по телу», а от ближайшей настоящей кожи — он плавно растекается от её краёв, поэтому совпадает по тону
+// и не оставляет прямоугольных заплаток. Считаем на уменьшенной копии (быстро), красим в полном размере.
+function skinFill(d, w, h, need) {
+  const L = 256, n = L * L;
+  const r = new Float32Array(n), g = new Float32Array(n), b = new Float32Array(n), c = new Float32Array(n);
+  const isSkin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
+    const i = (y * w + x) * 4;
+    if (need[i >> 2] || !isSkin(i)) continue;
+    const k = ((y * L / h) | 0) * L + ((x * L / w) | 0);
+    r[k] += d[i]; g[k] += d[i + 1]; b[k] += d[i + 2]; c[k]++;
+  }
+  let ok = new Uint8Array(n), any = false;
+  for (let k = 0; k < n; k++) if (c[k] >= 3) { r[k] /= c[k]; g[k] /= c[k]; b[k] /= c[k]; ok[k] = 1; any = true; } else { r[k] = g[k] = b[k] = 0; }
+  if (!any) return;
+  const src = ok.slice(); // настоящая кожа — её не трогаем
+  for (let it = 0; it < 300; it++) {
+    const nx = ok.slice();
+    let left = 0;
+    for (let y = 0; y < L; y++) for (let x = 0; x < L; x++) {
+      const k = y * L + x;
+      if (ok[k]) continue;
+      let sr = 0, sg = 0, sb = 0, sn = 0;
+      if (x > 0 && ok[k - 1]) { sr += r[k - 1]; sg += g[k - 1]; sb += b[k - 1]; sn++; }
+      if (x < L - 1 && ok[k + 1]) { sr += r[k + 1]; sg += g[k + 1]; sb += b[k + 1]; sn++; }
+      if (y > 0 && ok[k - L]) { sr += r[k - L]; sg += g[k - L]; sb += b[k - L]; sn++; }
+      if (y < L - 1 && ok[k + L]) { sr += r[k + L]; sg += g[k + L]; sb += b[k + L]; sn++; }
+      if (sn) { r[k] = sr / sn; g[k] = sg / sn; b[k] = sb / sn; nx[k] = 1; } else left++;
+    }
+    ok = nx;
+    if (!left) break;
+  }
+  // Сглаживаем дорисованное (несколько проходов), настоящую кожу оставляем как есть.
+  for (let it = 0; it < 10; it++) for (let y = 1; y < L - 1; y++) for (let x = 1; x < L - 1; x++) {
+    const k = y * L + x;
+    if (src[k]) continue;
+    r[k] = (r[k - 1] + r[k + 1] + r[k - L] + r[k + L]) / 4; g[k] = (g[k - 1] + g[k + 1] + g[k - L] + g[k + L]) / 4; b[k] = (b[k - 1] + b[k + 1] + b[k - L] + b[k + L]) / 4;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = y * w + x;
+    if (!need[p]) continue;
+    const fx = Math.min(L - 1.001, Math.max(0, (x + 0.5) * L / w - 0.5)), fy = Math.min(L - 1.001, Math.max(0, (y + 0.5) * L / h - 0.5));
+    const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0, k = y0 * L + x0;
+    const mix = (a) => (a[k] * (1 - tx) + a[k + 1] * tx) * (1 - ty) + (a[k + L] * (1 - tx) + a[k + L + 1] * tx) * ty;
+    const i = p * 4;
+    d[i] = mix(r); d[i + 1] = mix(g); d[i + 2] = mix(b); d[i + 3] = 255;
+  }
+}
+
 // ---------- Облегающая юбка: собираем сетку сами ----------
 // Трубка по форме её тела: на каждой высоте берём контур тела (выпуклую оболочку — она перекрывает
 // промежуток между ног) и чуть отступаем наружу. Привязка: верх — к тазу, низ — к бёдрам, поэтому
@@ -497,7 +547,7 @@ export class PieceWardrobe {
         minishorts: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // короткие лосины
         top: (x, y) => y > hem && y < neck.y + 0.008 && ax(x) < reach, // до шеи, рукава до запястий
         crop: (x, y) => y > cropHem && y < neck.y - 0.012 && ax(x) < shortSleeve, // короткий топ с коротким рукавом
-        tank: (x, y) => y > cropHem && y < neck.y - 0.03 && ax(x) < ux + 0.03, // майка без рукавов
+        tank: (x, y) => y > cropHem && y < neck.y - 0.03 && (ax(x) < ux + 0.012 || y < upArm.y - 0.05), // майка без рукавов (подмышка закрыта)
         longcrop: (x, y) => y > cropHem && y < neck.y + 0.008 && ax(x) < reach, // короткий топ с длинным рукавом
         tee: (x, y) => y > hem && y < neck.y - 0.012 && ax(x) < shortSleeve, // футболка до пояса
         polo: (x, y, z) => y > hem && y < neck.y + 0.03 && ax(x) < shortSleeve && !vOpen(x, y, z),
@@ -550,10 +600,17 @@ export class PieceWardrobe {
     const data = ctx.getImageData(0, 0, w, h), d = data.data;
     const z = this.zoneMask('legsall', w, h);
     const skin = (i) => d[i + 3] >= 250 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
-    let r = 0, g = 0, b = 0, n = 0;
-    for (let i = 0; i < d.length; i += 16) if (skin(i)) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
-    if (!n) return map;
-    for (let i = 0; i < d.length; i += 4) if (z[i] >= 128 && !skin(i)) { d[i] = r / n; d[i + 1] = g / n; d[i + 2] = b / n; d[i + 3] = 255; }
+    const need = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) if (z[i] >= 128 && !skin(i)) need[p] = 1;
+    // Край чулка полупрозрачный и похож на кожу — захватываем ещё несколько точек вокруг, чтобы не осталось следа.
+    for (let pass = 0; pass < 4; pass++) {
+      const prev = need.slice();
+      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+        const p = y * w + x;
+        if (!prev[p] && z[p * 4] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
+      }
+    }
+    skinFill(d, w, h, need);
     ctx.putImageData(data, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
@@ -578,7 +635,7 @@ export class PieceWardrobe {
     const mask = document.createElement('canvas');
     mask.width = w; mask.height = h;
     const mc = mask.getContext('2d', { willReadFrequently: true });
-    mc.fillStyle = '#fff'; mc.strokeStyle = '#fff'; mc.lineWidth = 2; // обводка закрывает швы между треугольниками
+    mc.fillStyle = '#fff'; mc.strokeStyle = '#fff'; mc.lineWidth = 1; // обводка закрывает швы между треугольниками
     mc.beginPath();
     for (let i = 0; i < T.length; i += 6) { mc.moveTo(T[i] * w, T[i + 1] * h); mc.lineTo(T[i + 2] * w, T[i + 3] * h); mc.lineTo(T[i + 4] * w, T[i + 5] * h); mc.closePath(); }
     mc.fill(); mc.stroke();
@@ -591,11 +648,18 @@ export class PieceWardrobe {
       const xa = Math.max(0, Math.floor(Math.min(x0, x1, x2)) - 1), xb = Math.min(w - 1, Math.ceil(Math.max(x0, x1, x2)) + 1);
       const ya = Math.max(0, Math.floor(Math.min(y0, y1, y2)) - 1), yb = Math.min(h - 1, Math.ceil(Math.max(y0, y1, y2)) + 1);
       for (let y = ya; y <= yb; y++) for (let x = xa; x <= xb; x++) {
-        const a = ((y1 - y2) * (x + 0.5 - x2) + (x2 - x1) * (y + 0.5 - y2)) / den;
-        const b2 = ((y2 - y0) * (x + 0.5 - x2) + (x0 - x2) * (y + 0.5 - y2)) / den;
-        const c = 1 - a - b2;
-        if (a < -0.03 || b2 < -0.03 || c < -0.03) continue;
-        if (inside(a * P[0] + b2 * P[2] + c * P[4], a * P[1] + b2 * P[3] + c * P[5], a * Z[0] + b2 * Z[1] + c * Z[2])) m[(y * w + x) * 4] = 255;
+        // 3×3 пробы на точку: край ткани получается сглаженным, без «лесенки».
+        let hit = 0, tot = 0;
+        for (let sy = 0; sy < 3; sy++) for (let sx = 0; sx < 3; sx++) {
+          const px = x + (sx + 0.5) / 3, py = y + (sy + 0.5) / 3;
+          const a = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / den;
+          const b2 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / den;
+          const c = 1 - a - b2;
+          if (a < -0.02 || b2 < -0.02 || c < -0.02) continue;
+          tot++;
+          if (inside(a * P[0] + b2 * P[2] + c * P[4], a * P[1] + b2 * P[3] + c * P[5], a * Z[0] + b2 * Z[1] + c * Z[2])) hit++;
+        }
+        if (tot) { const k = (y * w + x) * 4; m[k] = Math.max(m[k], Math.round(255 * hit / tot)); }
       }
     }
     const data = ctx.getImageData(0, 0, w, h), d = data.data;
@@ -603,32 +667,19 @@ export class PieceWardrobe {
     // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи). Нарисованный верх их не закрывает
     // целиком — заливаем такие места цветом кожи, иначе руки «пропадают».
     if (['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(kind)) {
-      const up = this.paintTris('upper');
-      const um = document.createElement('canvas');
-      um.width = w; um.height = h;
-      const uc = um.getContext('2d', { willReadFrequently: true });
-      uc.fillStyle = '#fff'; uc.strokeStyle = '#fff'; uc.lineWidth = 2;
-      uc.beginPath();
-      for (const list of [up.fast, ...up.slow.map((x) => x.U)]) for (let i = 0; i < list.length; i += 6) { uc.moveTo(list[i] * w, list[i + 1] * h); uc.lineTo(list[i + 2] * w, list[i + 3] * h); uc.lineTo(list[i + 4] * w, list[i + 5] * h); uc.closePath(); }
-      uc.fill(); uc.stroke();
-      const u = uc.getImageData(0, 0, w, h).data;
-      let sr = 0, sg = 0, sb = 0, sn = 0;
-      for (let i = 0; i < d.length; i += 16) { // цвет кожи — средний по её непрозрачным «кожаным» точкам
-        if (u[i] < 128 || d[i + 3] < 250 || !(d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150)) continue;
-        sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; sn++;
-      }
-      if (sn) for (let i = 0; i < d.length; i += 4) {
-        if (u[i] < 128 || d[i + 3] >= 250) continue;
-        d[i] = sr / sn; d[i + 1] = sg / sn; d[i + 2] = sb / sn; d[i + 3] = 255;
-      }
+      const u = this.zoneMask('upper', w, h);
+      const need = new Uint8Array(w * h);
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) if (u[i] >= 128 && d[i + 3] < 250) need[p] = 1;
+      skinFill(d, w, h, need);
     }
     const zone = keep ? this.zoneMask('minishorts', w, h) : null;
     for (let i = 0; i < d.length; i += 4) {
-      if (m[i] < 128) continue;
+      if (m[i] < 8) continue;
       if (zone && zone[i] < 128 && !(d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150)) continue;
       // Ровная плотная ткань, без просвечивания.
       const k = 1; // ровный цвет: рисунок чулок и белья под тканью не проступает (тени даёт освещение)
-      d[i] = Math.min(255, R * k); d[i + 1] = Math.min(255, G * k); d[i + 2] = Math.min(255, Bl * k); d[i + 3] = 255;
+      const al = m[i] / 255; // на краю ткань плавно сходит на нет
+      d[i] = d[i] * (1 - al) + Math.min(255, R * k) * al; d[i + 1] = d[i + 1] * (1 - al) + Math.min(255, G * k) * al; d[i + 2] = d[i + 2] * (1 - al) + Math.min(255, Bl * k) * al; d[i + 3] = 255;
     }
     ctx.putImageData(data, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
