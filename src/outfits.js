@@ -8,7 +8,8 @@ import { VRMUtils } from '@pixiv/three-vrm';
 
 export const PIECE_CATS = [
   { id: 'tops', name: 'Верх', re: /_Tops_/i },
-  { id: 'bottoms', name: 'Низ', re: /_Bottoms_/i },
+  { id: 'bottoms', name: 'Юбки', re: /_Bottoms_/i },
+  { id: 'leggings', name: 'Лосины', skin: true }, // нарисованы по телу; носятся и сами, и под юбкой
   { id: 'shoes', name: 'Обувь', re: /_Shoes_/i },
   { id: 'acc', name: 'Аксессуары', re: /_Accessory/i },
   { id: 'legs', name: 'Чулки / колготки', skin: true },
@@ -949,7 +950,7 @@ export class PieceWardrobe {
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).
-    const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.bottoms)?.bottoms, kl = this.paints.get(wear.legs)?.legs;
+    const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.leggings)?.leggings, kl = this.paints.get(wear.legs)?.legs;
     // (у облегающей юбки рисунка по телу нет — это отдельная сетка, см. tightSkirt)
     if (kl === 'bare') map = this.bareLegs(map);
     // Кант (манжеты, ворот, пояс, низ) — чуть темнее светлой ткани и чуть светлее тёмной: края выглядят аккуратно.
@@ -974,7 +975,7 @@ export class PieceWardrobe {
       }
     }
     if (kb) {
-      const hex = wear.bottomHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
+      const hex = wear.leggingsHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     map = this.paintLayers(map, layers);

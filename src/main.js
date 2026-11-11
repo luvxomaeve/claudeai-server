@@ -2891,10 +2891,10 @@ const PIECE_SOURCES = [
     id: `g_${g.id}`, name: g.name, url: g.url, cats: g.cats ?? ['tops', 'bottoms', 'shoes', 'legs'], names: g.baseNames ?? {}, legsKind: g.baseLegs ?? 'stockings',
   })),
   // Облегающий комплект: ткань нарисована по телу (без своей модели) — сидит точно по фигуре.
-  { id: 'p_fit', name: 'Облегающее', paint: { tops: 'top', bottoms: 'leggings' }, cats: ['tops', 'bottoms'], names: { tops: 'Облегающая кофточка', bottoms: 'Лосины' }, colors: { bottoms: 0x1b1a22 } },
-  { id: 'p_sport', name: 'Спорт', paint: { tops: 'crop', bottoms: 'shorts' }, cats: ['tops', 'bottoms'], names: { tops: 'Короткий топ', bottoms: 'Шорты-велосипедки' }, colors: { tops: 0xf2a7c3 } },
-  { id: 'p_tank', name: 'Лето', paint: { tops: 'tank', bottoms: 'minishorts' }, cats: ['tops', 'bottoms'], names: { tops: 'Майка без рукавов', bottoms: 'Короткие лосины' }, colors: { tops: 0x24222c, bottoms: 0x3d5a8a } },
-  { id: 'p_capri', name: 'Капри', paint: { bottoms: 'capri' }, cats: ['bottoms'], names: { bottoms: 'Лосины-капри' }, colors: { bottoms: 0x55525f } },
+  { id: 'p_fit', name: 'Облегающее', paint: { tops: 'top', leggings: 'leggings' }, cats: ['tops', 'leggings'], names: { tops: 'Облегающая кофточка', leggings: 'Лосины' }, colors: { leggings: 0x1b1a22 } },
+  { id: 'p_sport', name: 'Спорт', paint: { tops: 'crop', leggings: 'shorts' }, cats: ['tops', 'leggings'], names: { tops: 'Короткий топ', leggings: 'Шорты-велосипедки' }, colors: { tops: 0xf2a7c3 } },
+  { id: 'p_tank', name: 'Лето', paint: { tops: 'tank', leggings: 'minishorts' }, cats: ['tops', 'leggings'], names: { tops: 'Майка без рукавов', leggings: 'Короткие лосины' }, colors: { tops: 0x24222c, leggings: 0x3d5a8a } },
+  { id: 'p_capri', name: 'Капри', paint: { leggings: 'capri' }, cats: ['leggings'], names: { leggings: 'Лосины-капри' }, colors: { leggings: 0x55525f } },
   { id: 'p_long', name: 'Топ', paint: { tops: 'longcrop' }, cats: ['tops'], names: { tops: 'Топ с длинным рукавом' }, colors: { tops: 0xc9b3f5 } },
   { id: 'p_tee', name: 'Футболка', paint: { tops: 'tee' }, cats: ['tops'], names: { tops: 'Облегающая футболка' }, colors: { tops: 0x8fc4ee } },
   { id: 'p_polo', name: 'Поло', paint: { tops: 'polo' }, cats: ['tops'], names: { tops: 'Облегающее поло' }, colors: { tops: 0x34508c } },
@@ -2914,6 +2914,8 @@ window.__pw = pieceWardrobe; // для отладки
 const WEAR_KEY = girlKey('waifu-wear');
 let wear = {};
 try { wear = JSON.parse(localStorage.getItem(WEAR_KEY) || '{}'); } catch { wear = {}; }
+// Лосины и шорты переехали из «низа» в свой раздел (чтобы носить их и под юбкой).
+if (['p_fit', 'p_sport', 'p_tank', 'p_capri'].includes(wear.bottoms)) { wear.leggings = wear.bottoms; wear.bottoms = 'none'; }
 // Надета вещь, которой больше нет в шкафу (убранное платье) — возвращаем своё.
 for (const c of Object.keys(wear)) {
   const src = PIECE_SOURCES.find((x) => x.id === wear[c]);
@@ -2940,6 +2942,7 @@ function applyWear() {
   for (const c of PIECE_CATS) {
     const v = wear[c.id] ?? 'base';
     w[c.id] = v === 'base' || v === 'none' || pieceWardrobe.hasSource(v) ? v : 'base';
+    if (c.id === 'leggings' && w[c.id] === 'base') w[c.id] = 'none'; // своих лосин у модели нет
   }
   // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
   const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
@@ -2951,6 +2954,7 @@ function applyWear() {
   else if (lt?.hex != null) w.legsTint = lt.hex;
   if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
   if (isPaint(w.bottoms)) w.bottomHex = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]?.hex ?? defHex(w.bottoms, 'bottoms');
+  if (isPaint(w.leggings)) w.leggingsHex = TINTS[wearTint[`leggings:${w.leggings}`] ?? 0]?.hex ?? defHex(w.leggings, 'leggings');
   pieceWardrobe.apply(w, (map) => {
     stockings?.setBase(map);
     stockings?.apply(look.stockings);
@@ -3001,8 +3005,7 @@ async function pickPiece(cat, id, quiet = false) {
   if (cat === 'tops') {
     // Платье — низ не нужен; обычный верх — вернуть низ, если его не было.
     if (isDress(id)) wear.bottoms = 'none';
-    // (лосины носят без юбки — её не возвращаем, когда меняешь верх)
-    else if (wear.bottoms === 'none' || wear.bottoms === undefined && isDress(wear.tops)) wear.bottoms = 'base';
+    else if (isDress(wear.tops)) wear.bottoms = 'base'; // сняли платье — юбка возвращается; «без юбки» сам не сбрасывается
   }
   if (cat === 'bottoms' && id !== 'none' && isDress(wear.tops)) wear.tops = 'base';
   wear[cat] = id;
@@ -3044,11 +3047,11 @@ async function pickPiece(cat, id, quiet = false) {
   else if (Math.random() < 0.6) say(pick(['Мне идёт? ♥', 'Хи, примерим~', 'Так лучше?', 'Нравится?']));
 }
 // Гардероб-шкаф: вкладки по частям (верх, низ, обувь, аксессуары, ноги) и карточки вещей с названиями.
-const PIECE_ICONS = { tops: '👚', bottoms: '🩳', shoes: '👠', acc: '🎀', legs: '🧦' };
+const PIECE_ICONS = { tops: '👚', bottoms: '👗', leggings: '🩳', shoes: '👠', acc: '🎀', legs: '🧦' };
 const BASE_NAMES = GIRL?.baseNames ?? window.WAIFU_BASE_NAMES ?? {};
 let closetTab = 'tops';
 function pieceName(srcId, cat) {
-  if (srcId === 'none') return { shoes: 'Босиком', acc: 'Без аксессуара', bottoms: 'Без низа (платье)' }[cat] ?? 'Без';
+  if (srcId === 'none') return { shoes: 'Босиком', acc: 'Без аксессуара', bottoms: 'Без юбки', leggings: 'Без лосин' }[cat] ?? 'Без';
   if (srcId === 'base') return BASE_NAMES[cat] ?? (cat === 'legs' ? 'Свои' : 'Своё');
   const src = PIECE_SOURCES.find((x) => x.id === srcId);
   return src?.names?.[cat] ?? src?.name ?? srcId;
@@ -3096,6 +3099,8 @@ async function updateSelfDress(dt) {
     const top = rnd('tops');
     await pickPiece('tops', top, true);
     if (!isDress(top)) await pickPiece('bottoms', rnd('bottoms'), true);
+    // Иногда — лосины или шорты (под юбку или вместо неё); чаще без них.
+    { const L = PIECE_SOURCES.filter((x) => x.cats.includes('leggings')); await pickPiece('leggings', L.length && Math.random() < 0.3 ? L[Math.floor(Math.random() * L.length)].id : 'none', true); }
     await pickPiece('legs', rnd('legs'), true);
     await pickPiece('shoes', rnd('shoes'), true);
     character.react({ expression: 'happy', motion: 'sway' });
@@ -3159,11 +3164,10 @@ function renderPieces() {
   }
   box.appendChild(tabs);
   const c = PIECE_CATS.find((x) => x.id === closetTab);
-  const opts = ['base'];
+  const opts = c.id === 'leggings' ? ['none'] : ['base'];
   for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && src.id !== 'p_bare') opts.push(src.id); // «без чулок» — отдельной кнопкой сверху
-  if (c.id === 'shoes' || c.id === 'acc') opts.push('none');
-  if (c.id === 'bottoms' && isDress(wear.tops)) opts.push('none');
-  const cur = wear[c.id] ?? 'base';
+  if (c.id === 'shoes' || c.id === 'acc' || c.id === 'bottoms') opts.push('none');
+  const cur = c.id === 'leggings' ? (!wear.leggings || wear.leggings === 'base' ? 'none' : wear.leggings) : (wear[c.id] ?? 'base');
   if (c.id === 'legs') {
     // Одна кнопка: снять чулки / надеть обратно (те, что были).
     const off = cur === 'p_bare';
@@ -3186,7 +3190,9 @@ function renderPieces() {
     if (id !== 'none') {
       const dot = document.createElement('span');
       dot.className = 'ci-tint';
-      dot.style.background = tint.hex == null ? 'conic-gradient(#f2a7c3, #8fc4ee, #9fdcc4, #c8283c, #f2a7c3)' : `#${tint.hex.toString(16).padStart(6, '0')}`;
+      const own = PIECE_SOURCES.find((x) => x.id === id)?.colors?.[c.id]; // у нарисованных вещей есть свой цвет
+      const hx = tint.hex ?? own;
+      dot.style.background = hx == null ? 'conic-gradient(#f2a7c3, #8fc4ee, #9fdcc4, #c8283c, #f2a7c3)' : `#${hx.toString(16).padStart(6, '0')}`;
       b.appendChild(dot);
     }
     // Тап по надетой вещи — сменить её цвет.
@@ -3194,11 +3200,24 @@ function renderPieces() {
     grid.appendChild(b);
   }
   box.appendChild(grid);
-  {
-    const hint = document.createElement('p');
-    hint.className = 'panel-note';
-    hint.textContent = 'Тапни надетую вещь ещё раз — сменится цвет 🎨';
-    box.appendChild(hint);
+  // Палитра для надетой вещи: тапнул цвет — сразу перекрасилась (не нужно листать по кругу).
+  if (cur !== 'none') {
+    const pal = document.createElement('div');
+    pal.className = 'closet-palette';
+    const now = wearTint[`${c.id}:${cur}`] ?? 0;
+    TINTS.forEach((t, i) => {
+      const sw = document.createElement('button');
+      sw.className = 'ci-tint pal' + (i === now ? ' on' : '');
+      sw.title = t.name;
+      sw.style.background = t.hex == null ? 'conic-gradient(#f2a7c3, #8fc4ee, #9fdcc4, #c8283c, #f2a7c3)' : `#${t.hex.toString(16).padStart(6, '0')}`;
+      sw.addEventListener('click', () => {
+        wearTint[`${c.id}:${cur}`] = i;
+        try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
+        applyWear(); renderPieces(); wishEvent('tint');
+      });
+      pal.appendChild(sw);
+    });
+    box.appendChild(pal);
   }
 }
 
@@ -4408,7 +4427,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 103;
+const WAIFU_BUILD = 104;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
