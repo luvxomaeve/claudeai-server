@@ -1388,7 +1388,8 @@ export class Character {
         const d = lo.getWorldPosition(new THREE.Vector3()).sub(up.getWorldPosition(new THREE.Vector3())).normalize();
         return THREE.MathUtils.smoothstep(Math.acos(THREE.MathUtils.clamp(d.dot(down), -1, 1)), 0.3, 1.75);
       };
-      const amt = 0; // увеличение от позы отключено — форма постоянная
+      // Только возврат объёма, потерянного сеткой при сгибе (см. installHipKeep): стоя — ноль.
+      const amt = 0.03 * (this.scale ?? 1);
       HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
     }

@@ -85,7 +85,8 @@ function installClothPoke(mesh) {
 
         mvPosition = viewMatrix * pkW;
         mvPosition.xyz += pkV;
-        mvPosition.xyz -= normalize( mvPosition.xyz ) * uLift;
+        // в приседе задняя часть юбки рисуется «поверх» тела — оно не проступает сквозь ткань пятнами
+        mvPosition.xyz -= normalize( mvPosition.xyz ) * ( uLift + aDroop * uSquatC * 0.09 );
         gl_Position = projectionMatrix * mvPosition;
       }`);
     };
@@ -130,11 +131,7 @@ function installHem(mesh, from) {
 function installDroop(vrm, mesh) {
   const g = mesh.geometry, pos = g.getAttribute('position');
   if (!mesh.isSkinnedMesh || !pos || g.getAttribute('aDroop')) return;
-  const bind = (name) => {
-    const node = vrm.humanoid?.getRawBoneNode(name);
-    const i = node ? mesh.skeleton.bones.indexOf(node) : -1;
-    return i >= 0 ? new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(mesh.skeleton.boneInverses[i]).invert()) : null;
-  };
+  const bind = (name) => bindBone(vrm, mesh, name);
   const H = bind('hips'), foot = bind('leftFoot'), toe = bind('leftToes');
   if (!H || !foot) return;
   const back = Math.sign(foot.z - (toe?.z ?? foot.z + 0.1)) || -1;
@@ -178,17 +175,30 @@ function setTuck(mesh, on, y = 0) {
   }
 }
 
+// Где кость была в исходной позе, в координатах сетки. Вещь может быть привязана к своим копиям костей
+// (другой объект с тем же именем) — тогда ищем по имени.
+function bindBone(vrm, mesh, name) {
+  const node = vrm.humanoid?.getRawBoneNode(name);
+  if (!node) return null;
+  const from = (m) => {
+    const bones = m.skeleton?.bones ?? [];
+    let i = bones.indexOf(node);
+    if (i < 0) i = bones.findIndex((b) => b.name === node.name);
+    return i >= 0 && m.skeleton.boneInverses[i] ? new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(m.skeleton.boneInverses[i]).invert()) : null;
+  };
+  let p = from(mesh);
+  // У вещи в скелете только часть костей (например, без стоп) — берём положение из любой другой сетки
+  // той же модели: исходная поза у них общая.
+  if (!p) vrm.scene.traverse((o) => { if (!p && o.isSkinnedMesh && o !== mesh) p = from(o); });
+  return p;
+}
 // В глубоком приседе сетка тела между ног собирается в торчащий бугорок (кости бёдер разошлись,
 // а «дно» таза осталось на месте). Чем сильнее согнуты ноги, тем больше утягиваем это место вверх, в таз.
 export const SQUAT_FLEX = { value: 0 };
 function installCrotchFix(vrm, mesh) {
   const g = mesh.geometry, pos = g.getAttribute('position');
   if (!mesh.isSkinnedMesh || !pos || g.getAttribute('aCrotch')) return;
-  const bind = (name) => {
-    const node = vrm.humanoid?.getRawBoneNode(name);
-    const i = node ? mesh.skeleton.bones.indexOf(node) : -1;
-    return i >= 0 ? new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(mesh.skeleton.boneInverses[i]).invert()) : null;
-  };
+  const bind = (name) => bindBone(vrm, mesh, name);
   const L = bind('leftUpperLeg'), R = bind('rightUpperLeg'), K = bind('leftLowerLeg');
   if (!L || !R || !K) return;
   const k0 = Math.max(0.25, L.y - K.y) / 0.4;
@@ -216,6 +226,38 @@ function installCrotchFix(vrm, mesh) {
   }
 }
 
+// Сохранение объёма при сгибе ноги. В приседе сетка у тазобедренного сустава «схлопывается», и бёдра сзади
+// становятся плоскими, хотя стоя у модели там нормальный объём. Чем сильнее согнута нога, тем больше
+// возвращаем потерянное — ровно до формы, какая у неё стоя (HIP_FLEX задаётся в character.js).
+// Саму модель не меняем: стоя добавка равна нулю. Ткань низа идёт вместе с телом, чтобы не прорезалась.
+function installHipKeep(vrm, mesh, cloth) {
+  const g = mesh.geometry, pos = g.getAttribute('position'), nor = g.getAttribute('normal');
+  if (!mesh.isSkinnedMesh || !pos || !nor || g.getAttribute('hipBulge')) return;
+  const bind = (name) => bindBone(vrm, mesh, name);
+  const L = bind('leftUpperLeg'), R = bind('rightUpperLeg'), K = bind('leftLowerLeg'), foot = bind('leftFoot'), toe = bind('leftToes');
+  if (!L || !R || !K || !foot) return;
+  const k0 = Math.max(0.25, L.y - K.y) / 0.4;
+  const back = new THREE.Vector3(0, 0, Math.sign(foot.z - (toe?.z ?? foot.z + 0.1)) || -1);
+  const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.02 * k0, 0)));
+  const sigma = 0.095 * k0, gain = cloth ? 1.6 : 1;
+  const arr = new Float32Array(pos.count * 2), v = new THREE.Vector3(), n = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
+    n.fromBufferAttribute(nor, i);
+    // Тело: только то, что смотрит назад. Ткань: вся задняя половина и шире — она висит дальше от тела
+    // и должна отойти не меньше, чем оно, иначе тело проглянет сквозь юбку.
+    const facing = cloth ? THREE.MathUtils.smoothstep((v.z - L.z) * back.z, -0.04 * k0, 0.03 * k0) : Math.min(1, Math.max(0, n.dot(back) * 0.85 + 0.3));
+    if (facing <= 0) continue;
+    const waist = 1 - THREE.MathUtils.smoothstep(v.y, L.y - 0.02 * k0, L.y + 0.07 * k0); // выше сустава сходит на нет
+    const sg = cloth ? sigma * 1.8 : sigma;
+    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist : 0; }
+  }
+  g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    patchBulge(m);
+  }
+}
+
 export class PieceWardrobe {
   constructor(scene) {
     this.scene = scene;
@@ -229,7 +271,8 @@ export class PieceWardrobe {
     for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(this.base.pieces);
     for (const m of this.base.pieces.bottoms ?? []) installDroop(vrm, m);
-    for (const m of this.base.skins) installCrotchFix(vrm, m);
+    for (const m of this.base.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); }
+    for (const m of this.base.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
   }
 
   // Палец ведёт ткань: point — где касание (мир), dir — куда ведут (мир), power — сила толчка.
@@ -320,7 +363,8 @@ export class PieceWardrobe {
     installHems(idx.pieces);
     idx.skins.forEach(patchDonorSkin);
     for (const m of idx.pieces.bottoms ?? []) installDroop(vrm, m);
-    for (const m of idx.skins) installCrotchFix(vrm, m);
+    for (const m of idx.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); }
+    for (const m of idx.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
     this.skinCache?.clear();
