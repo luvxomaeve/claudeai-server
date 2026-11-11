@@ -2930,6 +2930,26 @@ for (const c of Object.keys(wear)) {
   const src = PIECE_SOURCES.find((x) => x.id === wear[c]);
   if (wear[c] !== 'base' && wear[c] !== 'none' && (!src || !src.cats.includes(c))) { wear[c] = 'base'; if (c === 'tops' && wear.bottoms === 'none') wear.bottoms = 'base'; }
 }
+// Чулки из другого наряда — это только рисунок на коже: грузим одну картинку (≈0,7 МБ), а не всю модель (≈7 МБ).
+const legSkinLoading = new Map();
+function legSkinUrl(id) {
+  const src = PIECE_SOURCES.find((x) => x.id === id);
+  if (!src?.url || !src.cats.includes('legs')) return null;
+  const name = src.url.split('/').pop().replace(/\.(glb|json|vrm)$/, '');
+  return `models/skin-${name}.png`;
+}
+function loadLegSkin(id) {
+  if (pieceWardrobe.hasSource(id) || pieceWardrobe.legSkins.has(id)) return Promise.resolve(true);
+  const url = legSkinUrl(id);
+  if (!url) return Promise.resolve(false);
+  if (!legSkinLoading.has(id)) legSkinLoading.set(id, new Promise((res) => {
+    const img = new Image();
+    img.onload = () => { pieceWardrobe.addLegSkin(id, img); res(true); };
+    img.onerror = () => res(false);
+    img.src = url;
+  }));
+  return legSkinLoading.get(id);
+}
 // Картинки настоящей кожи (ноги — из модели без чулок, руки и плечи — из наряда с открытыми руками).
 let skinDonorsP = null;
 function loadSkinDonors() {
@@ -2962,7 +2982,7 @@ function applyWear() {
   const w = {};
   for (const c of PIECE_CATS) {
     const v = wear[c.id] ?? 'base';
-    w[c.id] = v === 'base' || v === 'none' || pieceWardrobe.hasSource(v) ? v : 'base';
+    w[c.id] = v === 'base' || v === 'none' || pieceWardrobe.hasSource(v) || (c.id === 'legs' && pieceWardrobe.legSkins.has(v)) ? v : 'base';
     if (c.id === 'leggings' && w[c.id] === 'base') w[c.id] = 'none'; // своих лосин у модели нет
   }
   // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
@@ -2990,6 +3010,10 @@ function applyWear() {
 function preloadWornSources() {
   const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
   if (isPaint(wear.tops) || wear.legs === 'p_bare') loadSkinDonors().then(applyWear);
+  // Надетые чулки из другого наряда — только картинка кожи; остальное — модель.
+  const legId = wear.legs;
+  const legOnly = legId && legId !== 'base' && legId !== 'none' && !isPaint(legId) && !Object.entries(wear).some(([c, v]) => c !== 'legs' && v === legId);
+  if (legOnly && legSkinUrl(legId)) { ids.delete(legId); loadLegSkin(legId).then((ok) => (ok ? applyWear() : loadPieceSource(legId).then(applyWear).catch(() => {}))); }
   for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
 }
 // Цвета вещей: тап по уже надетой вещи — следующий цвет.
@@ -3034,7 +3058,9 @@ async function pickPiece(cat, id, quiet = false) {
   // Нарисованный верх открывает руки и плечи, «без чулок» — ноги: нужна настоящая кожа из других нарядов.
   // Это две лёгкие картинки (а не целые модели) — грузятся заранее, здесь обычно уже готовы.
   if ((cat === 'tops' && isPaint(id)) || (cat === 'legs' && id === 'p_bare')) await loadSkinDonors();
-  if (id !== 'base' && id !== 'none' && !pieceWardrobe.hasSource(id)) {
+  // Чулки: хватает картинки кожи того наряда (быстро); не вышло — грузим модель, как раньше.
+  const legsFast = cat === 'legs' && id !== 'base' && id !== 'none' && !pieceWardrobe.hasSource(id) && await loadLegSkin(id);
+  if (id !== 'base' && id !== 'none' && !legsFast && !pieceWardrobe.hasSource(id)) {
     showToast('⏳ Загружаю вещь…'); // без вспышки на весь экран — она «залипала», пока грузится
     try { await loadPieceSource(id); } catch (e) { console.error(e); say('Не получилось загрузить вещь…', 'sad'); }
   }
@@ -4428,7 +4454,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 119;
+const WAIFU_BUILD = 120;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';

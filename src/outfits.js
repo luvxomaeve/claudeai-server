@@ -534,6 +534,7 @@ export class PieceWardrobe {
     this.scene = scene;
     this.base = null; // { vrm, pieces, skins, skinMap }
     this.sources = new Map(); // id -> { vrm, pieces, skinMap, active }
+    this.legSkins = new Map(); // id наряда → текстура его кожи (для чулок: грузим одну картинку, а не всю модель)
     this.skinDonors = new Map(); // id → { skinMap: { image } }: одна картинка кожи (без загрузки всей модели)
     this.paints = new Map(); // id «нарисованной» облегающей вещи → { tops|bottoms|legs: вид ткани }
   }
@@ -621,6 +622,26 @@ export class PieceWardrobe {
   }
 
   hasSource(id) { return id === 'base' || this.sources.has(id) || this.paints.has(id); }
+  // Кожа другого наряда из одной картинки (настройки текстуры — как у её собственной кожи).
+  addLegSkin(id, img) {
+    const tex = new THREE.Texture(img);
+    const ref = this.base?.skinMap;
+    if (ref) for (const k of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[k] = ref[k];
+    tex.needsUpdate = true;
+    this.legSkins.set(id, { skinMap: tex });
+  }
+  // Кэш готовых текстур держим небольшим: каждая — 4 МБ в памяти и столько же в видеопамяти.
+  // Без этого после десятков смен цвета игра начинала тормозить.
+  keepCache(map, key, tex, max = 6) {
+    map.set(key, tex);
+    while (map.size > max) {
+      const k = map.keys().next().value, old = map.get(k);
+      map.delete(k);
+      const inUse = this.base?.skins.some((m) => [].concat(m.material).some((mm) => mm?.map === old));
+      if (!inUse) old?.dispose?.(); else map.set(k, old);
+      if (inUse && map.size > max + 2) break;
+    }
+  }
 
   // ---------- «Нарисованные» облегающие вещи: лосины и кофточка ----------
   // Это не отдельная сетка, а плотная ткань, нарисованная прямо по телу (как у VRoid колготки и майка):
@@ -823,7 +844,7 @@ export class PieceWardrobe {
     const tex = new THREE.CanvasTexture(canvas);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
     tex.needsUpdate = true;
-    this.paintTexCache.set(key, tex);
+    this.keepCache(this.paintTexCache, key, tex);
     return tex;
   }
 
@@ -949,6 +970,36 @@ export class PieceWardrobe {
     setTimeout(step, 300);
   }
 
+  // Кожа верхней части тела под снятой одеждой (руки, плечи, полоска над шортиками). Самый медленный шаг —
+  // считается один раз на каждый «верх» и не зависит от чулок и цветов.
+  prepUpper(map, upper) {
+    if (!map?.image || !this.base) return map;
+    const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
+    const key = `${map.uuid}|${upper}|${donors.map(([id]) => id).join(',')}`;
+    this.prepCache ??= new Map();
+    if (this.prepCache.has(key)) return this.prepCache.get(key);
+    const img = map.image, w = img.width, h = img.height;
+    const pc = document.createElement('canvas');
+    pc.width = w; pc.height = h;
+    const pctx = pc.getContext('2d', { willReadFrequently: true });
+    pctx.drawImage(img, 0, 0, w, h);
+    const pd = pctx.getImageData(0, 0, w, h), d0 = pd.data;
+    const u = upper ? this.zoneMask('upper', w, h) : this.zoneMask('waistgap', w, h);
+    const need = new Uint8Array(w * h);
+    let any = false;
+    // Заменяем только ткань (серую/прозрачную). Тёмные места самой кожи — пупок, ложбинки — не трогаем.
+    const fleshy = (i) => d0[i] > d0[i + 1] && d0[i + 1] >= d0[i + 2] && d0[i] - d0[i + 2] > 14 && d0[i] > 70;
+    for (let p = 0; p < need.length; p++) if (u[p] >= 128 && (d0[p * 4 + 3] < 250 || !fleshy(p * 4))) { need[p] = 1; any = true; }
+    if (!any) { this.prepCache.set(key, map); return map; }
+    this.realSkin(d0, w, h, need, donors); skinFill(d0, w, h, need);
+    pctx.putImageData(pd, 0, 0);
+    const tex = new THREE.CanvasTexture(pc);
+    for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
+    tex.needsUpdate = true;
+    this.keepCache(this.prepCache, key, tex, 4);
+    return tex;
+  }
+
   // Красим все слои ткани за один проход по текстуре (раньше — по проходу на слой: смена наряда подтормаживала).
   // layers: [{ kind, hex, keep }]; keep — чулки остаются поверх: ниже белья красим только голую кожу.
   paintLayers(map, layers) {
@@ -956,46 +1007,54 @@ export class PieceWardrobe {
     this.paintTexCache ??= new Map();
     const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
     const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
-    if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
+    if (this.paintTexCache.has(key)) { const t = this.paintTexCache.get(key); this.paintTexCache.delete(key); this.paintTexCache.set(key, t); return t; }
     const img = map.image, w = img.width, h = img.height;
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h), d = data.data;
-    const isSkin = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
-    // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи) — дорисовываем её от соседней кожи.
-    {
-      // Кожа нужна: над шортиками (серая резинка модели) — всегда; выше пояса — когда надет нарисованный верх.
-      const u = layers.some((l) => ['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(l.kind)) ? this.zoneMask('upper', w, h) : this.zoneMask('waistgap', w, h);
-      const need = new Uint8Array(w * h);
-      let any = false;
-      // Нужна кожа везде, где её нет: и в прозрачных местах, и там, где нарисованы манжеты/бретельки своего наряда.
-      // Заменяем только ткань (серую/прозрачную). Тёмные места самой кожи — пупок, ложбинки — не трогаем:
-      // иначе на их месте получалась квадратная заплатка.
-      const fleshy = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 14 && d[i] > 70;
-      for (let p = 0; p < need.length; p++) if (u[p] >= 128 && (d[p * 4 + 3] < 250 || !fleshy(p * 4))) { need[p] = 1; any = true; }
-      if (any) { this.realSkin(d, w, h, need, donors); skinFill(d, w, h, need); } // сперва настоящая кожа рук и плеч, остаток — дорисовка
+    // Кожа под снятой одеждой уже подготовлена заранее (prepUpper) — здесь только ткань.
+    // Точки исходной картинки читаем один раз и запоминаем: смена цвета потом — просто копия в памяти.
+    this.srcCache ??= new Map();
+    let src = this.srcCache.get(map.uuid);
+    if (!src) {
+      const pcv = document.createElement('canvas');
+      pcv.width = w; pcv.height = h;
+      const pctx = pcv.getContext('2d', { willReadFrequently: true });
+      pctx.drawImage(img, 0, 0, w, h);
+      src = pctx.getImageData(0, 0, w, h).data;
+      this.srcCache.set(map.uuid, src);
+      while (this.srcCache.size > 3) this.srcCache.delete(this.srcCache.keys().next().value);
     }
-    // Нарисованной светотени на ткани нет (давала квадратные пятна) — объём считает шейдер, см. installEdgeShade.
+    const prep = new ImageData(new Uint8ClampedArray(src), w, h);
+    // Шаг 2 (быстрый): ткань. Проходим только по точкам самой вещи (их список считается один раз).
+    const data = prep, d = data.data;
+    const isSkin = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
+    this.idxCache ??= new Map();
     for (const { kind, hex, keep } of layers) {
       const m = this.clothMask(kind, w, h);
+      let idx = this.idxCache.get(`${kind}|${w}`);
+      if (!idx) {
+        let n = 0;
+        for (let p = 0; p < m.length; p++) if (m[p] >= 8) n++;
+        idx = new Uint32Array(n);
+        n = 0;
+        for (let p = 0; p < m.length; p++) if (m[p] >= 8) idx[n++] = p;
+        this.idxCache.set(`${kind}|${w}`, idx);
+      }
       const zone = keep ? this.zoneMask('minishorts', w, h) : null;
       const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
-      for (let p = 0, i = 0; p < m.length; p++, i += 4) {
-        const mv = m[p];
-        if (mv < 8) continue;
+      for (let q = 0; q < idx.length; q++) {
+        const p = idx[q], i = p * 4;
         if (zone && zone[p] < 128 && !isSkin(i)) continue;
-        const al = mv / 255; // на краю ткань плавно сходит на нет
-        const f = 1;
-        d[i] = d[i] * (1 - al) + R * f * al; d[i + 1] = d[i + 1] * (1 - al) + G * f * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * (f + (1 - f) * 0.15) * al; d[i + 3] = 255;
+        const al = m[p] / 255; // на краю ткань плавно сходит на нет
+        d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
       }
     }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
     ctx.putImageData(data, 0, 0);
     const tex = new THREE.CanvasTexture(canvas);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
     tex.needsUpdate = true;
-    this.paintTexCache.set(key, tex);
+    this.keepCache(this.paintTexCache, key, tex);
     return tex;
   }
 
@@ -1075,9 +1134,9 @@ export class PieceWardrobe {
     }
     // Кожа собирается из двух нарядов: торс — от того, чей верх надет (у VRoid под каждым
     // верхом своя майка/бельё, нарисованные на коже), ноги — от выбранных чулок/колготок.
-    const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : this.sources.get(id))?.skinMap ?? this.base.skinMap;
+    const skinOf = (id) => (id === 'base' || id === 'none' ? this.base : (this.sources.get(id) ?? this.legSkins.get(id)))?.skinMap ?? this.base.skinMap;
     const topId = wear.tops ?? 'base';
-    let map = this.compositeSkin(skinOf(topId), skinOf(wear.legs ?? 'base'));
+    let map = this.compositeSkin(this.prepUpper(skinOf(topId), !!this.paints.get(wear.tops)?.tops), skinOf(wear.legs ?? 'base'));
     // (старую перекраску шортиков убрали: теперь их целиком рисует слой «under» — это было самое медленное место)
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
@@ -1271,7 +1330,7 @@ export class PieceWardrobe {
     const tex = new THREE.CanvasTexture(canvas);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
     tex.needsUpdate = true;
-    this.shortsCache.set(sKey, tex);
+    this.keepCache(this.shortsCache, sKey, tex);
     return tex;
   }
 
@@ -1325,7 +1384,7 @@ export class PieceWardrobe {
     const tex = new THREE.CanvasTexture(canvas);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
     tex.needsUpdate = true;
-    this.legTintCache.set(key, tex);
+    this.keepCache(this.legTintCache, key, tex);
     return tex;
   }
 
@@ -1360,7 +1419,7 @@ export class PieceWardrobe {
     const tex = new THREE.CanvasTexture(canvas);
     for (const kk of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[kk] = map[kk];
     tex.needsUpdate = true;
-    this.darkCache.set(key, tex);
+    this.keepCache(this.darkCache, key, tex);
     return tex;
   }
 
@@ -1378,7 +1437,7 @@ export class PieceWardrobe {
     const canvas = document.createElement('canvas');
     canvas.width = w;
     canvas.height = h;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true }); // хранится в памяти: дальше её читают без задержки
     ctx.drawImage(ti, 0, 0, w, h);
     this.ensureLegTris();
     ctx.save();
@@ -1397,7 +1456,7 @@ export class PieceWardrobe {
     const tex = new THREE.CanvasTexture(canvas);
     for (const k of ['flipY', 'colorSpace', 'wrapS', 'wrapT', 'anisotropy', 'magFilter', 'minFilter']) tex[k] = legsMap[k];
     tex.needsUpdate = true;
-    this.skinCache.set(key, tex);
+    this.keepCache(this.skinCache, key, tex);
     return tex;
   }
 
