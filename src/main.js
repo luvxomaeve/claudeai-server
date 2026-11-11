@@ -4535,7 +4535,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 126;
+const WAIFU_BUILD = 127;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4680,6 +4680,13 @@ let autoLoopT = performance.now();
   }
   // Пишем, пока она выполняет команды (садится/встаёт, наклоняется) — ровно, по кадрам.
   if (autoMode && (!reps.home.on || autoLayerDrag) && now - autoDragAt < 300) autoRecNote();
+  // Отпустил — сдвиг от руки плавно уходит, и она возвращается ровно к записанному повтору.
+  if (autoMode && reps.home.on && !(poseDrag?.shift)) {
+    const k = Math.exp(-dt * 2.2), r = reps.home;
+    if (r.bendOff) r.bendOff = Math.abs(r.bendOff) < 0.004 ? 0 : r.bendOff * k;
+    if (r.sitOff) r.sitOff = Math.abs(r.sitOff) < 0.004 ? 0 : r.sitOff * k;
+    if (autoLayer?.off) autoLayer.off = Math.abs(autoLayer.off) < 0.004 ? 0 : autoLayer.off * k;
+  }
   // Второй слой повтора играет вместе с основным (туда-обратно, плавно).
   if (!reps.home.on) { autoLayer = null; autoLayerDrag = null; reps.home.layerBend = null; }
   else if (autoLayer && reps.home.state === 'play' && !(poseDrag?.auto && autoLayerDrag === autoLayer.kind)) {
