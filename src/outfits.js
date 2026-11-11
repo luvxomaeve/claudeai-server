@@ -75,14 +75,14 @@ function installClothPoke(mesh) {
         vec3 wv = vec3( sin( uClothT * 2.1 + pkW.y * 15.0 + pkW.x * 7.0 ), 0.35 * sin( uClothT * 2.7 + pkW.x * 12.0 ), cos( uClothT * 1.7 + pkW.y * 12.0 + pkW.z * 7.0 ) );
         vec3 pkMove = uPokeDir * pkK + uSway * hemW + wv * ( hemW * ( 0.0026 + 0.25 * length( uSway ) + 0.2 * length( uPokeDir ) * pkK ) );
         // присела — задняя часть юбки не торчит коробом, а под своим весом свисает вниз (и не уходит под пол)
-        float drp = aDroop * aHem * aHem * uSquatC;
+        float drp = 0.0; // свисание юбки в приседе выключено: выглядело хуже, чем без него
         pkMove.y -= drp * 0.17;
         pkMove.y += max( 0.0, 0.006 - ( pkW.y + pkMove.y ) ) * step( 0.0001, drp );
         // ткань не уходит «внутрь» тела и других слоёв: движение вглубь гасим, остаётся скольжение вдоль и наружу
         vec3 pkV = mat3( viewMatrix ) * pkMove;
         vec3 pkN = normalize( transformedNormal );
         pkV -= pkN * ( min( 0.0, dot( pkV, pkN ) ) * 0.9 );
-        pkV += pkN * ( aDroop * aHem * uSquatC * 0.035 ); // свисающая часть держит зазор от тела — не «прорезается»
+
         mvPosition = viewMatrix * pkW;
         mvPosition.xyz += pkV;
         mvPosition.xyz -= normalize( mvPosition.xyz ) * uLift;
