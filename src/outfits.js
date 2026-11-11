@@ -63,8 +63,9 @@ function installClothPoke(mesh) {
       shader.uniforms.uTuck = (m.userData.tuck ??= { value: 0 });
       shader.uniforms.uTuckY = (m.userData.tuckY ??= { value: 0 });
       shader.uniforms.uLift = (m.userData.lift ??= { value: 0 });
+      shader.uniforms.uSquatC = SQUAT_FLEX;
       shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed -= normalize( normal ) * ( ( aTuck + smoothstep( 0.03, 0.045, aTuck ) * 0.07 ) * uTuck * mix( 1.0, smoothstep( 0.034, 0.045, aTuck ), uTuckY ) );');
-      shader.vertexShader = 'attribute float aTuck;\nattribute float aHem;\nuniform float uTuck;\nuniform float uTuckY;\nuniform float uLift;\nuniform vec3 uSway;\nuniform float uClothT;\nuniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
+      shader.vertexShader = 'attribute float aTuck;\nattribute float aHem;\nuniform float uTuck;\nuniform float uTuckY;\nuniform float uLift;\nuniform float uSquatC;\nattribute float aDroop;\nuniform vec3 uSway;\nuniform float uClothT;\nuniform vec3 uPokePos;\nuniform vec3 uPokeDir;\nuniform float uPokeR;\n' + shader.vertexShader.replace('#include <project_vertex>', `#include <project_vertex>
       {
         vec4 pkW = modelMatrix * vec4( transformed, 1.0 );
         vec3 pkD = pkW.xyz - uPokePos;
@@ -73,10 +74,15 @@ function installClothPoke(mesh) {
         float hemW = aHem * aHem;
         vec3 wv = vec3( sin( uClothT * 2.1 + pkW.y * 15.0 + pkW.x * 7.0 ), 0.35 * sin( uClothT * 2.7 + pkW.x * 12.0 ), cos( uClothT * 1.7 + pkW.y * 12.0 + pkW.z * 7.0 ) );
         vec3 pkMove = uPokeDir * pkK + uSway * hemW + wv * ( hemW * ( 0.0026 + 0.25 * length( uSway ) + 0.2 * length( uPokeDir ) * pkK ) );
+        // присела — задняя часть юбки не торчит коробом, а под своим весом свисает вниз (и не уходит под пол)
+        float drp = aDroop * aHem * aHem * uSquatC;
+        pkMove.y -= drp * 0.17;
+        pkMove.y += max( 0.0, 0.006 - ( pkW.y + pkMove.y ) ) * step( 0.0001, drp );
         // ткань не уходит «внутрь» тела и других слоёв: движение вглубь гасим, остаётся скольжение вдоль и наружу
         vec3 pkV = mat3( viewMatrix ) * pkMove;
         vec3 pkN = normalize( transformedNormal );
         pkV -= pkN * ( min( 0.0, dot( pkV, pkN ) ) * 0.9 );
+        pkV += pkN * ( aDroop * aHem * uSquatC * 0.035 ); // свисающая часть держит зазор от тела — не «прорезается»
         mvPosition = viewMatrix * pkW;
         mvPosition.xyz += pkV;
         mvPosition.xyz -= normalize( mvPosition.xyz ) * uLift;
@@ -119,6 +125,25 @@ function installHem(mesh, from) {
   const arr = new Float32Array(pos.count), span = Math.max(1e-4, (hi - lo) * (1 - from));
   for (let i = 0; i < pos.count; i++) arr[i] = Math.min(1, Math.max(0, 1 - (pos.getY(i) - lo) / span));
   g.setAttribute('aHem', new THREE.BufferAttribute(arr, 1));
+}
+// Какая часть низа «сзади» (за тазом): она в приседе свисает. 0 — спереди, 1 — сзади.
+function installDroop(vrm, mesh) {
+  const g = mesh.geometry, pos = g.getAttribute('position');
+  if (!mesh.isSkinnedMesh || !pos || g.getAttribute('aDroop')) return;
+  const bind = (name) => {
+    const node = vrm.humanoid?.getRawBoneNode(name);
+    const i = node ? mesh.skeleton.bones.indexOf(node) : -1;
+    return i >= 0 ? new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().copy(mesh.skeleton.boneInverses[i]).invert()) : null;
+  };
+  const H = bind('hips'), foot = bind('leftFoot'), toe = bind('leftToes');
+  if (!H || !foot) return;
+  const back = Math.sign(foot.z - (toe?.z ?? foot.z + 0.1)) || -1;
+  const arr = new Float32Array(pos.count), v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
+    arr[i] = THREE.MathUtils.smoothstep((v.z - H.z) * back, -0.01, 0.07);
+  }
+  g.setAttribute('aDroop', new THREE.BufferAttribute(arr, 1));
 }
 function installHems(pieces) {
   for (const m of pieces.bottoms ?? []) installHem(m, 0.12);
@@ -203,6 +228,7 @@ export class PieceWardrobe {
     for (const list of Object.values(this.base.pieces)) list.forEach(installClothPoke);
     for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(this.base.pieces);
+    for (const m of this.base.pieces.bottoms ?? []) installDroop(vrm, m);
     for (const m of this.base.skins) installCrotchFix(vrm, m);
   }
 
@@ -293,6 +319,7 @@ export class PieceWardrobe {
     for (const m of idx.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(idx.pieces);
     idx.skins.forEach(patchDonorSkin);
+    for (const m of idx.pieces.bottoms ?? []) installDroop(vrm, m);
     for (const m of idx.skins) installCrotchFix(vrm, m);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;

@@ -1219,8 +1219,11 @@ canvas.addEventListener('pointermove', (e) => {
     // Вбок или по кругу — гладишь.
     const dx = e.clientX - stroking.sx, dy = e.clientY - stroking.sy;
     if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.25) {
-      const waist = character.bones.spine?.getWorldPosition(new THREE.Vector3()).y ?? 0;
-      const upper = stroking.hit.point ? stroking.hit.point.y > waist + 0.04 * (character.scale ?? 1) : ['body', 'arm', 'face'].includes(stroking.hit.zone);
+      // «Выше пояса» считаем вдоль самого тела (от таза к груди), а не по высоте над полом —
+      // так работает и стоя, и сидя, и лёжа.
+      const B = character.bones, P = (n) => n.getWorldPosition(new THREE.Vector3());
+      const waistP = P(B.spine ?? B.hips), axis = P(B.neck ?? B.head).sub(P(B.hips)).normalize();
+      const upper = stroking.hit.point ? stroking.hit.point.clone().sub(waistP).dot(axis) > 0.04 * (character.scale ?? 1) : ['body', 'arm', 'face'].includes(stroking.hit.zone);
       if (reps.home.on) { setRepeat(false, true); renderAutoRep(); } // идёт повтор — уступает руке
       stopAuto(true);
       stroking = null;
@@ -4417,6 +4420,12 @@ let autoLoopT = performance.now();
   }
   autoRepCheck(now);
   autoLife(now);
+  // Пока ты её двигаешь, гладишь или идёт повтор — она не засыпает (иначе во сне тело «обмякает»
+  // и наклон/прогиб лёжа почти не действует); взялся вести спящую — просыпается.
+  if (autoMode && (pointerActive || reps.home.on || now - lastOnHerAt < 9000)) {
+    character.lieT = 0;
+    if (poseDrag?.auto && character.sleep > 0.05) character.wake?.(4);
+  }
   // Просьба-желание держится рядом с ней (слева от головы) и двигается вместе с ней.
   if (!wishEl.hidden && character.bones?.head) {
     const p = screenOf(character.bones.head, 0.02);
@@ -4614,7 +4623,8 @@ function idleEmote() {
   emoteLast = e.id;
   character.setExpression(e.expr[0], e.expr[1], e.expr[2]);
   // Поза выставлена руками, идёт повтор или танец — без движений тела, только лицо и слова.
-  const busy = poseMode || character.mixer || curRep().on;
+  // Лежит — тоже без жестов телом: лёжа они её перегибают и дёргают.
+  const busy = poseMode || character.mixer || curRep().on || character.sitS > 0.95;
   if (!busy) character.playMotion(e.motion);
   if (e.wink) character.wink();
   say(pick(e.lines));

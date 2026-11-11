@@ -749,7 +749,7 @@ export class Character {
       // Смотришь в лицо — засыпает позже, но всё равно засыпает.
       const want = lying && this.wakeT <= 0 && this.lieT > (watched || this.autoSleep ? 22 : 10) ? 1 : 0;
       // Засыпает медленно (веки тяжелеют), просыпается быстрее.
-      this.sleep += (want - this.sleep) * (1 - Math.exp(-dt * (want ? 0.7 : 3)));
+      this.sleep += (want - this.sleep) * (1 - Math.exp(-dt * (want ? 0.7 : 1.5))); // просыпается без рывка
       this.sleepJoy = Math.max(0, (this.sleepJoy ?? 0) - dt * 0.25);
     }
     this.sitDropNow = 0;
@@ -818,7 +818,8 @@ export class Character {
       // Свои «часы» бёдер: на полу и лёжа покачивание живее (быстрее), во сне — тише, но не замирает.
       this.hipClock = (this.hipClock ?? t) + (this.lastDt ?? 0.016) * (1 + 0.7 * p2) * (1 - 0.5 * (this.sleep ?? 0));
       const tt = this.hipClock;
-      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2); // во сне — почти неподвижна
+      // во сне — почти неподвижна; лёжа на боку ёрзает вдвое спокойнее (иначе её «перегибает»)
+      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2) * (1 - 0.5 * this.sitPhases(s).p4);
       if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
