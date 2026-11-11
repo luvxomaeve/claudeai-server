@@ -593,6 +593,7 @@ export class Character {
     // Во сне дыхание медленное и глубже.
     const sl = this.sleep ?? 0;
     const breath = Math.sin(t * (1.5 - 0.6 * sl)) * (1 + 0.8 * sl);
+    this.breathNow = breath;
     pose.spineX += breath * 0.02;
     pose.lShoulderZ += breath * 0.035;
     pose.rShoulderZ -= breath * 0.035;
@@ -1409,6 +1410,23 @@ export class Character {
     if (this.dancing && !this.mixer) this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.5);
     this.updateExpressions(dt);
     this.vrm.update(dt);
+    // Дыхание видно телом: на вдохе грудная клетка чуть расширяется (вперёд заметнее, чем вширь), на выдохе
+    // опадает. Шею и плечи возвращаем к своему размеру — руки и голова не «пульсируют». Облегающая одежда
+    // нарисована по телу и вещи-сетки привязаны к тем же костям, поэтому ткань поднимается вместе с грудью.
+    {
+      const h = this.vrm.humanoid;
+      const chest = h.getRawBoneNode('upperChest') ?? h.getRawBoneNode('chest');
+      if (chest) {
+        this.breathS = (this.breathS ?? 0) + (((this.breathNow ?? 0) * 0.5 + 0.5) - (this.breathS ?? 0)) * (1 - Math.exp(-dt * 6));
+        const k = this.dancing || this.mixer ? 0.4 : 1;
+        const sx = 1 + 0.009 * this.breathS * k, sy = 1 + 0.005 * this.breathS * k, sz = 1 + 0.024 * this.breathS * k;
+        chest.scale.set(sx, sy, sz);
+        for (const n of ['neck', 'leftShoulder', 'rightShoulder']) {
+          const c = h.getRawBoneNode(n);
+          if (c && c.parent === chest) c.scale.set(1 / sx, 1 / sy, 1 / sz);
+        }
+      }
+    }
     this.vrm.scene.updateMatrixWorld(true);
     this.updateZones();
     this.measureGaze();

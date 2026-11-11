@@ -1117,6 +1117,11 @@ export class PieceWardrobe {
       s.vrm.scene.position.copy(this.base.vrm.scene.position);
       s.vrm.scene.quaternion.copy(this.base.vrm.scene.quaternion);
       s.vrm.update(dt);
+      // Дыхание: грудная клетка донора расширяется так же, как у неё (иначе тело проступит сквозь чужой верх).
+      for (const name of ['upperChest', 'chest', 'neck', 'leftShoulder', 'rightShoulder']) {
+        const a = bh.getRawBoneNode(name), b = h.getRawBoneNode(name);
+        if (a && b) b.scale.copy(a.scale);
+      }
     }
   }
 
