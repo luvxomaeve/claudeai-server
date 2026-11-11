@@ -1230,12 +1230,13 @@ canvas.addEventListener('pointermove', (e) => {
       const B = character.bones, P = (n) => n.getWorldPosition(new THREE.Vector3());
       const waistP = P(B.spine ?? B.hips), axis = P(B.neck ?? B.head).sub(P(B.hips)).normalize();
       const upper = stroking.hit.point ? stroking.hit.point.clone().sub(waistP).dot(axis) > 0.04 * (character.scale ?? 1) : ['body', 'arm', 'face'].includes(stroking.hit.zone);
-      // Идёт повтор одного движения (наклон ИЛИ приседание), а ты взялся за другое — повтор не останавливаем:
-      // второе движение запишется отдельным слоем и пойдёт вместе с первым. Взялся за то же самое — повтор уступает руке.
+      // Идёт повтор — рукой его не сбить, останавливает только «отмена». Движение, за которое взялся
+      // (наклон или приседание), на время идёт за пальцем, остальное продолжает повторяться. Отпустил:
+      // предложит «+ Повторить и это» (заменит/добавит это движение), а не нажмёшь — вернётся прежний повтор.
       const dk = upper ? 'bend' : 'sit';
-      const layering = reps.home.on && reps.home.state === 'play' && reps.home.autoKind && reps.home.autoKind !== 'both' && reps.home.autoKind !== dk;
+      const layering = reps.home.on && reps.home.state === 'play';
       if (reps.home.on && !layering) { setRepeat(false, true); autoLayer = null; renderAutoRep(); }
-      if (layering) { if (autoLayer?.kind === dk) autoLayer = null; autoLayerDrag = dk; autoRec = null; if (dk === 'bend') { reps.home.layerBend ??= character.bodyOffset.hipsRotX; autoBendTarget = reps.home.layerBend; } }
+      if (layering) { autoLayerDrag = dk; autoRec = null; if (dk === 'bend') { reps.home.layerBend ??= character.bodyOffset.hipsRotX; autoBendTarget = reps.home.layerBend; } }
       else autoLayerDrag = null;
       stopAuto(true);
       stroking = null;
@@ -4427,7 +4428,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 118;
+const WAIFU_BUILD = 119;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
@@ -4659,6 +4660,14 @@ function autoSwipe(upper, dir) {
   showLabel(['Встала', 'Присела', 'На коленях', 'Села', 'Легла'][[0, 0.5, 0.8, 1.0, 1.3].indexOf(next)] ?? '');
 }
 // Сделал подряд пару свайпов (подвигал её туда-сюда) — когда она закончит, предложим повторить.
+// Движение рукой поверх повтора не приняли — возвращаем прежний повтор этого движения.
+function autoLayerRestore() {
+  const r = reps.home;
+  if (!r.on) return;
+  if (autoLayer?.kind !== 'bend') r.layerBend = null;
+  if (autoLayer?.kind !== 'sit' && r.sitMoved !== false) r.sitFree = false;
+  autoLayerDrag = null;
+}
 function autoRepCheck(now) {
   if (!autoMode || !autoRec || (reps.home.on && !autoRec.layerKind) || pointerActive || now - autoRec.last < 500) return;
   const rec = autoRec;
@@ -4666,16 +4675,17 @@ function autoRepCheck(now) {
   const n = autoSwipes.filter((t) => t >= rec.start - 50).length;
   autoSwipes = [];
   const S = rec.samples;
-  if ((rec.turns ?? 0) < 1 && n < 2) return;
-  if (S.length < 8) return;
+  const no = () => { if (rec.layerKind) autoLayerRestore(); };
+  if ((rec.turns ?? 0) < 1 && n < 2) return no();
+  if (S.length < 8) return no();
   const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
   // Предлагаем повторить, только если водил её хотя бы 3 секунды — на короткие движения не всплывает.
-  if (rec.layerKind ? (S[S.length - 1].t < 3 || rng(rec.layerKind) < (rec.layerKind === 'bend' ? 0.25 : 0.12)) : (S[S.length - 1].t < 3 || (rng('bend') < 0.25 && rng('sit') < 0.12))) return;
+  if (rec.layerKind ? (S[S.length - 1].t < 3 || rng(rec.layerKind) < (rec.layerKind === 'bend' ? 0.25 : 0.12)) : (S[S.length - 1].t < 3 || (rng('bend') < 0.25 && rng('sit') < 0.12))) return no();
   autoRepOffer = rec;
   renderAutoRep();
   try { navigator.vibrate?.(12); } catch { /* ignore */ }
   clearTimeout(autoRepTimer);
-  autoRepTimer = setTimeout(() => { autoRepOffer = null; renderAutoRep(); }, 6000);
+  autoRepTimer = setTimeout(() => { if (autoRepOffer?.layerKind) autoLayerRestore(); autoRepOffer = null; renderAutoRep(); }, 6000);
 }
 autoRepBtn.addEventListener('click', (e) => {
   e.stopPropagation();
