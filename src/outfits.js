@@ -624,7 +624,7 @@ export class PieceWardrobe {
         tank: { hem: cropHem, sl: null, r: 0.082 }, polo: { hem, sl: shortSleeve, r: 0 },
       };
       // Низ: верхний край — талия, нижний (lo).
-      const BOTS = { leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26 };
+      const BOTS = { under: hipJ.y - leg * 0.26, leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26 };
       const [base, trim] = kind.split(':');
       const T = TOPS[base], lo = BOTS[base];
       const TW = 0.011; // ширина канта (манжета, ворот, пояс, низ)
@@ -635,8 +635,9 @@ export class PieceWardrobe {
           ? (x, y, z) => body(x, y, z) && (y < T.hem + TW || (T.sl != null && ax(x) > T.sl - TW) || (base !== 'polo' && nk(x, y, z) < T.r + TW))
           : body;
       } else if (lo != null) {
-        const body = (x, y) => y < waist && y > lo;
-        inside = trim ? (x, y) => body(x, y) && (y > waist - TW * 1.6 || y < lo + TW) : body;
+        const topY = base === 'under' ? hipJ.y + leg * 0.2 : waist; // бельё — та же форма шортиков, что была, только ровная
+        const body = (x, y) => y < topY && y > lo;
+        inside = trim ? (x, y) => body(x, y) && (y > topY - TW * 1.6 || y < lo + TW) : body;
       } else inside = {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
@@ -658,6 +659,30 @@ export class PieceWardrobe {
       }
     }
     return (this.paintCache[kind] = { fast, slow });
+  }
+
+  // Цвет чулок (берём с икры). Нет чулок (кожа) — null.
+  legTone(map) {
+    if (!map?.image || !this.calfUV?.length) return null;
+    this.toneCache ??= new Map();
+    if (this.toneCache.has(map.uuid)) return this.toneCache.get(map.uuid);
+    const S = 256, cv = document.createElement('canvas');
+    cv.width = S; cv.height = S;
+    const c = cv.getContext('2d', { willReadFrequently: true });
+    c.drawImage(map.image, 0, 0, S, S);
+    const d = c.getImageData(0, 0, S, S).data;
+    let r = 0, g = 0, b = 0, n = 0, skin = 0, tot = 0;
+    for (let k = 0; k < this.calfUV.length; k += 2) {
+      const x = Math.min(S - 1, Math.max(0, Math.floor(this.calfUV[k] * S))), y = Math.min(S - 1, Math.max(0, Math.floor(this.calfUV[k + 1] * S)));
+      const i = (y * S + x) * 4;
+      if (d[i + 3] < 200) continue;
+      tot++;
+      if (d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150) { skin++; continue; }
+      r += d[i]; g += d[i + 1]; b += d[i + 2]; n++;
+    }
+    const hex = n && skin < tot * 0.6 ? (Math.round(r / n) << 16) | (Math.round(g / n) << 8) | Math.round(b / n) : null;
+    this.toneCache.set(map.uuid, hex);
+    return hex;
   }
 
   // Маска области на текстуре (грубо, по треугольникам).
@@ -928,6 +953,11 @@ export class PieceWardrobe {
       return (f(r) << 16) | (f(g) << 8) | f(b);
     };
     const layers = [];
+    // Бельё (шортики под одеждой): ровная ткань с аккуратным кантом, в тон чулок.
+    {
+      const hex = wear.legsDark ? 0x17151c : (wear.legsTint ?? this.legTone(map) ?? 0x24222c);
+      layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex: trimOf(hex) });
+    }
     if (kt) {
       const hex = wear.topHex ?? 0xf1edf6;
       layers.push({ kind: kt, hex }, { kind: `${kt}:trim`, hex: trimOf(hex) });

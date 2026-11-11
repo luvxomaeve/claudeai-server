@@ -4398,6 +4398,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
+const WAIFU_BUILD = 100;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
@@ -4424,6 +4425,11 @@ function renderAutoMenu() {
     b.addEventListener('click', (e) => { e.stopPropagation(); fn(); if (stay) renderAutoMenu(); else autoMenu.hidden = true; });
     autoMenu.appendChild(b);
   }
+  // Номер сборки — чтобы было видно, какая версия стоит.
+  const ver = document.createElement('small');
+  ver.textContent = `сборка ${WAIFU_BUILD}`;
+  ver.style.cssText = 'text-align:center;opacity:0.55;font-size:11px;padding-top:2px';
+  autoMenu.appendChild(ver);
 }
 autoExit.addEventListener('click', (e) => { e.stopPropagation(); autoHint.hidden = true; if (autoMenu.hidden) renderAutoMenu(); autoMenu.hidden = !autoMenu.hidden; });
 window.addEventListener('pointerdown', (e) => { if (!autoMenu.hidden && e.target !== autoExit && !autoMenu.contains(e.target)) autoMenu.hidden = true; }, { capture: true, passive: true });
