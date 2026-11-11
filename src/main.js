@@ -1229,7 +1229,7 @@ canvas.addEventListener('pointermove', (e) => {
     // выше пояса — наклон вперёд / прогиб назад, ниже пояса — присесть / сесть / лечь / встать.
     // Вбок или по кругу — гладишь.
     const dx = e.clientX - stroking.sx, dy = e.clientY - stroking.sy;
-    if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.25) {
+    if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.25 && autoState !== 'freeze' && autoState !== 'hold') { // «Замри» — только гладим, не двигаем
       // «Выше пояса» считаем вдоль самого тела (от таза к груди), а не по высоте над полом —
       // так работает и стоя, и сидя, и лёжа.
       const B = character.bones, P = (n) => n.getWorldPosition(new THREE.Vector3());
@@ -4260,6 +4260,7 @@ function updateLoop(dt) {
     return;
   }
   if (r.state !== 'play') return;
+  if (r.hold) { character.slideHold = 3; return; } // «Замри» второй раз: повтор на паузе, поза держится
   // Живее: темп и размах чуть «дышат» — каждый повтор немного другой.
   r.life += dt;
   const tempo = 1 + 0.08 * Math.sin(r.life * 0.23) + 0.04 * Math.sin(r.life * 0.61 + 1);
@@ -4536,7 +4537,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 128;
+const WAIFU_BUILD = 129;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4549,9 +4550,9 @@ for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, 
 function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
-  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', '🤫', 'Замри'], ['cam', '🎥', 'Камера']]) {
+  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера']]) {
     const b = document.createElement('button');
-    const on = id === 'cam' ? camOnly : autoState === id;
+    const on = id === 'cam' ? camOnly : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = on ? 'active' : '';
     b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
     b.addEventListener('click', (e) => {
@@ -4572,6 +4573,15 @@ function renderAutoStates() {
       }
       showAutoStates(1300); // выбрал — значки скоро спрячутся
       if (id === 'cam') { camOnly = !camOnly; renderAutoStates(); showToast(camOnly ? '🎥 Палец крутит камеру — её не задеваешь' : '👆 Снова можно гладить'); return; }
+      if (id === 'freeze') {
+        // 1-й тап — сама не двигается (записанный повтор идёт). 2-й — повтор замирает в той позе, где застал.
+        // 3-й — снова живая, повтор продолжается.
+        const repOn = reps.home.on && reps.home.state === 'play';
+        setAutoState(autoState === 'freeze' ? (repOn ? 'hold' : 'live') : autoState === 'hold' ? 'live' : 'freeze');
+        showToast({ freeze: repOn ? '🤫 Замерла — повтор идёт. Ещё тап — остановить' : '🤫 Замерла — можно гладить', hold: '⏸ Остановилась в этой позе', live: '🧍 Снова живая' }[autoState]);
+        showAutoStates(2600);
+        return;
+      }
       setAutoState(autoState === id ? 'live' : id); // повторный тап — снова живая
     });
     autoStates.appendChild(b);
@@ -4602,7 +4612,8 @@ function setAutoState(st) {
   autoState = st;
   if (!character) return;
   character.forceSleep = st === 'sleep';
-  character.frozen = st === 'freeze';
+  character.frozen = st === 'freeze' || st === 'hold';
+  reps.home.hold = st === 'hold';
   if (st !== 'live') stopAuto(true);
   if (st === 'sleep') {
     if (reps.home.on) { setRepeat(false, true); renderAutoRep(); }
@@ -4705,7 +4716,7 @@ let autoLoopT = performance.now();
   }
   // Второй слой повтора играет вместе с основным (туда-обратно, плавно).
   if (!reps.home.on) { autoLayer = null; autoLayerDrag = null; reps.home.layerBend = null; }
-  else if (autoLayer && reps.home.state === 'play' && !(poseDrag?.auto && autoLayerDrag === autoLayer.kind)) {
+  else if (autoLayer && reps.home.state === 'play' && !reps.home.hold && !(poseDrag?.auto && autoLayerDrag === autoLayer.kind)) {
     const L = autoLayer;
     L.t = (L.t + dt) % (L.dur * 2);
     const tri = L.t < L.dur ? L.t / L.dur : 2 - L.t / L.dur;
