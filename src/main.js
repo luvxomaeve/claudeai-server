@@ -1230,7 +1230,13 @@ canvas.addEventListener('pointermove', (e) => {
       const B = character.bones, P = (n) => n.getWorldPosition(new THREE.Vector3());
       const waistP = P(B.spine ?? B.hips), axis = P(B.neck ?? B.head).sub(P(B.hips)).normalize();
       const upper = stroking.hit.point ? stroking.hit.point.clone().sub(waistP).dot(axis) > 0.04 * (character.scale ?? 1) : ['body', 'arm', 'face'].includes(stroking.hit.zone);
-      if (reps.home.on) { setRepeat(false, true); renderAutoRep(); } // идёт повтор — уступает руке
+      // Идёт повтор одного движения (наклон ИЛИ приседание), а ты взялся за другое — повтор не останавливаем:
+      // второе движение запишется отдельным слоем и пойдёт вместе с первым. Взялся за то же самое — повтор уступает руке.
+      const dk = upper ? 'bend' : 'sit';
+      const layering = reps.home.on && reps.home.state === 'play' && reps.home.autoKind && reps.home.autoKind !== 'both' && reps.home.autoKind !== dk;
+      if (reps.home.on && !layering) { setRepeat(false, true); autoLayer = null; renderAutoRep(); }
+      if (layering) { if (autoLayer?.kind === dk) autoLayer = null; autoLayerDrag = dk; autoRec = null; if (dk === 'bend') { reps.home.layerBend ??= character.bodyOffset.hipsRotX; autoBendTarget = reps.home.layerBend; } }
+      else autoLayerDrag = null;
       stopAuto(true);
       stroking = null;
       poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now(), auto: true, dir: 0, run: 0, turns: 0 };
@@ -4186,8 +4192,9 @@ function updateLoop(dt) {
     applyPoints({ hL: m.hL ? pts.hL : null, hR: m.hR ? pts.hR : null, fL: m.fL ? pts.fL : null, fR: m.fR ? pts.fR : null });
   }
   const o = character.bodyOffset;
-  o.hipsRotX = bend;
-  o.spineX = spine;
+  // Наклон может вести второй слой (простой вид: наклон и приседание записаны отдельно и идут вместе).
+  o.hipsRotX = r.layerBend ?? bend;
+  o.spineX = r.layerBend != null ? bendSpine(r.layerBend) : spine;
   // Посадку ведёт повтор, только если она менялась в записи и ты не взял её в руки.
   const sitByRep = r.sitMoved !== false && !r.sitFree;
   if (sitByRep) character.sit = sit;
@@ -4420,7 +4427,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 117;
+const WAIFU_BUILD = 118;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
@@ -4468,10 +4475,12 @@ document.body.appendChild(autoRepBtn);
 for (const ev of ['pointerdown', 'touchstart']) autoRepBtn.addEventListener(ev, (e) => e.stopPropagation());
 const camEase = { yaw: 0, pitch: 0 }; // сколько камере ещё довернуться
 let autoBendTarget = null; // куда палец ведёт наклон; тело догоняет плавно
+let autoLayer = null; // второй слой повтора: { kind: 'bend' | 'sit', S: [[t, v]…], dur, t }
+let autoLayerDrag = null; // сейчас рукой ведём второй слой ('bend' | 'sit')
 let autoDragAt = 0;
 function autoRecNote() {
   const now = performance.now();
-  if (!autoRec || now - autoRec.last > 1600) autoRec = { start: now, samples: [] };
+  if (!autoRec || now - autoRec.last > 1600) autoRec = { start: now, samples: [], layerKind: reps.home.on ? autoLayerDrag : null };
   autoRec.last = now;
   autoRec.samples.push({ t: (now - autoRec.start) / 1000, ...nowPose() });
 }
@@ -4485,15 +4494,32 @@ let autoLoopT = performance.now();
   if (!character) return;
   if (autoBendTarget != null) {
     const o = character.bodyOffset;
-    if (!autoMode || poseMode || reps.home.on) autoBendTarget = null;
-    else {
+    if (!autoMode || poseMode || (reps.home.on && autoLayerDrag !== 'bend')) autoBendTarget = null;
+    else if (reps.home.on) {
+      // второй слой: наклон ведём поверх идущего повтора приседаний
+      const r = reps.home;
+      r.layerBend = (r.layerBend ?? o.hipsRotX) + (autoBendTarget - (r.layerBend ?? o.hipsRotX)) * (1 - Math.exp(-dt * 11));
+      if (!poseDrag) autoBendTarget = null;
+    } else {
       o.hipsRotX += (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * (poseDrag ? 11 : 3.5))); // за пальцем — плотно, сама — неспешно
       o.spineX = bendSpine(o.hipsRotX);
       if (!poseDrag && Math.abs(autoBendTarget - o.hipsRotX) < 0.004) autoBendTarget = null;
     }
   }
   // Пишем, пока она выполняет команды (садится/встаёт, наклоняется) — ровно, по кадрам.
-  if (autoMode && !reps.home.on && now - autoDragAt < 300) autoRecNote();
+  if (autoMode && (!reps.home.on || autoLayerDrag) && now - autoDragAt < 300) autoRecNote();
+  // Второй слой повтора играет вместе с основным (туда-обратно, плавно).
+  if (!reps.home.on) { autoLayer = null; autoLayerDrag = null; reps.home.layerBend = null; }
+  else if (autoLayer && reps.home.state === 'play' && !(poseDrag?.auto && autoLayerDrag === autoLayer.kind)) {
+    const L = autoLayer;
+    L.t = (L.t + dt) % (L.dur * 2);
+    const tri = L.t < L.dur ? L.t / L.dur : 2 - L.t / L.dur;
+    const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * L.dur;
+    let i = 0; while (i < L.S.length - 2 && L.S[i + 1][0] < u) i++;
+    const a = L.S[i], b = L.S[i + 1], k = THREE.MathUtils.clamp((u - a[0]) / Math.max(1e-4, b[0] - a[0]), 0, 1), v = a[1] + (b[1] - a[1]) * k;
+    if (L.kind === 'bend') reps.home.layerBend = v;
+    else { reps.home.sitFree = true; character.sit = THREE.MathUtils.clamp(v, 0, sitMax()); character.sitRate = Math.max(character.sitRate, 1.2); character.slideHold = 3; }
+  }
   // Камера: палец задаёт поворот, камера доезжает плавно и чуть «докатывается».
   if (Math.abs(camEase.yaw) + Math.abs(camEase.pitch) > 1e-5) {
     const a = 1 - Math.exp(-dt * 13);
@@ -4528,9 +4554,10 @@ let autoLoopT = performance.now();
 function renderAutoRep() {
   const playing = autoMode && reps.home.on && reps.home.state === 'play';
   autoRepBtn.hidden = !(autoMode && (playing || autoRepOffer));
-  autoRepBtn.classList.toggle('active', playing);
-  autoRepBtn.classList.toggle('offer', !playing && !!autoRepOffer);
-  autoRepBtn.textContent = playing ? '✕ отмена' : '🔁 Повторить';
+  const offer = !!autoRepOffer;
+  autoRepBtn.classList.toggle('active', playing && !offer);
+  autoRepBtn.classList.toggle('offer', offer);
+  autoRepBtn.textContent = offer ? (playing ? '🔁 + Повторить и это' : '🔁 Повторить') : '✕ отмена';
 }
 // Живые мелочи: во сне над головой плывут 💤, проснулась сама — зевает; на повторе — искорки и фразы;
 // глубокий наклон или прогиб — комментирует.
@@ -4633,7 +4660,7 @@ function autoSwipe(upper, dir) {
 }
 // Сделал подряд пару свайпов (подвигал её туда-сюда) — когда она закончит, предложим повторить.
 function autoRepCheck(now) {
-  if (!autoMode || !autoRec || reps.home.on || pointerActive || now - autoRec.last < 500) return;
+  if (!autoMode || !autoRec || (reps.home.on && !autoRec.layerKind) || pointerActive || now - autoRec.last < 500) return;
   const rec = autoRec;
   autoRec = null;
   const n = autoSwipes.filter((t) => t >= rec.start - 50).length;
@@ -4643,7 +4670,7 @@ function autoRepCheck(now) {
   if (S.length < 8) return;
   const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
   // Предлагаем повторить, только если водил её хотя бы 3 секунды — на короткие движения не всплывает.
-  if (S[S.length - 1].t < 3 || (rng('bend') < 0.25 && rng('sit') < 0.12)) return;
+  if (rec.layerKind ? (S[S.length - 1].t < 3 || rng(rec.layerKind) < (rec.layerKind === 'bend' ? 0.25 : 0.12)) : (S[S.length - 1].t < 3 || (rng('bend') < 0.25 && rng('sit') < 0.12))) return;
   autoRepOffer = rec;
   renderAutoRep();
   try { navigator.vibrate?.(12); } catch { /* ignore */ }
@@ -4653,7 +4680,19 @@ function autoRepCheck(now) {
 autoRepBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   const r = reps.home;
-  if (r.on) { setRepeat(false, true); renderAutoRep(); return; }
+  // Идёт повтор и предложено второе движение — добавляем его слоем, первое не трогаем.
+  if (r.on && autoRepOffer?.layerKind) {
+    const rec2 = autoRepOffer, kd = rec2.layerKind;
+    autoRepOffer = null; clearTimeout(autoRepTimer);
+    autoLayer = { kind: kd, S: rec2.samples.map((x) => [x.t, kd === 'bend' ? (x.layerBend ?? x.bend) : x.sit]), dur: rec2.samples[rec2.samples.length - 1].t, t: 0 };
+    autoLayer.t = autoLayer.dur; // с того места, где отпустил
+    autoLayerDrag = null;
+    if (kd === 'sit') r.sitFree = true;
+    renderAutoRep();
+    say(pick(['И это тоже? Хи~', 'Сразу оба? Легко ♥', 'Запомнила и это~']), 'happy');
+    return;
+  }
+  if (r.on) { setRepeat(false, true); autoLayer = null; autoRepOffer = null; renderAutoRep(); return; }
   const rec = autoRepOffer;
   if (!rec) return;
   autoRepOffer = null;
@@ -4664,6 +4703,11 @@ autoRepBtn.addEventListener('click', (e) => {
   r.t = r.dur;
   r.movedPts = movedPoints(r.samples);
   r.sitMoved = sitMovedIn(r.samples);
+  { // какое это движение: наклон, приседание или оба сразу (для второго слоя)
+    const S = rec.samples, rg = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
+    r.autoKind = rg('sit') > 0.12 ? (rg('bend') > 0.25 ? 'both' : 'sit') : 'bend';
+    r.layerBend = null; autoLayer = null; autoLayerDrag = null;
+  }
   renderRep();
   renderAutoRep();
   character.react({ expression: 'happy' });
