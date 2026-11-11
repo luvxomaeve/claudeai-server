@@ -2881,12 +2881,18 @@ const PIECE_SOURCES = [
   ...(GIRLS ?? []).filter((g) => g !== GIRL).map((g) => ({
     id: `g_${g.id}`, name: g.name, url: g.url, cats: g.cats ?? ['tops', 'bottoms', 'shoes', 'legs'], names: g.baseNames ?? {}, legsKind: g.baseLegs ?? 'stockings',
   })),
-];
+// Большое платье убрано из шкафа (туфли и чулки от него остались).
+].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x));
 const pieceWardrobe = new PieceWardrobe(scene);
 window.__pw = pieceWardrobe; // для отладки
 const WEAR_KEY = girlKey('waifu-wear');
 let wear = {};
 try { wear = JSON.parse(localStorage.getItem(WEAR_KEY) || '{}'); } catch { wear = {}; }
+// Надета вещь, которой больше нет в шкафу (убранное платье) — возвращаем своё.
+for (const c of Object.keys(wear)) {
+  const src = PIECE_SOURCES.find((x) => x.id === wear[c]);
+  if (wear[c] !== 'base' && wear[c] !== 'none' && (!src || !src.cats.includes(c))) { wear[c] = 'base'; if (c === 'tops' && wear.bottoms === 'none') wear.bottoms = 'base'; }
+}
 const pieceLoading = new Map();
 function loadPieceSource(id) {
   if (pieceWardrobe.hasSource(id)) return Promise.resolve();
@@ -3755,7 +3761,8 @@ function updateAuto(dt) {
     && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
   if (!calm) return;
   // Иногда вместо движения — красивая поза на несколько секунд.
-  if (Math.random() < 0.4 && character.poseName === 'stand') {
+  // Готовые «стандартные» позы убраны: сама она только двигается (жесты, покачивания, эмоции).
+  if (false && character.poseName === 'stand') {
     const poses = ['flirty', 'hips', 'shy', 'think', 'hair', 'cheek', 'dreamy', 'hug'].filter((n) => n !== autoLastName);
     const n = poses[Math.floor(Math.random() * poses.length)];
     autoLastName = n;

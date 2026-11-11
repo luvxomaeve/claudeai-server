@@ -1651,3 +1651,6 @@ body.ui-hidden #auto-exit, body.ui-hidden #auto-help { opacity: 0.35; transition
 #wish:not(#_) { animation: fadeIn 0.35s ease; bottom: auto; left: 50%; top: 40%; transform: translate(-50%, -50%); padding: 8px 14px; font-size: 14px; transition: opacity 0.9s ease; }
 #wish.gone { opacity: 0; pointer-events: none; }
 #wish .w-bar { display: none; }
+
+/* Стандартные позы убраны: в списке ★ только свои сохранённые */
+#poses #pose-list #pose-more:not(#_) { display: none !important; }
