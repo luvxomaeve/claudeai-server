@@ -499,6 +499,8 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
 // Тень по силуэту: чем сильнее поверхность отвёрнута от камеры (край фигуры, бок, изгиб), тем она чуть
 // темнее и холоднее. Считается на лету в шейдере — идёт точно по контуру тела при любом движении,
 // не оставляет пятен и ничего не стоит по скорости. Одинаково для кожи и нарисованной на ней ткани.
+// Контровой свет: по самому краю силуэта — тонкая светлая кайма (как подсветка сзади). Она мягко «дышит».
+const EDGE_RIM = { value: new THREE.Color(0.3, 0.25, 0.3) };
 function installEdgeShade(mesh, k = 1) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     if (!m || m.isOutline || m.userData.edgeShade) continue;
@@ -508,15 +510,17 @@ function installEdgeShade(mesh, k = 1) {
       prev?.call(m, shader, renderer);
       const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
       if (!shader.fragmentShader.includes(at)) return;
-      shader.fragmentShader = shader.fragmentShader.replace(at, `${at}
+      shader.uniforms.uEdgeRim = EDGE_RIM;
+      shader.fragmentShader = 'uniform vec3 uEdgeRim;\n' + shader.fragmentShader.replace(at, `${at}
   {
     float edNV = clamp( dot( normalize( vViewPosition ), normal ), 0.0, 1.0 );
     float edE = smoothstep( 0.0, 1.0, pow( 1.0 - edNV, 2.2 ) ) * ${(0.5 * k).toFixed(3)};
     col *= mix( vec3( 1.0 ), vec3( 0.50, 0.46, 0.64 ), edE );
+    col += uEdgeRim * pow( 1.0 - edNV, 5.0 );
   }`);
     };
     const pk = m.customProgramCacheKey?.bind(m);
-    m.customProgramCacheKey = () => `${pk ? pk() : ''}|edge${k}`;
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|edgeRim${k}`;
     m.needsUpdate = true;
   }
 }
@@ -1419,6 +1423,10 @@ export class PieceWardrobe {
     if (!this.base) return;
     this.restorePokes(dt);
     this.updateCloth(dt);
+    { // контровой свет плавно меняет силу и чуть оттенок — картинка не «замирает»
+      const t = CLOTH_POKE.time.value, a = 0.3 + 0.07 * Math.sin(t * 0.6) + 0.03 * Math.sin(t * 1.7 + 1);
+      EDGE_RIM.value.setRGB(a, a * (0.82 + 0.06 * Math.sin(t * 0.23)), a * (0.96 + 0.04 * Math.sin(t * 0.31 + 2)));
+    }
     // Облегающая юбка: чем сильнее согнуты ноги, тем увереннее рисуется поверх тела (бедро не проглядывает).
     for (const sk of Object.values(this.tightSkirts ?? {})) if (sk.visible) setLift(sk, 0.022 + 0.05 * SQUAT_FLEX.value);
     const bh = this.base.vrm.humanoid;
