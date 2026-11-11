@@ -360,6 +360,11 @@ export class PieceWardrobe {
         shorts: (x, y) => y < waist && y > hipJ.y - leg * 0.4, // велосипедки: от талии до середины бедра
         top: (x, y) => y > hipJ.y + leg * 0.3 && y < neck.y + 0.008 && Math.abs(x - hips.x) < reach, // до шеи, рукава до запястий
         crop: (x, y) => y > hipJ.y + leg * 0.5 && y < neck.y - 0.012 && Math.abs(x - hips.x) < shortSleeve, // короткий топ с коротким рукавом
+        tank: (x, y) => y > hipJ.y + leg * 0.5 && y < neck.y - 0.03 && Math.abs(x - hips.x) < ux + 0.012, // майка без рукавов
+        longcrop: (x, y) => y > hipJ.y + leg * 0.5 && y < neck.y + 0.008 && Math.abs(x - hips.x) < reach, // короткий топ с длинным рукавом
+        tee: (x, y) => y > hipJ.y + leg * 0.3 && y < neck.y - 0.012 && Math.abs(x - hips.x) < shortSleeve, // футболка до пояса
+        minishorts: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // короткие шорты
+        capri: (x, y) => y < waist && y > knee.y - (knee.y - foot.y) * 0.5, // капри — до середины икры
         upper: (x, y) => y > hipJ.y + leg * 0.3, // всё выше пояса (для заливки кожи под снятым верхом)
       }[kind];
       const v = new THREE.Vector3(), idx = g.index, n = idx ? idx.count : pos.count;
@@ -418,7 +423,7 @@ export class PieceWardrobe {
     const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
     // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи). Нарисованный верх их не закрывает
     // целиком — заливаем такие места цветом кожи, иначе руки «пропадают».
-    if (kind === 'top' || kind === 'crop') {
+    if (['top', 'crop', 'tank', 'longcrop', 'tee'].includes(kind)) {
       const up = this.paintTris('upper');
       const um = document.createElement('canvas');
       um.width = w; um.height = h;
@@ -440,9 +445,8 @@ export class PieceWardrobe {
     }
     for (let i = 0; i < d.length; i += 4) {
       if (m[i] < 128) continue;
-      // Ровная плотная ткань: чуть-чуть объёма от исходной светотени, без просвечивания.
-      const l = (d[i] + d[i + 1] + d[i + 2]) / 765;
-      const k = 0.9 + 0.16 * (l - 0.7);
+      // Ровная плотная ткань, без просвечивания.
+      const k = 1; // ровный цвет: рисунок чулок и белья под тканью не проступает (тени даёт освещение)
       d[i] = Math.min(255, R * k); d[i + 1] = Math.min(255, G * k); d[i + 2] = Math.min(255, Bl * k); d[i + 3] = 255;
     }
     ctx.putImageData(data, 0, 0);

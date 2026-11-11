@@ -2886,7 +2886,11 @@ const PIECE_SOURCES = [
   })),
   // Облегающий комплект: ткань нарисована по телу (без своей модели) — сидит точно по фигуре.
   { id: 'p_fit', name: 'Облегающее', paint: { tops: 'top', legs: 'leggings' }, cats: ['tops', 'legs'], names: { tops: 'Облегающая кофточка', legs: 'Лосины' }, legsKind: 'tights' },
-  { id: 'p_sport', name: 'Спорт', paint: { tops: 'crop', bottoms: 'shorts' }, cats: ['tops', 'bottoms'], names: { tops: 'Короткий топ', bottoms: 'Шорты-велосипедки' } },
+  { id: 'p_sport', name: 'Спорт', paint: { tops: 'crop', bottoms: 'shorts' }, cats: ['tops', 'bottoms'], names: { tops: 'Короткий топ', bottoms: 'Шорты-велосипедки' }, colors: { tops: 0xf2a7c3 } },
+  { id: 'p_tank', name: 'Лето', paint: { tops: 'tank', bottoms: 'minishorts', legs: 'capri' }, cats: ['tops', 'bottoms', 'legs'], legsKind: 'tights',
+    names: { tops: 'Майка', bottoms: 'Короткие шорты', legs: 'Лосины-капри' }, colors: { tops: 0x24222c, bottoms: 0x3d5a8a, legs: 0x55525f } },
+  { id: 'p_long', name: 'Топ', paint: { tops: 'longcrop' }, cats: ['tops'], names: { tops: 'Топ с длинным рукавом' }, colors: { tops: 0xc9b3f5 } },
+  { id: 'p_tee', name: 'Футболка', paint: { tops: 'tee' }, cats: ['tops'], names: { tops: 'Облегающая футболка' }, colors: { tops: 0x8fc4ee } },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
 ].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x));
 const pieceWardrobe = new PieceWardrobe(scene);
@@ -2925,11 +2929,12 @@ function applyWear() {
   }
   // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
   const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
-  if (isPaint(w.legs)) { if (lt?.hex != null) w.legsHex = lt.hex; } // лосины: цвет — прямо цвет ткани
+  const defHex = (id, cat) => PIECE_SOURCES.find((x) => x.id === id)?.colors?.[cat];
+  if (isPaint(w.legs)) { w.legsHex = lt?.hex ?? defHex(w.legs, 'legs'); } // лосины: цвет — прямо цвет ткани
   else if (lt?.name === 'Глубокий чёрный') w.legsDark = 0.8;
   else if (lt?.hex != null) w.legsTint = lt.hex;
-  if (isPaint(w.tops)) { const tt = TINTS[wearTint[`tops:${w.tops}`] ?? 0]; if (tt?.hex != null) w.topHex = tt.hex; }
-  if (isPaint(w.bottoms)) { const bt = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]; if (bt?.hex != null) w.bottomHex = bt.hex; }
+  if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
+  if (isPaint(w.bottoms)) w.bottomHex = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]?.hex ?? defHex(w.bottoms, 'bottoms');
   pieceWardrobe.apply(w, (map) => {
     stockings?.setBase(map);
     stockings?.apply(look.stockings);
@@ -2978,7 +2983,8 @@ async function pickPiece(cat, id, quiet = false) {
   if (cat === 'tops') {
     // Платье — низ не нужен; обычный верх — вернуть низ, если его не было.
     if (isDress(id)) wear.bottoms = 'none';
-    else if (wear.bottoms === 'none' || wear.bottoms === undefined && isDress(wear.tops)) wear.bottoms = 'base';
+    // (лосины носят без юбки — её не возвращаем, когда меняешь верх)
+    else if ((wear.bottoms === 'none' && !isPaint(wear.legs)) || wear.bottoms === undefined && isDress(wear.tops)) wear.bottoms = 'base';
   }
   if (cat === 'bottoms' && id !== 'none' && isDress(wear.tops)) wear.tops = 'base';
   // Лосины носят без юбки (юбку поверх можно надеть потом); сняли лосины — юбка возвращается.
