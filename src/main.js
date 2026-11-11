@@ -2964,7 +2964,7 @@ function applyWear() {
 }
 function preloadWornSources() {
   const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
-  if (wear.legs === 'p_bare') for (const x of PIECE_SOURCES) if (x.url && x.cats.includes('legs')) ids.add(x.id);
+  if (wear.legs === 'p_bare') { const bareSrc = PIECE_SOURCES.filter((x) => x.url && x.bare); for (const x of (bareSrc.length ? bareSrc : PIECE_SOURCES.filter((y) => y.url && y.cats.includes('legs')))) ids.add(x.id); }
   for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
 }
 // Цвета вещей: тап по уже надетой вещи — следующий цвет.
@@ -3009,7 +3009,9 @@ async function pickPiece(cat, id, quiet = false) {
   renderPieces();
   // «Без чулок»: настоящую кожу ног берём из нарядов с короткими чулками/гольфами — подгружаем их текстуры.
   if (cat === 'legs' && id === 'p_bare') {
-    const need = PIECE_SOURCES.filter((x) => x.url && x.cats.includes('legs') && !pieceWardrobe.hasSource(x.id));
+    // Есть наряд, сохранённый без чулок (bare) — берём кожу только из него; иначе ищем по всем.
+    const bareSrc = PIECE_SOURCES.filter((x) => x.url && x.bare);
+    const need = (bareSrc.length ? bareSrc : PIECE_SOURCES.filter((x) => x.url && x.cats.includes('legs'))).filter((x) => !pieceWardrobe.hasSource(x.id));
     if (need.length) {
       showToast('Снимаю чулки…');
       $('flash').classList.add('on');
@@ -4396,7 +4398,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 101;
+const WAIFU_BUILD = 102;
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');
 autoMenu.id = 'auto-menu';
