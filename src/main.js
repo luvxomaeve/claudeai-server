@@ -2965,6 +2965,7 @@ function applyWear() {
 }
 function preloadWornSources() {
   const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
+  if (wear.legs === 'p_bare') for (const x of PIECE_SOURCES) if (x.url && x.cats.includes('legs')) ids.add(x.id);
   for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
 }
 // Цвета вещей: тап по уже надетой вещи — следующий цвет.
@@ -3007,6 +3008,16 @@ async function pickPiece(cat, id, quiet = false) {
   wear[cat] = id;
   try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
   renderPieces();
+  // «Без чулок»: настоящую кожу ног берём из нарядов с короткими чулками/гольфами — подгружаем их текстуры.
+  if (cat === 'legs' && id === 'p_bare') {
+    const need = PIECE_SOURCES.filter((x) => x.url && x.cats.includes('legs') && !pieceWardrobe.hasSource(x.id));
+    if (need.length) {
+      showToast('Снимаю чулки…');
+      $('flash').classList.add('on');
+      await Promise.all(need.map((x) => loadPieceSource(x.id).catch(() => {})));
+      $('flash').classList.remove('on');
+    }
+  }
   if (id !== 'base' && id !== 'none' && !pieceWardrobe.hasSource(id)) {
     showToast('Загружаю вещь… (первый раз — пару секунд)');
     $('flash').classList.add('on');

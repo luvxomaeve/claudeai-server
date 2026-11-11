@@ -684,7 +684,8 @@ export class PieceWardrobe {
   bareLegs(map) {
     if (!map?.image || !this.base) return map;
     this.paintTexCache ??= new Map();
-    const key = `${map.uuid}|bare`;
+    const donors = [...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
+    const key = `${map.uuid}|bare|${donors.map(([id]) => id).join(',')}`;
     if (this.paintTexCache.has(key)) return this.paintTexCache.get(key);
     const img = map.image, w = img.width, h = img.height;
     const canvas = document.createElement('canvas');
@@ -702,6 +703,42 @@ export class PieceWardrobe {
       for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
         const p = y * w + x;
         if (!prev[p] && z[p] >= 128 && (prev[p - 1] || prev[p + 1] || prev[p - w] || prev[p + w])) need[p] = 1;
+      }
+    }
+    // Настоящая кожа ног: у других нарядов чулки короче (гольфы, носки) — там на бёдрах и коленях в текстуре
+    // настоящая кожа модели. Берём её оттуда (раскладка текстуры у всех одна), подгоняя тон под её кожу.
+    // Дорисовываем только то, чего нет ни в одном наряде.
+    // Берём один наряд — тот, где настоящей кожи на ногах больше всего (несколько давали бы швы между собой).
+    let best = null;
+    for (const [, src] of donors) {
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const cc = cv.getContext('2d', { willReadFrequently: true });
+      cc.drawImage(src.skinMap.image, 0, 0, w, h);
+      const q = cc.getImageData(0, 0, w, h).data;
+      const qs = (i) => q[i + 3] >= 250 && q[i] > q[i + 1] && q[i + 1] >= q[i + 2] && q[i] - q[i + 2] > 18 && q[i] - q[i + 2] < 95 && q[i] > 150;
+      // Тон: во сколько раз её кожа отличается от кожи донора (по местам, где у обоих кожа).
+      let ar = 0, ag = 0, ab = 0, br = 0, bg = 0, bb = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4 * 7) if (!need[i >> 2] && skin(i) && qs(i)) { ar += d[i]; ag += d[i + 1]; ab += d[i + 2]; br += q[i]; bg += q[i + 1]; bb += q[i + 2]; n++; }
+      if (n < 500) continue;
+      const kr = ar / br, kg = ag / bg, kb = ab / bb, mr = ar / n, mg = ag / n, mb = ab / n;
+      const E = 8 * 4, EW = 8 * w * 4;
+      // Подходит только чистая кожа донора: не у края его чулка и по цвету близкая к её коже (не ремешки, не узоры).
+      const ok = (i) => qs(i) && qs(i - E) && qs(i + E) && qs(i - EW) && qs(i + EW)
+        && Math.abs(q[i] * kr - mr) < 34 && Math.abs(q[i + 1] * kg - mg) < 34 && Math.abs(q[i + 2] * kb - mb) < 34;
+      let cover = 0;
+      for (let y = 8; y < h - 8; y += 3) for (let x = 8; x < w - 8; x += 3) { const p = y * w + x; if (need[p] && ok(p * 4)) cover++; }
+      if (!best || cover > best.cover) best = { q, ok, kr, kg, kb, cover };
+    }
+    if (best && best.cover > 200) {
+      const { q, ok, kr, kg, kb } = best;
+      for (let y = 8; y < h - 8; y++) for (let x = 8; x < w - 8; x++) {
+        const p = y * w + x;
+        if (!need[p]) continue;
+        const i = p * 4;
+        if (!ok(i)) continue;
+        d[i] = Math.min(255, q[i] * kr); d[i + 1] = Math.min(255, q[i + 1] * kg); d[i + 2] = Math.min(255, q[i + 2] * kb); d[i + 3] = 255;
+        need[p] = 0;
       }
     }
     skinFill(d, w, h, need);
