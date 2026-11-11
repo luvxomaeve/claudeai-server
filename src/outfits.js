@@ -990,7 +990,7 @@ export class PieceWardrobe {
     }
     if (kb) {
       const hex = wear.leggingsHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
-      layers.push({ kind: kb, hex, keep }, { kind: `${kb}:seam`, hex: trimOf(hex), keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
+      layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     map = this.paintLayers(map, layers);
     this.setSkin(map);
