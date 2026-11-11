@@ -10,7 +10,7 @@ android {
     applicationId 'ru.ogroman.waifutouch'
     minSdk 24
     targetSdk 34
-    versionCode 94
+    versionCode 95
     versionName '1.1'
   }
   signingConfigs {

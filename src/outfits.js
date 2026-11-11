@@ -540,17 +540,30 @@ export class PieceWardrobe {
       // Поло: вырез-уголок спереди и широкий отложной воротник.
       const vBottom = neck.y - 0.085;
       const vOpen = (x, y, z) => (z - hips.z) * front > 0.015 && y > vBottom && ax(x) < (y - vBottom) * 0.55;
-      const inside = {
-        leggings: (x, y) => y < waist && y > foot.y + 0.03, // от талии до щиколотки
-        capri: (x, y) => y < waist && y > knee.y - (knee.y - foot.y) * 0.5, // до середины икры
-        shorts: (x, y) => y < waist && y > hipJ.y - leg * 0.4, // велосипедки: до середины бедра
-        minishorts: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // короткие лосины
-        top: (x, y) => y > hem && y < neck.y + 0.008 && ax(x) < reach, // до шеи, рукава до запястий
-        crop: (x, y) => y > cropHem && y < neck.y - 0.012 && ax(x) < shortSleeve, // короткий топ с коротким рукавом
-        tank: (x, y) => y > cropHem && y < neck.y - 0.03 && (ax(x) < ux + 0.012 || y < upArm.y - 0.05), // майка без рукавов (подмышка закрыта)
-        longcrop: (x, y) => y > cropHem && y < neck.y + 0.008 && ax(x) < reach, // короткий топ с длинным рукавом
-        tee: (x, y) => y > hem && y < neck.y - 0.012 && ax(x) < shortSleeve, // футболка до пояса
-        polo: (x, y, z) => y > hem && y < neck.y + 0.03 && ax(x) < shortSleeve && !vOpen(x, y, z),
+      // Вырез горловины — круглый (по расстоянию от основания шеи), а не срез по прямой: ложится ровно.
+      const nk = (x, y, z) => Math.hypot(x - neck.x, y - (neck.y + 0.015), z - neck.z);
+      const armhole = (x, y) => ax(x) < ux + 0.012 || y < upArm.y - 0.05; // без рукава: до плечевого сустава, подмышка закрыта
+      // Верх: низ (hem), рукав (sl: предел по руке или null — без рукавов), радиус горловины (r).
+      const TOPS = {
+        top: { hem, sl: reach, r: 0.052 }, longcrop: { hem: cropHem, sl: reach, r: 0.052 },
+        crop: { hem: cropHem, sl: shortSleeve, r: 0.074 }, tee: { hem, sl: shortSleeve, r: 0.07 },
+        tank: { hem: cropHem, sl: null, r: 0.082 }, polo: { hem, sl: shortSleeve, r: 0 },
+      };
+      // Низ: верхний край — талия, нижний (lo).
+      const BOTS = { leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26 };
+      const [base, trim] = kind.split(':');
+      const T = TOPS[base], lo = BOTS[base];
+      const TW = 0.011; // ширина канта (манжета, ворот, пояс, низ)
+      let inside;
+      if (T) {
+        const body = (x, y, z) => y > T.hem && y < neck.y + 0.03 && (T.sl == null ? armhole(x, y) : ax(x) < T.sl) && (base === 'polo' ? !vOpen(x, y, z) : nk(x, y, z) > T.r);
+        inside = trim
+          ? (x, y, z) => body(x, y, z) && (y < T.hem + TW || (T.sl != null && ax(x) > T.sl - TW) || (base !== 'polo' && nk(x, y, z) < T.r + TW))
+          : body;
+      } else if (lo != null) {
+        const body = (x, y) => y < waist && y > lo;
+        inside = trim ? (x, y) => body(x, y) && (y > waist - TW * 1.6 || y < lo + TW) : body;
+      } else inside = {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
         upper: (x, y) => y > hem, // всё выше пояса (для заливки кожи под снятым верхом)
@@ -666,7 +679,7 @@ export class PieceWardrobe {
     const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
     // Под своим обычным верхом кожа в текстуре бывает прозрачной (руки, плечи). Нарисованный верх их не закрывает
     // целиком — заливаем такие места цветом кожи, иначе руки «пропадают».
-    if (['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(kind)) {
+    if (['top', 'crop', 'tank', 'longcrop', 'tee', 'polo'].includes(kind)) { // (кант красится поверх уже залитой кожи)
       const u = this.zoneMask('upper', w, h);
       const need = new Uint8Array(w * h);
       for (let i = 0, p = 0; i < d.length; i += 4, p++) if (u[i] >= 128 && d[i + 3] < 250) need[p] = 1;
@@ -774,16 +787,27 @@ export class PieceWardrobe {
     const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.bottoms)?.bottoms, kl = this.paints.get(wear.legs)?.legs;
     // (у облегающей юбки рисунка по телу нет — это отдельная сетка, см. tightSkirt)
     if (kl === 'bare') map = this.bareLegs(map);
+    // Кант (манжеты, ворот, пояс, низ) — чуть темнее светлой ткани и чуть светлее тёмной: края выглядят аккуратно.
+    const trimOf = (hex) => {
+      const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255, lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
+      const f = (c) => Math.round(lum > 0.45 ? c * 0.8 : c + (255 - c) * 0.2);
+      return (f(r) << 16) | (f(g) << 8) | f(b);
+    };
     if (kt) {
       const hex = wear.topHex ?? 0xf1edf6;
       map = this.paintCloth(map, kt, hex);
+      map = this.paintCloth(map, `${kt}:trim`, trimOf(hex));
       if (kt === 'polo') {
         // Воротник — светлый на тёмном поло и тёмный на светлом.
         const lum = (((hex >> 16) & 255) * 0.3 + ((hex >> 8) & 255) * 0.59 + (hex & 255) * 0.11) / 255;
         map = this.paintCloth(map, 'polocollar', lum > 0.72 ? 0x2b2530 : 0xf6f3fa);
       }
     }
-    if (kb) map = this.paintCloth(map, kb, wear.bottomHex ?? 0x24222c, !!wear.keepStockings && (kb === 'leggings' || kb === 'capri'));
+    if (kb) {
+      const hex = wear.bottomHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
+      map = this.paintCloth(map, kb, hex, keep);
+      map = this.paintCloth(map, `${kb}:trim`, trimOf(hex), keep);
+    }
     this.setSkin(map);
     onSkin?.(map);
   }
