@@ -2988,6 +2988,8 @@ const PIECE_SOURCES = [
   { id: 'p_minihigh', name: 'Мини высокая', paint: { gen: 'minihigh' }, cats: ['bottoms'], names: { bottoms: 'Мини с высокой талией' }, colors: { bottoms: 0x2b2530 } },
   // «Без чулок»: голые ноги (под лосины, шорты и юбки).
   { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
+  // Чёрные туфли на высокой шпильке: туфля нарисована по стопе, каблук — отдельная деталь; она стоит на них выше.
+  { id: 'p_heels', name: 'Шпильки', paint: { shoes: 'pumps' }, cats: ['shoes'], names: { shoes: 'Туфли на шпильке' }, colors: { shoes: 0x0c0a0e } },
   // Длинные капроновые чулки: нарисованы поверх голой ноги, кожа просвечивает.
   { id: 'p_nylon', name: 'Капрон', paint: { legs: 'nylon' }, cats: ['legs'], names: { legs: 'Капроновые чулки' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
   { id: 'p_nylon2', name: 'Капрон короче', paint: { legs: 'nylonmid' }, cats: ['legs'], names: { legs: 'Капроновые чулки покороче' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
@@ -3073,6 +3075,8 @@ function applyWear() {
   if (isPaint(w.legs)) { w.legsHex = TINTS[wearTint[`legs:${w.legs}`] ?? 0]?.hex ?? defHex(w.legs, 'legs'); } // «без чулок» — красить нечего; капрон — свой цвет
   else if (lt?.name === 'Глубокий чёрный') w.legsTint = 0x0b090d; // настоящий чёрный на любых чулках, и на белых тоже
   else if (lt?.hex != null) w.legsTint = lt.hex;
+  if (isPaint(w.shoes)) w.shoesHex = TINTS[wearTint[`shoes:${w.shoes}`] ?? 0]?.hex ?? defHex(w.shoes, 'shoes');
+  character?.setHeels?.(w.shoes === 'p_heels');
   if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
   if (isPaint(w.bottoms)) w.bottomHex = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]?.hex ?? defHex(w.bottoms, 'bottoms');
   if (isPaint(w.leggings)) w.leggingsHex = TINTS[wearTint[`leggings:${w.leggings}`] ?? 0]?.hex ?? defHex(w.leggings, 'leggings');
@@ -4640,7 +4644,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 176;
+const WAIFU_BUILD = 178;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

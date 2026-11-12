@@ -570,6 +570,12 @@ export class Character {
 
   update(dt) {
     this.lastDt = Math.min(dt, 0.05);
+    if (this.heel) {
+      this.heelK = (this.heelK ?? 0) + ((this.heelWant ?? 0) - (this.heelK ?? 0)) * (1 - Math.exp(-dt * 5));
+      const up = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.47, 0.6);
+      this.heelRaise = this.heelK * this.heel.raise * up;
+      for (const m of this.heel.meshes) m.visible = this.heelK > 0.5;
+    }
     this.turnBegin(dt);
     this.dragBoostT = Math.max(0, (this.dragBoostT ?? 0) - dt);
     this.time += dt;
@@ -1363,7 +1369,7 @@ export class Character {
     }
     if (b.hips) {
       const wk = this.updateWalk(dt, pose);
-      b.hips.position.y += pose.hipsY - this.sitDropNow;
+      b.hips.position.y += pose.hipsY - this.sitDropNow + (this.heelRaise ?? 0);
       b.hips.position.x += (pose.hipsX + wk.x) * this.flip;
       b.hips.position.z += wk.z * this.flip;
       // В приседе таз уходит чуть назад, на коленях — возвращается над пятками.
@@ -1421,6 +1427,54 @@ export class Character {
     this.calmArms(dt);
     this.finishFrame(dt);
   }
+
+  // Шпильки: тонкий каблук — отдельная деталь, прикреплённая к кости стопы; сама туфля нарисована по стопе
+  // (см. outfits.js, 'pumps'). Здесь считаем, на сколько поднять пятку, чтобы носок остался на полу.
+  setupHeels() {
+    // У моделей VRoid под обувью на каблуке стопа уже стоит «на носочке» (пятка поднята) — наклонять её не нужно.
+    // Находим низ пятки по сетке тела и ставим под неё шпильку до пола.
+    const S = this.scale, h = this.vrm.humanoid;
+    this.heel = { angle: 0, raise: 0, meshes: [] };
+    const mat = new THREE.MeshStandardMaterial({ color: 0x0c0a0e, roughness: 0.35, metalness: 0.1 });
+    const skins = [];
+    this.vrm.scene.traverse((o) => { if (o.isSkinnedMesh && [].concat(o.material).some((m) => /Body_\d+_SKIN/i.test(m?.name ?? ''))) skins.push(o); });
+    const v = new THREE.Vector3();
+    for (const side of ['left', 'right']) {
+      const rest = this.restFoot[side], raw = h.getRawBoneNode(`${side}Foot`);
+      if (!rest || !raw) continue;
+      raw.updateWorldMatrix(true, false);
+      const A = raw.getWorldPosition(new THREE.Vector3());
+      // Низ пятки: самая задняя часть стопы, её нижняя точка.
+      let zBack = Infinity; const pts = [];
+      for (const m of skins) {
+        const pos = m.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+          if (Math.abs(v.x - A.x) < 0.05 * S && v.y < A.y - 0.01 * S && v.z < A.z + 0.01 * S) { pts.push(v.clone()); if (v.z < zBack) zBack = v.z; }
+        }
+      }
+      if (pts.length < 5) continue;
+      let hy = Infinity;
+      for (const q of pts) if (q.z < zBack + 0.03 * S && q.y < hy) hy = q.y;
+      const top = new THREE.Vector3(A.x, hy + 0.012 * S, zBack + 0.02 * S);
+      const len = top.y; // до пола (y = 0)
+      if (!(len > 0.02 * S)) continue;
+      const g = new THREE.CylinderGeometry(0.012 * S, 0.0045 * S, len, 10);
+      g.translate(0, -len / 2, 0);
+      const m = new THREE.Mesh(g, mat);
+      m.castShadow = true;
+      const inv = raw.matrixWorld.clone().invert();
+      m.position.copy(top).applyMatrix4(inv);
+      m.quaternion.copy(raw.getWorldQuaternion(new THREE.Quaternion()).invert());
+      const ws = raw.getWorldScale(new THREE.Vector3());
+      m.scale.set(1 / ws.x, 1 / ws.y, 1 / ws.z);
+      m.visible = false;
+      raw.add(m);
+      this.heel.meshes.push(m);
+      this.heelDbg = { A: A.toArray(), top: top.toArray(), len, n: pts.length };
+    }
+  }
+  setHeels(on) { this.heelWant = on ? 1 : 0; }
 
   // Сама поворачивается боком/спиной. Вся поза считается как обычно (лицом вперёд), а в конце кадра модель
   // целиком доворачивается вокруг таза — ничего в позах и амплитудах не меняется. Взгляд «на тебя» пересчитан,
@@ -2074,7 +2128,11 @@ export class Character {
         pos: foot.getWorldPosition(new THREE.Vector3()),
         quat: foot.getWorldQuaternion(new THREE.Quaternion()),
       };
+      const toes = b[`${side}Toes`] ?? this.vrm.humanoid.getNormalizedBoneNode(`${side}Toes`);
+      this.restFoot[side].toes = toes ?? null;
+      if (toes) { toes.updateWorldMatrix(true, false); this.restFoot[side].toeQuat = toes.getWorldQuaternion(new THREE.Quaternion()); this.restFoot[side].toePos = toes.getWorldPosition(new THREE.Vector3()); this.restFoot[side].toeLocal = toes.quaternion.clone(); }
     }
+    try { this.setupHeels(); } catch (e) { console.warn('heels', e); }
     this.ikTmp = {
       a: new THREE.Vector3(), b: new THREE.Vector3(), c: new THREE.Vector3(),
       t: new THREE.Vector3(), d: new THREE.Vector3(), p: new THREE.Vector3(),
@@ -2197,6 +2255,9 @@ export class Character {
       const bend = (L ? pose.lKneeX - pose.rKneeX : pose.rKneeX - pose.lKneeX);
       const lift = THREE.MathUtils.clamp(bend, 0, 0.6) * (1 - p1);
       const target = rest.pos.clone();
+      // Туфли на каблуке: пятка поднята на высоту шпильки, носок на полу (см. setupHeels). На коленях и ниже — нет.
+      const hk = (this.heelK ?? 0) * (1 - p2);
+      target.y += hk * (this.heel?.raise ?? 0);
       target.y += lift * 0.06 * S;
       target.z += lift * 0.08 * S;
       target.x -= outSign * (L ? pose.lFootIn : pose.rFootIn);
@@ -2334,7 +2395,7 @@ export class Character {
       // нога наклоняют носок вниз. На коленях стопа продолжает линию голени
       // (носок назад, подъём на полу) — так голеностоп не выворачивается.
       const point = footOff ? Math.min(footOff.y / (0.3 * S), 1) * 0.7 : 0;
-      const pitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + p1 * 0.55 * (1 - p2));
+      const pitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + Math.max(p1 * 0.55 * (1 - p2), hk * (this.heel?.angle ?? 0)));
       let q = pitch.multiply(rest.quat.clone());
       if (p2 > 0 && QL) {
         // На коленях стопа жёстко продолжает голень и вытянута носком назад.
@@ -2343,6 +2404,10 @@ export class Character {
         q = q.slerp(kneelQ, p2);
       }
       this.setWorldQuat(foot, q);
+      // На каблуке пальцы остаются на полу (плоско), а не продолжают наклон стопы.
+      const toes = rest.toes;
+      if (toes && rest.toeQuat && hk > 0.01) { toes.updateWorldMatrix(true, false); const cur = toes.getWorldQuaternion(new THREE.Quaternion()); this.setWorldQuat(toes, cur.slerp(rest.toeQuat, hk)); }
+      else if (toes && rest.toeLocal) toes.quaternion.copy(rest.toeLocal);
     }
     if (leanN) this.shinLean += (leanSum / leanN - this.shinLean) * 0.3;
   }

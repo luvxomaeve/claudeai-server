@@ -411,13 +411,13 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
   }
   if (pts.length < 50) return null;
   // Плотная «стрейч»-юбка: сетка гуще (ткань ложится глаже), зазор до тела маленький — сидит по фигуре.
-  const RINGS = 26, SEG = 64, margin = 0.009;
+  const RINGS = 26, SEG = 64, margin = 0.003;
   const positions = [], skinI = [], skinW = [], uvs = [], hemW = [];
   const sgn = Math.sign(hipJ.x - cx) || 1;
   let prevR = null;
   for (let r = 0; r <= RINGS; r++) {
     const y = top + (hem - top) * (r / RINGS);
-    const band = pts.filter((p) => Math.abs(p[1] - y) < 0.016).map((p) => [p[0], p[2]]);
+    const band = pts.filter((p) => Math.abs(p[1] - y) < 0.011).map((p) => [p[0], p[2]]);
     const H = band.length >= 3 ? hull2d(band) : null;
     const radii = [];
     for (let k = 0; k < SEG; k++) {
@@ -446,7 +446,7 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
       for (let k = 0; k < SEG; k++) { let m = 0; for (let j = -3; j <= 3; j++) m = Math.max(m, real[(k + j + SEG) % SEG]); sm[k] = m; }
       // Только в талии и на верхе бёдер. Ниже ткань натянута между ногами ровно (как у настоящей узкой юбки):
       // если и там повторять тело, она западает между ног и мнётся.
-      const fit = THREE.MathUtils.smoothstep(y, hipJ.y - 0.01, hipJ.y + 0.06);
+      const fit = THREE.MathUtils.smoothstep(y, hipJ.y - 0.01, hipJ.y + 0.04);
       for (let k = 0; k < SEG; k++) if (sm[k] > 0.02) radii[k] = Math.min(radii[k], radii[k] * (1 - fit) + (sm[k] * 0.3 + Math.max(sm[k], radii[k] * 0.9) * 0.7) * fit);
     }
     // Юбка книзу не сужается резко: каждое кольцо не уже 96% предыдущего (прямой силуэт, а не «штаны»).
@@ -577,7 +577,10 @@ export class PieceWardrobe {
       for (const [kind, kTop, kHem] of [['skirt', 0.42, 0.5], ['mini', 0.34, 0.33], ['minihigh', 0.54, 0.33]]) {
         const m = dm ? buildTightSkirt(vrm, this.base.skins, dm, kTop, kHem) : null;
         if (!m) continue;
-        installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.011); installEdgeShade(m);
+        installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.003); installEdgeShade(m);
+        // Юбка вплотную к телу. Чтобы тело не «протыкало» её при движении, юбка рисуется с запасом по глубине:
+        // всё, что на пару сантиметров позади неё, она закрывает.
+        for (const mm of [].concat(m.material)) { if (mm && !mm.isOutline) { mm.polygonOffset = true; mm.polygonOffsetFactor = -1; mm.polygonOffsetUnits = -400; mm.needsUpdate = true; } }
         this.tightSkirts[kind] = m;
         try { installSheenFull(m); } catch { /* ignore */ }
       }
@@ -727,6 +730,8 @@ export class PieceWardrobe {
         bust: (x, y) => { const c = B('chest') ?? B('spine'); return y > (c ? c.y - 0.01 : hipJ.y + leg * 0.75) && y < neck.y - 0.03 && ax(x) < ux + 0.02; }, // грудная клетка: тут тени делаем совсем мягкими
         waistgap: (x, y) => y > hipJ.y + leg * 0.19 && y < hipJ.y + leg * 0.5, // над шортиками: тут торчала бы серая резинка модели
         nylonpanty: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // верх колготок: от талии до ног
+        // Лодочка: носок, пятка и борта закрыты, подъём стопы открыт.
+        pumps: (x, y, z) => { const f = (z - foot.z) * (Math.sign((toe?.z ?? foot.z + 0.1) - foot.z) || 1); return y < foot.y - 0.005 && (f > 0.075 || f < -0.012 || y < foot.y - 0.045); },
         all: () => true, // вся развёртка тела (чтобы знать, где между её кусками пусто)
         legsall: (x, y) => y < hipJ.y - leg * 0.26, // ноги ниже белья (для «без чулок»)
       }[kind];
@@ -1253,7 +1258,7 @@ export class PieceWardrobe {
     if (wear.legsDark) map = this.darkenLegs(map, wear.legsDark);
     else if (wear.legsTint != null) map = this.tintLegs(map, wear.legsTint);
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).
-    const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.leggings)?.leggings, kl = this.paints.get(wear.legs)?.legs;
+    const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.leggings)?.leggings, kl = this.paints.get(wear.legs)?.legs, ks = this.paints.get(wear.shoes)?.shoes;
     // (у облегающей юбки рисунка по телу нет — это отдельная сетка, см. tightSkirt)
     const isNylon = kl === 'nylon' || kl === 'nylonmid' || kl === 'nylontights';
     if (kl === 'bare' || isNylon) map = this.bareLegs(map); // капрон рисуем поверх голой ноги
@@ -1317,6 +1322,8 @@ export class PieceWardrobe {
         const mixc = (k) => Math.round(((0xeec3b4 >> k) & 255) * 0.16 + ((nh >> k) & 255) * 0.84);
         layers.push({ kind: kb, hex: (mixc(16) << 16) | (mixc(8) << 8) | mixc(0), alpha: 0.88 });
       } } // поверх лосин/шорт колготки ровные по всей длине: отдельной «верхней» полосы нет (иначе у края шорт рваная кайма)
+    // Туфли-лодочки нарисованы по стопе (каблук — отдельная деталь, см. character.js): поверх всего остального.
+    if (ks) layers.push({ kind: ks, hex: wear.shoesHex ?? 0x0c0a0e });
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
@@ -1733,7 +1740,7 @@ export class PieceWardrobe {
       EDGE_RIM.value.setRGB(a, a * (0.82 + 0.06 * Math.sin(t * 0.23)), a * (0.96 + 0.04 * Math.sin(t * 0.31 + 2)));
     }
     // Облегающая юбка: чем сильнее согнуты ноги, тем увереннее рисуется поверх тела (бедро не проглядывает).
-    for (const sk of Object.values(this.tightSkirts ?? {})) if (sk.visible) setLift(sk, 0.017 + 0.05 * SQUAT_FLEX.value);
+    for (const sk of Object.values(this.tightSkirts ?? {})) if (sk.visible) setLift(sk, 0.004 + 0.035 * SQUAT_FLEX.value);
     const bh = this.base.vrm.humanoid;
     for (const [, s] of this.sources) {
       if (!s.active) continue;
