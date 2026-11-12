@@ -1208,15 +1208,23 @@ export class PieceWardrobe {
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     map = this.paintLayers(map, layers);
-    // Блик — только на лосинах/шортах и только в их границах (те же, что у рисунка ткани).
+    // Блик — только на нарисованной ткани и только в её границах (те же, что у рисунка).
     {
       const mesh = this.base.skins[0], B = (n) => bindBone(this.base.vrm, mesh, n);
-      const hipJ = B('leftUpperLeg'), knee = B('leftLowerLeg'), foot = B('leftFoot');
-      if (kb && hipJ && knee && foot) {
+      const hipJ = B('leftUpperLeg'), knee = B('leftLowerLeg'), foot = B('leftFoot'), neck = B('neck'), hand = B('leftHand'), hips = B('hips'), upArm = B('leftUpperArm'), elbow = B('leftLowerArm');
+      sheenWant.leg = 0; sheenWant.top = 0;
+      if (hipJ && knee && foot) {
         const leg = hipJ.y - knee.y;
         const lo = { leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26 }[kb];
-        SHEEN.value.set(hipJ.y + leg * 0.42, lo ?? hipJ.y, lo == null ? 0 : 1);
-      } else SHEEN.value.z = 0;
+        if (lo != null) { SHEEN.value.set(hipJ.y + leg * 0.42, lo, 0); sheenWant.leg = 1; }
+        if (kt && neck && hand && hips && upArm && elbow) {
+          const ux = Math.abs(upArm.x - hips.x), ex = Math.abs(elbow.x - hips.x), reach = Math.abs(hand.x - hips.x) - 0.012, short = ux + (ex - ux) * 0.5;
+          const hem = kt === 'top' || kt === 'tee' || kt === 'polo' ? hipJ.y + leg * 0.3 : hipJ.y + leg * 0.5;
+          const sl = kt === 'top' || kt === 'longcrop' ? reach : kt === 'tank' ? ux + 0.012 : short;
+          SHEEN_TOP.value.set(hem, neck.y - 0.05, sl, 0); SHEEN_CX.value = hips.x; sheenWant.top = 0.6;
+        }
+      }
+      setSheenOn(sheenWant.on);
     }
     this.setSkin(map);
     onSkin?.(map);
@@ -1699,6 +1707,11 @@ export const HIP_FLEX = { value: new THREE.Vector2() };
 // что это ткань. Только свет (тело не двигается) и только в пределах самих лосин: x — верх (пояс), y — нижний
 // край (в исходной позе), z — сила (0 — лосин нет).
 export const SHEEN = { value: new THREE.Vector3() };
+// То же для облегающего верха: x — низ, y — верх (под горловиной), z — предел по руке (рукав), w — сила.
+export const SHEEN_TOP = { value: new THREE.Vector4() };
+const sheenWant = { leg: 0, top: 0, cx: 0, on: true };
+const SHEEN_CX = { value: 0 };
+export function setSheenOn(on) { sheenWant.on = !!on; SHEEN.value.z = sheenWant.on ? sheenWant.leg : 0; SHEEN_TOP.value.w = sheenWant.on ? sheenWant.top : 0; }
 function installSheen(mesh) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     if (!m || m.isOutline || m.userData.sheen) continue;
@@ -1708,15 +1721,18 @@ function installSheen(mesh) {
       prev?.call(m, sh, r);
       const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
       if (!sh.fragmentShader.includes(at) || !sh.vertexShader.includes('#include <begin_vertex>')) return;
-      sh.uniforms.uSheen = SHEEN;
-      sh.vertexShader = 'varying float vSheenY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSheenY = position.y;');
-      sh.fragmentShader = 'uniform vec3 uSheen;\nvarying float vSheenY;\n' + sh.fragmentShader.replace(at, `${at}
-  if ( uSheen.z > 0.0 ) {
-    float shM = smoothstep( uSheen.y + 0.005, uSheen.y + 0.03, vSheenY ) * ( 1.0 - smoothstep( uSheen.x - 0.03, uSheen.x - 0.005, vSheenY ) );
-    if ( shM > 0.0 ) {
+      sh.uniforms.uSheen = SHEEN; sh.uniforms.uSheenTop = SHEEN_TOP; sh.uniforms.uSheenCx = SHEEN_CX;
+      sh.vertexShader = 'varying float vSheenY;\nvarying float vSheenX;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vSheenY = position.y; vSheenX = position.x;');
+      sh.fragmentShader = 'uniform vec3 uSheen;\nuniform vec4 uSheenTop;\nuniform float uSheenCx;\nvarying float vSheenY;\nvarying float vSheenX;\n' + sh.fragmentShader.replace(at, `${at}
+  if ( uSheen.z + uSheenTop.w > 0.0 ) {
+    float shL = uSheen.z * smoothstep( uSheen.y + 0.005, uSheen.y + 0.03, vSheenY ) * ( 1.0 - smoothstep( uSheen.x - 0.03, uSheen.x - 0.005, vSheenY ) );
+    float shT = uSheenTop.w * smoothstep( uSheenTop.x + 0.005, uSheenTop.x + 0.03, vSheenY ) * ( 1.0 - smoothstep( uSheenTop.y - 0.03, uSheenTop.y, vSheenY ) )
+      * ( 1.0 - smoothstep( uSheenTop.z - 0.03, uSheenTop.z - 0.005, abs( vSheenX - uSheenCx ) ) );
+    if ( shL + shT > 0.0 ) {
       vec3 shV = normalize( vViewPosition );
       float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + shV ) ), 0.0 );
-      col += vec3( 0.20, 0.19, 0.25 ) * ( pow( shH, 26.0 ) + 0.22 * pow( shH, 5.0 ) ) * shM * uSheen.z;
+      // На лосинах — атласный блик с ярким гребнем; на верхе — только ровный мягкий отсвет ткани, без пятен.
+      col += vec3( 0.20, 0.19, 0.25 ) * ( pow( shH, 26.0 ) * shL + 0.22 * pow( shH, 5.0 ) * min( shL + shT, 1.0 ) );
     }
   }`);
     };
