@@ -4537,12 +4537,15 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 134;
+const WAIFU_BUILD = 135;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
 var autoState = 'live';
 var camOnly = false;
+// 🔁 Предлагать «Повторить» после того, как её подвигал. Выключил — она просто слушается пальца, без записи.
+var repOffer = true;
+try { repOffer = localStorage.getItem('waifu-repoffer') !== '0'; } catch { /* ignore */ }
 const autoStates = document.createElement('div');
 autoStates.id = 'auto-states';
 document.body.appendChild(autoStates);
@@ -4550,9 +4553,9 @@ for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, 
 function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
-  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', '']]) {
+  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', '']]) {
     const b = document.createElement('button');
-    const on = id === 'cam' ? camOnly : autoState === id || (id === 'freeze' && autoState === 'hold');
+    const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = on ? 'active' : '';
     // Без подписей: что включено, видно по самому значку (он меняется) и подсветке.
     b.innerHTML = id === 'lie' ? `<svg viewBox="0 0 24 24" aria-hidden="true">${LIE_ICONS[lieMode] ?? LIE_ICONS.side}</svg>` : `<i>${icon}</i>`;
@@ -4581,6 +4584,14 @@ function renderAutoStates() {
         return;
       }
       showAutoStates(1300); // выбрал — значки скоро спрячутся
+      if (id === 'rep') {
+        repOffer = !repOffer;
+        try { localStorage.setItem('waifu-repoffer', repOffer ? '1' : '0'); } catch { /* ignore */ }
+        if (!repOffer) { if (reps.home.on) setRepeat(false, true); autoRec = null; autoRepOffer = null; renderAutoRep(); }
+        renderAutoStates();
+        showToast(repOffer ? '🔁 Повтор включён: подвигай её — предложит повторить' : '🔁 Повтор выключен');
+        return;
+      }
       if (id === 'cam') { camOnly = !camOnly; renderAutoStates(); showToast(camOnly ? '🎥 Палец крутит камеру — её не задеваешь' : '👆 Снова можно гладить'); return; }
       if (id === 'freeze') {
         // 1-й тап — сама не двигается (записанный повтор идёт). 2-й — повтор замирает в той позе, где застал.
@@ -4686,6 +4697,7 @@ let autoLayer = null; // второй слой повтора: { kind: 'bend' | 
 let autoLayerDrag = null; // сейчас рукой ведём второй слой ('bend' | 'sit')
 let autoDragAt = 0;
 function autoRecNote() {
+  if (!repOffer) return;
   const now = performance.now();
   if (!autoRec || now - autoRec.last > 1600) autoRec = { start: now, samples: [], layerKind: reps.home.on ? autoLayerDrag : null };
   autoRec.last = now;
@@ -5090,11 +5102,18 @@ function autoWalk(dt) {
   const calm = autoMode && autoState === 'live' && !poseMode && !poseDrag && !pointerActive && !reps.home.on && !auto
     && character.sit < 0.02 && (character.sleep ?? 0) < 0.1 && Math.abs(character.bodyOffset.hipsRotX) < 0.25
     && !character.dancing && !character.mixer && !character.loop && $('wardrobe').classList.contains('hidden');
+  // Повернулась сама — а её тронули, усадили, включили повтор: сразу лицом к тебе (камеру крутить можно).
+  const bodyCalm = autoMode && autoState === 'live' && !poseMode && !reps.home.on && character.sit < 0.02 && (character.sleep ?? 0) < 0.1
+    && Math.abs(character.bodyOffset.hipsRotX) < 0.25 && !character.dancing && !character.mixer && !character.loop && $('wardrobe').classList.contains('hidden');
+  if (character.turnGoal && (!bodyCalm || poseDrag || performance.now() - lastOnHerAt < 400)) character.turnTo(0, true);
   if (!calm) { walkTimer = Math.max(walkTimer, 5); return; }
   walkTimer -= dt;
   if (walkTimer > 0) return;
   walkTimer = 9 + Math.random() * 11;
   const S = character.scale ?? 1;
+  // Иногда вместо шагов поворачивается: вполоборота, боком, спиной — и потом обратно.
+  if (character.turnGoal) { if (Math.random() < 0.75) { character.turnTo(0); return; } }
+  else if (Math.random() < 0.4) { const sgn = Math.random() < 0.5 ? 1 : -1; character.turnTo(sgn * [0.8, 0.8, 1.5, 1.5, Math.PI][Math.floor(Math.random() * 5)]); walkTimer = 6 + Math.random() * 6; return; }
   if (character.walkAway() > 0.08 * S && Math.random() < 0.55) character.walkTo(0, 0);
   else character.walkTo((Math.random() * 2 - 1) * 0.3 * S, (Math.random() * 0.34 - 0.1) * S);
 }

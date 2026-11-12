@@ -569,6 +569,7 @@ export class Character {
 
   update(dt) {
     this.lastDt = Math.min(dt, 0.05);
+    this.turnBegin(dt);
     this.dragBoostT = Math.max(0, (this.dragBoostT ?? 0) - dt);
     this.time += dt;
     const t = this.time;
@@ -1411,6 +1412,41 @@ export class Character {
     this.finishFrame(dt);
   }
 
+  // Сама поворачивается боком/спиной. Вся поза считается как обычно (лицом вперёд), а в конце кадра модель
+  // целиком доворачивается вокруг таза — ничего в позах и амплитудах не меняется. Взгляд «на тебя» пересчитан,
+  // так что спиной она оглядывается через плечо. Ступни при повороте переступают.
+  turnTo(a, fast = false) { this.turnGoal = a; if (fast) this.turnFast = true; }
+  turnBegin(dt) {
+    const sc = this.vrm.scene;
+    if (this.turnBase == null) { this.turnBase = sc.rotation.y; this.turnPos = sc.position.clone(); this.turn = 0; this.turnV = 0; this.turnGoal ??= 0; }
+    if (this.turnApplied) { sc.rotation.y = this.turnBase; sc.position.copy(this.turnPos); sc.updateMatrixWorld(true); this.turnApplied = false; }
+    if ((this.turnGoal ?? 0) === 0 && Math.abs(this.turn) < 1e-4 && Math.abs(this.turnV) < 1e-4) { this.turn = 0; this.turnV = 0; this.turnFast = false; this.turnStep = 0; return; }
+    // Плавно, с разгоном и торможением (пружина без перелёта); от касания возвращается быстрее.
+    const w = this.turnFast ? 9 : 2.6;
+    this.turnV += ((this.turnGoal - this.turn) * w * w - 2 * w * this.turnV) * dt;
+    this.turn += this.turnV * dt;
+    this.turnStep = Math.min(1, Math.abs(this.turnV) / 0.5);
+    this.turnPhase = (this.turnPhase ?? 0) + Math.abs(this.turnV) * dt * 5;
+    // Камера и «верх» для взгляда — в её (неповёрнутой) системе.
+    if (this.gazeTarget || this.gazeUp) {
+      const hp = this.bones.hips.getWorldPosition(new THREE.Vector3());
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -this.turn);
+      if (this.gazeTarget) this.gazeTarget = this.gazeTarget.clone().sub(hp).applyQuaternion(q).add(hp);
+      if (this.gazeUp) this.gazeUp = this.gazeUp.clone().applyQuaternion(q);
+    }
+  }
+  turnEnd() {
+    if (!this.turn) return;
+    const sc = this.vrm.scene;
+    const hp = this.bones.hips.getWorldPosition(new THREE.Vector3());
+    const q = hp.clone().sub(this.turnPos);
+    const c = Math.cos(this.turn), s = Math.sin(this.turn);
+    sc.rotation.y = this.turnBase + this.turn;
+    sc.position.set(this.turnPos.x + q.x - (c * q.x + s * q.z), this.turnPos.y, this.turnPos.z + q.z - (-s * q.x + c * q.z));
+    sc.updateMatrixWorld(true);
+    this.turnApplied = true;
+  }
+
   // Сама ходит: пара шагов в сторону/вперёд и обратно. Ступни переставляет по очереди (ведущая — со стороны
   // движения, ноги не перекрещиваются), таз переносит вес плавно. Только стоя; садится/ложится — у себя «дома».
   walkTo(x, z) {
@@ -1485,6 +1521,7 @@ export class Character {
   }
 
   finishFrame(dt) {
+    this.turnEnd();
     this.restorePokes();
     this.hairInertia(dt);
     if (this.dancing && !this.mixer) this.exprTarget.happy = Math.max(this.exprTarget.happy, 0.5);
@@ -2236,6 +2273,7 @@ export class Character {
 
       // Сама прошлась (см. updateWalk): ступня там, куда шагнула.
       if (this.walk) target.addScaledVector(this.walk.foot[side], this.walk.k);
+      if (this.turnStep > 0.01) target.y += Math.max(0, Math.sin((this.turnPhase ?? 0) + (L ? 0 : Math.PI))) * 0.035 * S * this.turnStep * (1 - p1);
       // Ступня, сдвинутая пальцем.
       const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
       (this.footBase ??= {})[side] = target.clone(); // где стопа стоит без сдвига
