@@ -1214,13 +1214,15 @@ export class PieceWardrobe {
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
       const lk = { leggings: 1, capri: 1, shorts: 1, minishorts: 1 }[kb] ? kb : null, w = map.image.width, h = map.image.height;
-      const key = `${lk}|${kt}|${w}|${map.uuid}`;
+      const key = `${lk}|${kt}|${w}|${map.uuid}|${sheenWant.stock ? 1 : 0}|${wear.leggingsHex}`;
       if (key !== sheenWant.key) {
         sheenWant.key = key;
         const mb = lk ? this.clothMask(lk, w, h) : null, mt = kt ? this.clothMask(kt, w, h) : null, d = sheenTex.image.data, N = SHEEN_N;
         // Чулки блестят так же, как лосины, — всегда, когда блики включены, по всей длине и одним тоном.
         // Чулок — это всё на ногах, что не голая кожа (смотрим готовый рисунок).
         let legs = null, px = null;
+        const lhex = wear.leggingsHex ?? 0x24222c, lR = (lhex >> 16) & 255, lG = (lhex >> 8) & 255, lB = lhex & 255;
+        const keepSt = !!wear.keepStockings && (lk === 'leggings' || lk === 'capri');
         {
           legs = this.zoneMask('legsall', w, h);
           const cv = (this.sheenCv ??= document.createElement('canvas'));
@@ -1234,7 +1236,13 @@ export class PieceWardrobe {
           for (let x = 0; x < N; x++, i += 4) {
             const p = row + Math.min(w - 1, Math.floor(((x + 0.5) / N) * w));
             let r = mb ? mb[p] : 0;
-            if (legs && legs[p] >= 128 && !(px[i] > px[i + 1] && px[i + 1] >= px[i + 2] && px[i] - px[i + 2] > 18 && px[i] > 150)) r = 255;
+            if (legs && legs[p] >= 128) {
+              const skin = px[i] > px[i + 1] && px[i + 1] >= px[i + 2] && px[i] - px[i + 2] > 18 && px[i] > 150;
+              if (sheenWant.stock) { if (!skin) r = 255; }
+              // Блеск чулок выключен: под лосинами, из-под которых выглядывают чулки, блестит только сама ткань лосин
+              // (по её цвету) — чулок остаётся матовым по всей длине.
+              else if (r && keepSt && Math.abs(px[i] - lR) + Math.abs(px[i + 1] - lG) + Math.abs(px[i + 2] - lB) > 60) r = 0;
+            }
             d[i] = r; d[i + 1] = mt ? mt[p] : 0;
           }
         }
@@ -1729,7 +1737,9 @@ const sheenTex = new THREE.DataTexture(new Uint8Array(SHEEN_N * SHEEN_N * 4), SH
 sheenTex.magFilter = THREE.LinearFilter; sheenTex.minFilter = THREE.LinearFilter; sheenTex.needsUpdate = true;
 const SHEEN_MAP = { value: sheenTex };
 export const SHEEN = { value: new THREE.Vector2() };
-const sheenWant = { leg: 0, top: 0, on: true, key: '' };
+const sheenWant = { leg: 0, top: 0, on: true, stock: true, key: '' };
+// Блеск чулок — отдельной настройкой (в гардеробе, раздел «Чулки»). После смены нужно перерисовать наряд.
+export function setStockSheen(on) { sheenWant.stock = !!on; }
 export function setSheenOn(on) { sheenWant.on = !!on; SHEEN.value.set(sheenWant.on ? sheenWant.leg : 0, sheenWant.on ? sheenWant.top : 0); }
 function installSheenFull(mesh) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
