@@ -1472,9 +1472,63 @@ export class Character {
       raw.add(m);
       this.heel.meshes.push(m);
       this.heelDbg = { A: A.toArray(), top: top.toArray(), len, n: pts.length };
+      // Нос туфли: гладкий острый «колпачок» поверх пальцев (иначе вблизи видны пальцы, как у носка).
+      try {
+        const fr = [];
+        let zMax = -Infinity;
+        for (const mm of skins) {
+          const pos = mm.geometry.attributes.position;
+          for (let i = 0; i < pos.count; i++) {
+            v.fromBufferAttribute(pos, i).applyMatrix4(mm.matrixWorld);
+            if (Math.abs(v.x - A.x) < 0.06 * S && v.y < A.y - 0.02 * S && v.z > A.z + 0.045 * S) { fr.push(v.clone()); if (v.z > zMax) zMax = v.z; }
+          }
+        }
+        if (fr.length > 20) {
+          const z0 = A.z + 0.055 * S, RN = 9, SG = 18, P = [], I = [];
+          let prev = null;
+          for (let r = 0; r <= RN; r++) {
+            const tt = r / RN, z = z0 + (zMax - z0) * Math.min(1, tt * 1.12);
+            const sl = fr.filter((q) => Math.abs(q.z - z) < 0.012 * S);
+            let ring = null;
+            if (sl.length >= 3 && tt < 0.9) {
+              let cx = 0, cy = 0; for (const q of sl) { cx += q.x; cy += q.y; } cx /= sl.length; cy /= sl.length;
+              ring = { cx, cy, rad: [] };
+              for (let k = 0; k < SG; k++) {
+                const a = (k / SG) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
+                let best = 0; for (const q of sl) { const px = q.x - cx, py = q.y - cy, along = px * dx + py * dy, off = Math.abs(px * dy - py * dx); if (off < 0.012 * S && along > best) best = along; }
+                ring.rad.push(best);
+              }
+              // пустые направления — от соседей; лёгкое сглаживание, чтобы пальцы не проступали
+              for (let k = 0; k < SG; k++) if (!ring.rad[k]) ring.rad[k] = Math.max(ring.rad[(k + 1) % SG], ring.rad[(k + SG - 1) % SG], 0.008 * S);
+              ring.rad = ring.rad.map((_, k) => Math.max(ring.rad[k], (ring.rad[(k + 1) % SG] + ring.rad[(k + SG - 1) % SG]) / 2));
+            } else if (prev) {
+              // острый носок: кольца сходятся в точку чуть впереди пальцев
+              const kk = Math.max(0.05, 1 - (tt - 0.75) / 0.3);
+              ring = { cx: prev.cx, cy: prev.cy - 0.002 * S, rad: prev.rad.map((x) => x * Math.min(1, kk)) };
+            }
+            if (!ring) continue;
+            const zz = tt >= 0.9 ? zMax + (tt - 0.9) * 0.22 * S : z;
+            const base = P.length / 3;
+            for (let k = 0; k < SG; k++) { const a = (k / SG) * Math.PI * 2; P.push(ring.cx + Math.cos(a) * (ring.rad[k] + 0.004 * S), Math.max(0.002, ring.cy + Math.sin(a) * (ring.rad[k] + 0.004 * S)), zz); }
+            if (prev && prev.base != null) for (let k = 0; k < SG; k++) { const a0 = prev.base + k, a1 = prev.base + (k + 1) % SG, b0 = base + k, b1 = base + (k + 1) % SG; I.push(a0, b0, a1, a1, b0, b1); }
+            ring.base = base; prev = ring;
+          }
+          if (I.length) {
+            const g2 = new THREE.BufferGeometry();
+            const arr = new Float32Array(P);
+            for (let i = 0; i < arr.length; i += 3) { v.set(arr[i], arr[i + 1], arr[i + 2]).applyMatrix4(inv); arr[i] = v.x; arr[i + 1] = v.y; arr[i + 2] = v.z; }
+            g2.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+            g2.setIndex(I); g2.computeVertexNormals();
+            const cap = new THREE.Mesh(g2, new THREE.MeshStandardMaterial({ color: 0x0c0a0e, roughness: 0.3, metalness: 0.1, side: THREE.DoubleSide }));
+            cap.castShadow = true; cap.visible = false; cap.frustumCulled = false;
+            raw.add(cap);
+            this.heel.meshes.push(cap);
+          }
+        }
+      } catch (e) { console.warn('toe cap', e); }
     }
   }
-  setHeels(on) { this.heelWant = on ? 1 : 0; }
+  setHeels(on, hex) { this.heelWant = on ? 1 : 0; if (hex != null) for (const m of this.heel?.meshes ?? []) m.material.color.setHex(hex); }
 
   // Сама поворачивается боком/спиной. Вся поза считается как обычно (лицом вперёд), а в конце кадра модель
   // целиком доворачивается вокруг таза — ничего в позах и амплитудах не меняется. Взгляд «на тебя» пересчитан,

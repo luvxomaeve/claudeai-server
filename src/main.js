@@ -3121,7 +3121,7 @@ function applyWear() {
   else if (lt?.name === 'Глубокий чёрный') w.legsTint = 0x0b090d; // настоящий чёрный на любых чулках, и на белых тоже
   else if (lt?.hex != null) w.legsTint = lt.hex;
   if (isPaint(w.shoes)) w.shoesHex = TINTS[wearTint[`shoes:${w.shoes}`] ?? 0]?.hex ?? defHex(w.shoes, 'shoes');
-  character?.setHeels?.(w.shoes === 'p_heels');
+  character?.setHeels?.(w.shoes === 'p_heels', w.shoesHex ?? 0x0c0a0e); // каблук и нос — в цвет туфель
   if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
   if (isPaint(w.bottoms)) w.bottomHex = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]?.hex ?? defHex(w.bottoms, 'bottoms');
   if (isPaint(w.leggings)) w.leggingsHex = TINTS[wearTint[`leggings:${w.leggings}`] ?? 0]?.hex ?? defHex(w.leggings, 'leggings');
@@ -4689,7 +4689,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 181;
+const WAIFU_BUILD = 182;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

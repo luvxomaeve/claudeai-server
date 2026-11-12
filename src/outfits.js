@@ -1323,12 +1323,13 @@ export class PieceWardrobe {
         layers.push({ kind: kb, hex: (mixc(16) << 16) | (mixc(8) << 8) | mixc(0), alpha: 0.88 });
       } } // поверх лосин/шорт колготки ровные по всей длине: отдельной «верхней» полосы нет (иначе у края шорт рваная кайма)
     // Туфли-лодочки нарисованы по стопе (каблук — отдельная деталь, см. character.js): поверх всего остального.
-    if (ks) layers.push({ kind: ks, hex: wear.shoesHex ?? 0x0c0a0e });
+    // Пятка и борта туфли — чистый цвет туфли поверх чулка (иначе сквозь тонкий слой проступал чулок и пятка серела).
+    if (ks) layers.push({ kind: ks, hex: wear.shoesHex ?? 0x0c0a0e }, { kind: ks, hex: wear.shoesHex ?? 0x0c0a0e });
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
       const lk = { leggings: 1, capri: 1, shorts: 1, minishorts: 1 }[kb] ? kb : null, w = map.image.width, h = map.image.height;
-      const key = `${lk}|${kt}|${w}|${map.uuid}|${sheenWant.stock ? 1 : 0}|${wear.leggingsHex}|${nylonTop ? kl : ''}`;
+      const key = `${lk}|${kt}|${w}|${map.uuid}|${sheenWant.stock ? 1 : 0}|${wear.leggingsHex}|${nylonTop ? kl : ''}|${ks ?? ''}`;
       if (key !== sheenWant.key) {
         sheenWant.key = key;
         const mb = lk ? this.clothMask(lk, w, h) : null, mt = kt ? this.clothMask(kt, w, h) : null, d = sheenTex.image.data, N = SHEEN_N;
@@ -1337,7 +1338,7 @@ export class PieceWardrobe {
         let legs = null, px = null;
         const lhex = wear.leggingsHex ?? 0x24222c, lR = (lhex >> 16) & 255, lG = (lhex >> 8) & 255, lB = lhex & 255;
         const keepSt = !!wear.keepStockings && (lk === 'leggings' || lk === 'capri');
-        const mn = nylonTop ? this.clothMask(kl, w, h) : null;
+        const mn = nylonTop ? this.clothMask(kl, w, h) : null, ms = ks ? this.clothMask(ks, w, h) : null;
         {
           legs = this.zoneMask('legsall', w, h);
           const cv = (this.sheenCv ??= document.createElement('canvas'));
@@ -1378,6 +1379,8 @@ export class PieceWardrobe {
             }
             // Блеск чулок выключен — капрон матовый везде, где он лежит, и поверх лосин тоже (иначе верх блестит, низ нет).
             if (!sheenWant.stock && mn && mn[p] >= 128) r = 0;
+            // Туфля — гладкая кожа, а не ткань: ни блеска ткани, ни отсвета кожи (иначе борта светлее носа и каблука).
+            if (ms && ms[p] >= 128) { r = 0; cloth = 255; }
             d[i] = r; d[i + 1] = mt ? mt[p] : 0; d[i + 2] = cloth;
           }
         }
