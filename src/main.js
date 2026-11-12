@@ -4640,12 +4640,22 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 168;
+const WAIFU_BUILD = 169;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
 var autoState = 'live';
 var camOnly = false;
+// Стойка стоя: расстояние между ступнями (доля роста) и вынос одной ноги вперёд. Фигура не меняется.
+const STANCES = [
+  { icon: '🧍', name: 'Стойка: обычная', w: 0, f: 0 },
+  { icon: '🚶', name: 'Стойка: ступни шире', w: 0.035, f: 0 },
+  { icon: '🤸', name: 'Стойка: широко', w: 0.075, f: 0 },
+  { icon: '💃', name: 'Стойка: нога вперёд', w: 0.015, f: 0.05 },
+];
+var stanceIdx = 0;
+try { stanceIdx = Math.min(STANCES.length - 1, Math.max(0, +(localStorage.getItem('waifu-stance') ?? 0) || 0)); } catch { /* ignore */ }
+function applyStance() { if (character) { character.stanceW = STANCES[stanceIdx].w; character.stanceF = STANCES[stanceIdx].f; } }
 // 🔁 Предлагать «Повторить» после того, как её подвигал. Выключил — она просто слушается пальца, без записи.
 var repOffer = true;
 try { repOffer = localStorage.getItem('waifu-repoffer') !== '0'; } catch { /* ignore */ }
@@ -4657,7 +4667,7 @@ function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
   // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна, только когда спит.
-  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ...(autoState === 'sleep' ? [['lie', '🛏', lieName]] : []), ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
+  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ...(autoState === 'sleep' ? [['lie', '🛏', lieName]] : []), ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = (on ? 'active' : '') + (id === 'cam' ? ' sep' : '');
@@ -4673,6 +4683,15 @@ function renderAutoStates() {
         return;
       }
       if (id === 'dice') { diceOutfit(); showAutoStates(3500); return; }
+      if (id === 'stance') {
+        // Стойка по кругу: как сейчас → ступни шире → широко → одна нога вперёд.
+        stanceIdx = (stanceIdx + 1) % STANCES.length;
+        try { localStorage.setItem('waifu-stance', String(stanceIdx)); } catch { /* ignore */ }
+        applyStance();
+        showToast(STANCES[stanceIdx].name);
+        showAutoStates(3500);
+        return;
+      }
       if (id === 'home') {
         // Домик, как в ручном виде: камера спереди, она встаёт ровно; сон, «замри» и повтор снимаются.
         camOnly = false; setAutoState('live'); autoReturn(); autoCentered = false; showAutoStates(900);
@@ -5419,6 +5438,7 @@ function tick() {
       }
     }
 
+    if (character.stanceW == null) applyStance();
     autoWalk(dt);
     updateFlirt(dt);
     character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);

@@ -2281,6 +2281,14 @@ export class Character {
         target.lerp(prone, b4);
       }
 
+      // Стойка (выбирается значком в простом виде): ступни шире или одна нога чуть вперёд. Только стоя; тело то же.
+      {
+        const st = this.stanceNow ??= { w: 0, f: 0 };
+        if (L) { const a = 1 - Math.exp(-(this.lastDt ?? 0.016) * 3); st.w += ((this.stanceW ?? 0) - st.w) * a; st.f += ((this.stanceF ?? 0) - st.f) * a; }
+        const sk = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.12, 0.4);
+        target.x += outSign * st.w * S * sk;
+        target.z += (L ? 1 : -1) * st.f * S * sk;
+      }
       // Сама прошлась (см. updateWalk): ступня там, куда шагнула.
       if (this.walk) target.addScaledVector(this.walk.foot[side], this.walk.k);
       if (this.turnStep > 0.01) target.y += Math.max(0, Math.sin((this.turnPhase ?? 0) + (L ? 0 : Math.PI))) * 0.035 * S * this.turnStep * (1 - p1);
