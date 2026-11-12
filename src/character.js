@@ -1901,7 +1901,9 @@ export class Character {
     const q = bone.getWorldQuaternion(new THREE.Quaternion());
     if (ri) q.multiply(ri); else q.copy(this.bones.hips.getWorldQuaternion(new THREE.Quaternion())).multiply(this.hipsRestInv);
     const xo = name.startsWith('other') ? off[0] : off[0] * (side === 'left' ? 1 : -1);
-    return bone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(xo, off[1], off[2]).multiplyScalar(this.scale).applyQuaternion(q));
+    // В облегающей юбке кисти лежат поверх ткани: точки на бёдрах и тазе чуть дальше от тела.
+    const pad = (this.handPad ?? 0) > 0 && (name === 'UpperLeg' || name === 'hips') ? 1 + this.handPad : 1;
+    return bone.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(xo * pad, off[1], off[2] * pad).multiplyScalar(this.scale).applyQuaternion(q));
   }
 
   // Кисти позы — к своим точкам на теле, плавно (в такт переходу позы).

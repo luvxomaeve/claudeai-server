@@ -450,7 +450,7 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
       for (let k = 0; k < SEG; k++) if (sm[k] > 0.02) radii[k] = Math.min(radii[k], radii[k] * (1 - fit) + (sm[k] * 0.3 + Math.max(sm[k], radii[k] * 0.9) * 0.7) * fit);
     }
     // Юбка книзу не сужается резко: каждое кольцо не уже 96% предыдущего (прямой силуэт, а не «штаны»).
-    if (prevR) for (let k = 0; k < SEG; k++) radii[k] = Math.max(radii[k], prevR[k] * 0.93); // книзу может слегка сужаться по бедру, но не «штанами»
+    if (prevR) for (let k = 0; k < SEG; k++) radii[k] = Math.max(radii[k], prevR[k] * 0.8); // подол идёт по бёдрам, а не стоит колоколом // книзу может слегка сужаться по бедру, но не «штанами»
     prevR = radii;
     const below = THREE.MathUtils.clamp((hipJ.y + 0.03 - y) / (hipJ.y + 0.03 - hem), 0, 1);
     const wLeg = 0.92 * Math.pow(below, 0.8);

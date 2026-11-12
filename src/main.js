@@ -4640,7 +4640,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 174;
+const WAIFU_BUILD = 175;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5439,6 +5439,7 @@ function tick() {
     }
 
     if (character.stanceW == null) applyStance();
+    character.handPad = isPaint(wear.bottoms) ? 0.3 : 0;
     autoWalk(dt);
     updateFlirt(dt);
     character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
