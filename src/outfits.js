@@ -1213,13 +1213,29 @@ export class PieceWardrobe {
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
       const lk = { leggings: 1, capri: 1, shorts: 1, minishorts: 1 }[kb] ? kb : null, w = map.image.width, h = map.image.height;
-      const key = `${lk}|${kt}|${w}`;
+      const key = `${lk}|${kt}|${w}|${lk ? map.uuid : ''}`;
       if (key !== sheenWant.key) {
         sheenWant.key = key;
         const mb = lk ? this.clothMask(lk, w, h) : null, mt = kt ? this.clothMask(kt, w, h) : null, d = sheenTex.image.data, N = SHEEN_N;
+        // Чулки под лосинами/шортами блестят так же, как сами лосины, — по всей длине, одним тоном (иначе ниже края
+        // капри они были бы другого оттенка). Чулок — это всё на ногах, что не голая кожа (смотрим готовый рисунок).
+        let legs = null, px = null;
+        if (lk) {
+          legs = this.zoneMask('legsall', w, h);
+          const cv = (this.sheenCv ??= document.createElement('canvas'));
+          cv.width = N; cv.height = N;
+          const c2 = cv.getContext('2d', { willReadFrequently: true });
+          c2.drawImage(map.image, 0, 0, N, N);
+          px = c2.getImageData(0, 0, N, N).data;
+        }
         for (let y = 0, i = 0; y < N; y++) {
           const row = Math.min(h - 1, Math.floor(((y + 0.5) / N) * h)) * w;
-          for (let x = 0; x < N; x++, i += 4) { const p = row + Math.min(w - 1, Math.floor(((x + 0.5) / N) * w)); d[i] = mb ? mb[p] : 0; d[i + 1] = mt ? mt[p] : 0; }
+          for (let x = 0; x < N; x++, i += 4) {
+            const p = row + Math.min(w - 1, Math.floor(((x + 0.5) / N) * w));
+            let r = mb ? mb[p] : 0;
+            if (legs && legs[p] >= 128 && !(px[i] > px[i + 1] && px[i + 1] >= px[i + 2] && px[i] - px[i + 2] > 18 && px[i] > 150)) r = 255;
+            d[i] = r; d[i + 1] = mt ? mt[p] : 0;
+          }
         }
         sheenTex.needsUpdate = true;
       }
