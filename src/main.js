@@ -4537,7 +4537,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 133;
+const WAIFU_BUILD = 134;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5082,6 +5082,22 @@ function updateWishes(dt) {
   character.react({ expression: 'relaxed', motion: 'tiltHead' });
   say(pick(def.ask), 'happy');
 }
+// Сама прохаживается, когда её не трогают: пара шагов в сторону или к тебе, потом обратно. Коснулся — стоит,
+// где стоит, и слушается; усадил/уложил — возвращается на место. Ничего на экране для этого нет.
+let walkTimer = 10;
+function autoWalk(dt) {
+  if (!character?.walkTo) return;
+  const calm = autoMode && autoState === 'live' && !poseMode && !poseDrag && !pointerActive && !reps.home.on && !auto
+    && character.sit < 0.02 && (character.sleep ?? 0) < 0.1 && Math.abs(character.bodyOffset.hipsRotX) < 0.25
+    && !character.dancing && !character.mixer && !character.loop && $('wardrobe').classList.contains('hidden');
+  if (!calm) { walkTimer = Math.max(walkTimer, 5); return; }
+  walkTimer -= dt;
+  if (walkTimer > 0) return;
+  walkTimer = 9 + Math.random() * 11;
+  const S = character.scale ?? 1;
+  if (character.walkAway() > 0.08 * S && Math.random() < 0.55) character.walkTo(0, 0);
+  else character.walkTo((Math.random() * 2 - 1) * 0.3 * S, (Math.random() * 0.34 - 0.1) * S);
+}
 // Какой её оставил — такой и встретит: поза (сидит/лежит, наклон), состояние (спит/замерла) и ракурс
 // запоминаются и возвращаются при следующем запуске. Только простой вид; повторы не храним.
 const LEFT_KEY = girlKey('waifu-left');
@@ -5197,6 +5213,7 @@ function tick() {
       }
     }
 
+    autoWalk(dt);
     character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
     character.update(dt);
     pieceWardrobe.sync(dt);

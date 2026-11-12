@@ -116,6 +116,7 @@ export const LOOPS = [
 ];
 
 // Движения, которые сами управляют руками.
+const ZERO3 = new THREE.Vector3();
 const ARM_MOTIONS = new Set(['flinch', 'raiseHand', 'stretch', 'touchHair', 'turnAway', 'clasp', 'handOnHip', 'nails']);
 
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
@@ -1350,8 +1351,10 @@ export class Character {
       else this.rot(f.node, 0, 0, s * f.curl * curl);
     }
     if (b.hips) {
+      const wk = this.updateWalk(dt, pose);
       b.hips.position.y += pose.hipsY - this.sitDropNow;
-      b.hips.position.x += pose.hipsX * this.flip;
+      b.hips.position.x += (pose.hipsX + wk.x) * this.flip;
+      b.hips.position.z += wk.z * this.flip;
       // В приседе таз уходит чуть назад, на коленях — возвращается над пятками.
       b.hips.position.z -= this.sitBackNow * this.flip;
       b.hips.position.x -= this.sitSideNow * this.flip;
@@ -1406,6 +1409,54 @@ export class Character {
 
     this.calmArms(dt);
     this.finishFrame(dt);
+  }
+
+  // Сама ходит: пара шагов в сторону/вперёд и обратно. Ступни переставляет по очереди (ведущая — со стороны
+  // движения, ноги не перекрещиваются), таз переносит вес плавно. Только стоя; садится/ложится — у себя «дома».
+  walkTo(x, z) {
+    this.walk ??= { pos: new THREE.Vector3(), goal: new THREE.Vector3(), foot: { left: new THREE.Vector3(), right: new THREE.Vector3() }, step: null, k: 1, out: new THREE.Vector3() };
+    this.walk.goal.set(x, 0, z);
+  }
+  walkAway() { return this.walk ? this.walk.pos.length() : 0; }
+  updateWalk(dt, pose) {
+    const w = this.walk;
+    if (!w) return ZERO3;
+    const S = this.scale;
+    // Присела/легла/спит — возвращается на место.
+    if (this.sitS > 0.06 || (this.sleep ?? 0) > 0.3) w.goal.set(0, 0, 0);
+    w.k = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.2, 0.5);
+    if (!w.step) {
+      const d = w.goal.clone().sub(w.pos);
+      if (d.length() > 0.03 * S && dt > 0) {
+        d.clampLength(0, 0.15 * S);
+        const leftOut = Math.sign((this.restFoot?.left?.pos.x ?? 1) - (this.restHips?.x ?? 0)) || 1;
+        let lead;
+        if (Math.abs(d.x) > Math.abs(d.z) * 0.6) lead = d.x * leftOut > 0 ? 'left' : 'right';
+        else lead = w.last === 'left' ? 'right' : 'left';
+        w.last = lead;
+        w.step = { d, u: 0, lead, trail: lead === 'left' ? 'right' : 'left', from: w.pos.clone(), dur: this.sitS > 0.06 ? 0.7 : 1.05 };
+      }
+    }
+    const st = w.step;
+    if (st) {
+      st.u = Math.min(1, st.u + dt / st.dur);
+      const sm = (x) => x * x * (3 - 2 * x);
+      const a = sm(THREE.MathUtils.clamp(st.u / 0.5, 0, 1)); // ведущая ступня
+      const b2 = sm(THREE.MathUtils.clamp((st.u - 0.5) / 0.5, 0, 1)); // вторая догоняет
+      const lf = w.foot[st.lead], tf = w.foot[st.trail];
+      lf.copy(st.from).addScaledVector(st.d, a); lf.y = Math.sin(Math.PI * a) * 0.05 * S;
+      tf.copy(st.from).addScaledVector(st.d, b2); tf.y = Math.sin(Math.PI * b2) * 0.05 * S;
+      w.pos.copy(st.from).addScaledVector(st.d, sm(st.u));
+      // Вес — на опорную ногу, корпус чуть разворачивается по ходу.
+      const sideSign = st.lead === 'left' ? 1 : -1;
+      const sway = (Math.sin(Math.PI * a) - Math.sin(Math.PI * b2)) * w.k;
+      pose.hipsZ += -0.05 * sideSign * sway;
+      pose.spineZ += 0.03 * sideSign * sway;
+      pose.hipsRotY += 0.1 * Math.sign(st.d.x || 0) * Math.sin(Math.PI * st.u) * w.k;
+      pose.hipsY -= 0.012 * S * Math.sin(Math.PI * st.u) * w.k;
+      if (st.u >= 1) { lf.y = 0; tf.y = 0; w.step = null; }
+    }
+    return w.out.copy(w.pos).multiplyScalar(w.k);
   }
 
   // Пока её тормошат, руки идут за телом с лёгкой инерцией (сглаживаем повороты плеча/локтя/кисти):
@@ -2183,6 +2234,8 @@ export class Character {
         target.lerp(prone, b4);
       }
 
+      // Сама прошлась (см. updateWalk): ступня там, куда шагнула.
+      if (this.walk) target.addScaledVector(this.walk.foot[side], this.walk.k);
       // Ступня, сдвинутая пальцем.
       const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
       (this.footBase ??= {})[side] = target.clone(); // где стопа стоит без сдвига
