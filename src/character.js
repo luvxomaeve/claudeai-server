@@ -1566,6 +1566,7 @@ export class Character {
     this.quietK = (this.quietK ?? 0) + (want - (this.quietK ?? 0)) * (1 - Math.exp(-dt * (want ? 9 : 1.6)));
     const k = this.quietK;
     this.armPrev ??= new Map();
+    const limit = !this.mixer && !this.dancing && !this.loop, maxStep = 15 * dt; // ≈ 860°/с
     for (const n of ['leftShoulder', 'rightShoulder', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand']) {
       const b = this.bones[n];
       if (!b) continue;
@@ -1574,7 +1575,21 @@ export class Character {
       if (k > 0.02 && dt > 0) {
         q.slerp(b.quaternion, 1 - Math.exp(-dt * (70 - 52 * k)));
         b.quaternion.copy(q);
+      } else if (limit && dt > 0 && q.angleTo(b.quaternion) > maxStep) {
+        // Рука не «телепортируется»: за кадр сустав поворачивается не больше, чем при очень быстром живом движении.
+        q.rotateTowards(b.quaternion, maxStep);
+        b.quaternion.copy(q);
       } else q.copy(b.quaternion);
+    }
+    // То же для ног: бедро, колено и стопа не перескакивают за один кадр (отстрелы при выставлении точек,
+    // смене позы лёжа и т.п.). В танцах и записанных анимациях не вмешиваемся.
+    for (const n of ['leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot']) {
+      const b = this.bones[n];
+      if (!b) continue;
+      let q = this.armPrev.get(n);
+      if (!q) this.armPrev.set(n, (q = b.quaternion.clone()));
+      if (limit && dt > 0 && q.angleTo(b.quaternion) > maxStep) { q.rotateTowards(b.quaternion, maxStep); b.quaternion.copy(q); }
+      else q.copy(b.quaternion);
     }
   }
 
