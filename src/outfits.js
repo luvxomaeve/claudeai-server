@@ -1042,7 +1042,7 @@ export class PieceWardrobe {
     if (!map?.image || !this.base || !layers.length) return map;
     this.paintTexCache ??= new Map();
     const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
-    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}${l.sheer ? 's' : ''}${l.rib ? 'r' : ''}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
+    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
     if (this.paintTexCache.has(key)) { const t = this.paintTexCache.get(key); this.paintTexCache.delete(key); this.paintTexCache.set(key, t); return t; }
     const img = map.image, w = img.width, h = img.height;
     // Кожа под снятой одеждой уже подготовлена заранее (prepUpper) — здесь только ткань.
@@ -1063,7 +1063,7 @@ export class PieceWardrobe {
     const data = prep, d = data.data;
     const isSkin = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
     this.idxCache ??= new Map();
-    for (const { kind, hex, keep, sheer, rib } of layers) {
+    for (const { kind, hex, keep } of layers) {
       const m = this.clothMask(kind, w, h);
       let idx = this.idxCache.get(`${kind}|${w}`);
       if (!idx) {
@@ -1075,20 +1075,13 @@ export class PieceWardrobe {
         this.idxCache.set(`${kind}|${w}`, idx);
       }
       const zone = keep ? this.zoneMask('minishorts', w, h) : null;
-      const um = keep ? this.clothMask('under', w, h) : null; // край шортиков тоже закрываем — иначе на лосинах от него линия
+      const um = keep ? this.clothMask('under', w, h) : null, ut = keep ? this.clothMask('under:trim', w, h) : null; // край шортиков тоже закрываем — иначе на лосинах от него линия
       const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
-      const ribP = Math.max(6, Math.round(w / 190)), ribW = Math.max(1, Math.round(ribP / 5));
       for (let q = 0; q < idx.length; q++) {
         const p = idx[q], i = p * 4;
-        let al = m[p] / 255; // на краю ткань плавно сходит на нет
-        // Чулки остаются поверх лосин. Колготки — тоже поверх, но тонкие: лосины просвечивают сквозь них.
-        if (zone && zone[p] < 128 && um[p] < 8 && !isSkin(i)) { if (!sheer) continue; al *= 0.5; }
-        if (rib) {
-          // Рубчик: тонкие тёмные бороздки через равные промежутки.
-          const x = p % w, ph = x % ribP, rk = ph < ribW ? 0.80 : ph < ribW * 2 ? 0.93 : 1;
-          d[i] = d[i] * (1 - al) + R * rk * al; d[i + 1] = d[i + 1] * (1 - al) + G * rk * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * rk * al; d[i + 3] = 255;
-          continue;
-        }
+        // Чулки остаются поверх лосин; кант шортиков под лосинами тоже закрываем (иначе от него пунктирная линия).
+        if (zone && zone[p] < 128 && um[p] < 8 && ut[p] < 8 && !isSkin(i)) continue;
+        const al = m[p] / 255; // на краю ткань плавно сходит на нет
         d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
       }
     }
@@ -1199,11 +1192,12 @@ export class PieceWardrobe {
     };
     // Облегающая ткань цвета кожи (розовый, персик, беж) выглядела бы как голое тело — такие цвета уводим в более
     // глубокий тон, чтобы вещь всегда читалась как одежда.
-    const skinLike = (hx) => {
+    const clothHex = (hx) => {
       const r0 = (hx >> 16) & 255, g0 = (hx >> 8) & 255, b0 = hx & 255;
-      return r0 > 225 && g0 >= 172 && g0 <= 220 && b0 >= 140 && b0 <= 215 && g0 >= b0;
+      // Только то, что почти совпадает с кожей (персик/беж). Розовый и остальные цвета — как выбраны.
+      if (r0 > 225 && g0 >= 172 && g0 <= 220 && b0 >= 140 && b0 <= 215 && g0 >= b0) return (Math.round(r0 * 0.95) << 16) | (Math.round(g0 * 0.80) << 8) | Math.round(b0 * 0.74);
+      return hx;
     };
-    const clothHex = (hx) => hx;
     const layers = [];
     // Бельё (шортики под одеждой): ровная ткань с аккуратным кантом, в тон чулок.
     {
@@ -1216,10 +1210,7 @@ export class PieceWardrobe {
     }
     if (kt) {
       const hex = clothHex(wear.topHex ?? 0xf1edf6);
-      // Бежевый/персик совпадает с кожей — такую вещь делаем вязаной «в рубчик» с заметным кантом: цвет тот же,
-      // светлый, но видно, что это ткань, а не тело.
-      const rib = skinLike(hex);
-      layers.push({ kind: kt, hex, rib }, { kind: `${kt}:trim`, hex: rib ? 0xb98a72 : trimOf(hex) });
+      layers.push({ kind: kt, hex }, { kind: `${kt}:trim`, hex: trimOf(hex) });
       if (kt === 'polo') {
         // Воротник — светлый на тёмном поло и тёмный на светлом.
         const lum = (((hex >> 16) & 255) * 0.3 + ((hex >> 8) & 255) * 0.59 + (hex & 255) * 0.11) / 255;
@@ -1228,9 +1219,7 @@ export class PieceWardrobe {
     }
     if (kb) {
       const hex = clothHex(wear.leggingsHex ?? 0x24222c), keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
-      const sheer = keep && !!wear.sheerTights;
-      const rib = skinLike(hex);
-      layers.push({ kind: kb, hex, keep, sheer, rib }, { kind: `${kb}:trim`, hex: rib ? 0xb98a72 : trimOf(hex), keep, sheer });
+      layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
@@ -1253,13 +1242,29 @@ export class PieceWardrobe {
           c2.drawImage(map.image, 0, 0, N, N);
           px = c2.getImageData(0, 0, N, N).data;
         }
+        // Где на ногах ткань, а где голая кожа — решаем не по одной точке, а по окрестности: тонкий чулок местами
+        // просвечивает (под коленями, на сгибах) и по цвету похож на кожу — из-за этого там были тёмные пятна
+        // без блика. Точка считается тканью, если вокруг неё ткани больше половины.
+        const S1 = N + 1, zn = new Int32Array(S1 * S1), cl = new Int32Array(S1 * S1);
+        for (let y = 0, i = 0; y < N; y++) {
+          const row = Math.min(h - 1, Math.floor(((y + 0.5) / N) * h)) * w;
+          for (let x = 0; x < N; x++, i += 4) {
+            const p = row + Math.min(w - 1, Math.floor(((x + 0.5) / N) * w));
+            const inLeg = legs && legs[p] >= 128 ? 1 : 0;
+            const skin = px[i] > px[i + 1] && px[i + 1] >= px[i + 2] && px[i] - px[i + 2] > 18 && px[i] > 150;
+            const q = (y + 1) * S1 + x + 1;
+            zn[q] = inLeg + zn[q - 1] + zn[q - S1] - zn[q - S1 - 1];
+            cl[q] = (inLeg && !skin ? 1 : 0) + cl[q - 1] + cl[q - S1] - cl[q - S1 - 1];
+          }
+        }
+        const RAD = 11, box = (a, x, y) => { const x0 = Math.max(0, x - RAD), y0 = Math.max(0, y - RAD), x1 = Math.min(N, x + RAD + 1), y1 = Math.min(N, y + RAD + 1); return a[y1 * S1 + x1] - a[y0 * S1 + x1] - a[y1 * S1 + x0] + a[y0 * S1 + x0]; };
         for (let y = 0, i = 0; y < N; y++) {
           const row = Math.min(h - 1, Math.floor(((y + 0.5) / N) * h)) * w;
           for (let x = 0; x < N; x++, i += 4) {
             const p = row + Math.min(w - 1, Math.floor(((x + 0.5) / N) * w));
             let r = mb ? mb[p] : 0, cloth = Math.max(r, mt ? mt[p] : 0);
             if (legs && legs[p] >= 128) {
-              const skin = px[i] > px[i + 1] && px[i + 1] >= px[i + 2] && px[i] - px[i + 2] > 18 && px[i] > 150;
+              const skin = box(cl, x, y) * 2 <= box(zn, x, y);
               if (!skin) cloth = 255;
               if (sheenWant.stock) { if (!skin) r = 255; }
               // Блеск чулок выключен: под лосинами, из-под которых выглядывают чулки, блестит только сама ткань лосин
