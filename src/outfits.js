@@ -1072,10 +1072,11 @@ export class PieceWardrobe {
         this.idxCache.set(`${kind}|${w}`, idx);
       }
       const zone = keep ? this.zoneMask('minishorts', w, h) : null;
+      const um = keep ? this.clothMask('under', w, h) : null; // край шортиков тоже закрываем — иначе на лосинах от него линия
       const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
       for (let q = 0; q < idx.length; q++) {
         const p = idx[q], i = p * 4;
-        if (zone && zone[p] < 128 && !isSkin(i)) continue;
+        if (zone && zone[p] < 128 && um[p] < 8 && !isSkin(i)) continue;
         const al = m[p] / 255; // на краю ткань плавно сходит на нет
         d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
       }

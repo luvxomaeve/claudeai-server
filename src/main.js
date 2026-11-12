@@ -4537,7 +4537,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 131;
+const WAIFU_BUILD = 132;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4646,12 +4646,11 @@ function renderAutoMenu() {
   const items = [
     ['👗', 'Гардероб', () => $('btn-wardrobe').click()],
     ['🎵', 'Анимации и танцы', () => $('btn-anims').click()],
-    ['✏️', 'Позы и точки', () => { if (autoMode) setAutoMode(false); $('btn-tab-pose').click(); }],
     ['📷', 'Фото', () => $('cam-photo').click()],
     [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
     ['👁', { follow: 'Взгляд: за пальцем', me: 'Взгляд: на тебя', closed: 'Взгляд: глаза закрыты' }[gazeMode] ?? 'Взгляд', () => $('btn-gaze').click(), true],
     ['↩️', 'Вернуть как было', () => (autoMode ? autoReturn() : resetView())],
-    autoMode ? ['🎛', 'Ручное управление (полосы и кнопки)', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],
+    autoMode ? ['🎛', 'Ручное управление: полосы, позы, точки', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],
   ];
   // В ручном виде выход в простой — первым пунктом, чтобы не искать.
   if (!autoMode) items.unshift(items.pop());

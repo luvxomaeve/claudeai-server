@@ -1724,3 +1724,6 @@ body.automode #auto-states.show:not(#_) { opacity: 1; pointer-events: auto; tran
 #auto-states button:not(#_) { width: 46px; min-width: 0; height: 46px; padding: 0; justify-content: center; flex: 0 1 46px; }
 #auto-states button i { font-size: 21px; }
 #auto-states button svg { width: 24px; height: 24px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* открыто меню ☰ — облачко с фразой не просвечивает сквозь него */
+body:has(#auto-menu:not([hidden])) #bubble { opacity: 0; }
