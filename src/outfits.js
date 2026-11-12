@@ -1094,7 +1094,20 @@ export class PieceWardrobe {
       }
       const zone = keep ? this.zoneMask('minishorts', w, h) : null;
       const um = keep ? this.clothMask('under', w, h) : null, ut = keep ? this.clothMask('under:trim', w, h) : null; // край шортиков тоже закрываем — иначе на лосинах от него линия
-      const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
+      let R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
+      if (zone) {
+        // Чулки того же тона, что лосины, сливались бы с ними. Если цвета близки — лосины делаем чуть светлее
+        // (тёмные) или чуть темнее (светлые), чтобы чулки читались отчётливо.
+        let sr = 0, sg = 0, sb = 0, n = 0;
+        for (let q = 0; q < idx.length; q += 7) { const p = idx[q]; if (zone[p] < 128 && um[p] < 8 && solid(p)) { const i = p * 4; sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; n++; } }
+        if (n > 40) {
+          sr /= n; sg /= n; sb /= n;
+          if (Math.abs(sr - R) + Math.abs(sg - G) + Math.abs(sb - Bl) < 75) {
+            const up = (sr + sg + sb) / 3 <= (R + G + Bl) / 3 + 4 && (R + G + Bl) / 3 < 150, f = (c) => Math.round(up ? c + (255 - c) * 0.17 : c * 0.8);
+            R = f(R); G = f(G); Bl = f(Bl);
+          }
+        }
+      }
       for (let q = 0; q < idx.length; q++) {
         const p = idx[q], i = p * 4;
         // Чулки остаются поверх лосин; кант шортиков под лосинами тоже закрываем (иначе от него пунктирная линия).
@@ -1220,8 +1233,7 @@ export class PieceWardrobe {
       const light = (c) => Math.round(c + (255 - c) * (lum > 0.3 ? 0.72 : 0.3)); // кант светлее ткани
       // Шортики однотонные, без светлых резинок.
       layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex });
-      // Капроновые чулки: полупрозрачная ткань поверх кожи (кожа просвечивает), сверху — плотная полоса.
-      if (kl === 'nylon') { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: 'nylon', hex: nh, alpha: 0.6 }, { kind: 'nylon:trim', hex: nh, alpha: 0.5 }); }
+      // (капрон рисуется последним — поверх лосин, см. ниже)
     }
     if (kt) {
       const hex = clothHex(wear.topHex ?? 0xf1edf6);
@@ -1233,9 +1245,20 @@ export class PieceWardrobe {
       }
     }
     if (kb) {
-      const hex = clothHex(wear.leggingsHex ?? 0x24222c), keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
+      let hex = clothHex(wear.leggingsHex ?? 0x24222c);
+      if (kl === 'nylon') {
+        // Капрон того же тона, что лосины, не был бы виден — тогда лосины чуть светлее (тёмные) или темнее (светлые).
+        const nh = wear.legsHex ?? 0x1b171d, c = (h, k) => (h >> k) & 255;
+        if (Math.abs(c(nh, 16) - c(hex, 16)) + Math.abs(c(nh, 8) - c(hex, 8)) + Math.abs(c(nh, 0) - c(hex, 0)) < 75) {
+          const up = (c(hex, 16) + c(hex, 8) + c(hex, 0)) / 3 < 150, f = (v) => Math.round(up ? v + (255 - v) * 0.2 : v * 0.8);
+          hex = (f(c(hex, 16)) << 16) | (f(c(hex, 8)) << 8) | f(c(hex, 0));
+        }
+      }
+      const keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
+    // Капроновые чулки: тонкая ткань поверх всего, что на ногах (кожа или лосины просвечивают), сверху плотная полоса.
+    if (kl === 'nylon') { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: 'nylon', hex: nh, alpha: kb ? 0.72 : 0.6 }, { kind: 'nylon:trim', hex: nh, alpha: 0.55 }); }
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
