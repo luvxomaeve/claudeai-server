@@ -172,6 +172,9 @@ let hipsTrackInit = false;
 function updateHipsTrack(dt) {
   if (!character?.bones.hips) return;
   const h = character.bones.hips.getWorldPosition(new THREE.Vector3());
+  // Сама прохаживается — кадр за ней не едет: камера стоит, она делает шаги внутри кадра.
+  const wk = character.walk;
+  if (wk) { h.x -= wk.out.x; h.z -= wk.out.z; }
   if (!hipsTrackInit) { hipsTrack.copy(h); hipsTrackInit = true; }
   hipsTrack.lerp(h, 1 - Math.exp(-dt * 4));
 }
@@ -4571,7 +4574,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 147;
+const WAIFU_BUILD = 148;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4991,8 +4994,12 @@ autoRepBtn.addEventListener('click', (e) => {
   say(pick(['Вот так? Хи~', 'Запомнила! Смотри~', 'Повторяю ♥', 'Так нравится?~']), 'happy');
 });
 window.addEventListener('pointerdown', () => { autoTouchAt = performance.now(); }, { capture: true, passive: true });
+const AUTO_CAM_SWAY = false;
 // Камера плавно покачивается вокруг неё, пока её не трогают (и ещё 3 секунды после).
 function updateAutoCam(dt) {
+  // Покачивание выключено: камера стоит ровно там, где её оставил, и сама никуда не уезжает. Живость теперь
+  // даёт она сама (шаги, повороты), а не камера.
+  if (AUTO_CAM_SWAY === false) return;
   if (!autoMode || !character || pointerActive || freeCam || faceCam) return;
   if (document.querySelector('.panel:not(.hidden)')) return; // открыто меню — камера стоит спокойно
   if (performance.now() - autoTouchAt < 3000) return;
@@ -5162,7 +5169,7 @@ function autoWalk(dt) {
   if (character.turnGoal) { if (Math.random() < 0.75) { character.turnTo(0); return; } }
   else if (Math.random() < 0.4) { const sgn = Math.random() < 0.5 ? 1 : -1; character.turnTo(sgn * [0.8, 0.8, 1.5, 1.5, Math.PI][Math.floor(Math.random() * 5)]); walkTimer = 6 + Math.random() * 6; return; }
   if (character.walkAway() > 0.08 * S && Math.random() < 0.55) character.walkTo(0, 0);
-  else character.walkTo((Math.random() * 2 - 1) * 0.3 * S, (Math.random() * 0.34 - 0.1) * S);
+  else character.walkTo((Math.random() * 2 - 1) * 0.2 * S, (Math.random() * 0.16 - 0.05) * S); // недалеко: остаётся в кадре
 }
 // Какой её оставил — такой и встретит: поза (сидит/лежит, наклон), состояние (спит/замерла) и ракурс
 // запоминаются и возвращаются при следующем запуске. Только простой вид; повторы не храним.
