@@ -682,7 +682,7 @@ export class PieceWardrobe {
         tank: { hem: cropHem, sl: null, r: 0.082 }, polo: { hem, sl: shortSleeve, r: 0 },
       };
       // Низ: верхний край — талия, нижний (lo).
-      const BOTS = { under: hipJ.y - leg * 0.26, leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26 };
+      const BOTS = { under: hipJ.y - leg * 0.26, leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26, nylon: foot.y - 1 };
       const [base, trim] = kind.split(':');
       const T = TOPS[base], lo = BOTS[base];
       const TW = 0.011; // ширина канта (манжета, ворот, пояс, низ)
@@ -694,13 +694,14 @@ export class PieceWardrobe {
           : body;
       } else if (lo != null) {
         const under = base === 'under';
-        const topY = under ? hipJ.y + leg * 0.2 : waist; // бельё — та же форма шортиков, что была, только ровная
+        const nylon = base === 'nylon'; // капроновые чулки: от пальцев до верха бедра, сверху плотная полоса
+        const topY = under ? hipJ.y + leg * 0.2 : nylon ? hipJ.y - leg * 0.17 : waist; // бельё — та же форма шортиков, что была, только ровная
         const body = (x, y) => y < topY && y > lo;
         const tw = under ? 0.009 : TW; // у шортиков резинки тоньше
         inside = trim === 'seam'
           // тонкий боковой шов (лосины, шорты)
           ? (x, y, z) => body(x, y) && y < topY - tw * 1.6 && y > lo + tw && Math.abs(z - hips.z) < 0.0045 && ax(x) > 0.05
-          : trim ? (x, y) => body(x, y) && (y > topY - tw * (under ? 1 : 1.6) || y < lo + tw) : body;
+          : trim ? (nylon ? (x, y) => body(x, y) && y > topY - 0.034 : (x, y) => body(x, y) && (y > topY - tw * (under ? 1 : 1.6) || y < lo + tw)) : body;
       } else inside = {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
@@ -1042,7 +1043,7 @@ export class PieceWardrobe {
     if (!map?.image || !this.base || !layers.length) return map;
     this.paintTexCache ??= new Map();
     const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
-    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
+    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}:${l.alpha ?? 1}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
     if (this.paintTexCache.has(key)) { const t = this.paintTexCache.get(key); this.paintTexCache.delete(key); this.paintTexCache.set(key, t); return t; }
     const img = map.image, w = img.width, h = img.height;
     // Кожа под снятой одеждой уже подготовлена заранее (prepUpper) — здесь только ткань.
@@ -1063,7 +1064,7 @@ export class PieceWardrobe {
     const data = prep, d = data.data;
     const isSkin = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
     this.idxCache ??= new Map();
-    for (const { kind, hex, keep } of layers) {
+    for (const { kind, hex, keep, alpha } of layers) {
       const m = this.clothMask(kind, w, h);
       let idx = this.idxCache.get(`${kind}|${w}`);
       if (!idx) {
@@ -1081,7 +1082,7 @@ export class PieceWardrobe {
         const p = idx[q], i = p * 4;
         // Чулки остаются поверх лосин; кант шортиков под лосинами тоже закрываем (иначе от него пунктирная линия).
         if (zone && zone[p] < 128 && um[p] < 8 && ut[p] < 8 && !isSkin(i)) continue;
-        const al = m[p] / 255; // на краю ткань плавно сходит на нет
+        const al = (m[p] / 255) * (alpha ?? 1); // на краю ткань плавно сходит на нет; alpha < 1 — тонкая ткань
         d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
       }
     }
@@ -1183,7 +1184,7 @@ export class PieceWardrobe {
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).
     const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.leggings)?.leggings, kl = this.paints.get(wear.legs)?.legs;
     // (у облегающей юбки рисунка по телу нет — это отдельная сетка, см. tightSkirt)
-    if (kl === 'bare') map = this.bareLegs(map);
+    if (kl === 'bare' || kl === 'nylon') map = this.bareLegs(map); // капрон рисуем поверх голой ноги
     // Кант (манжеты, ворот, пояс, низ) — чуть темнее светлой ткани и чуть светлее тёмной: края выглядят аккуратно.
     const trimOf = (hex) => {
       const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255, lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
@@ -1206,7 +1207,10 @@ export class PieceWardrobe {
       hex = clothHex(hex);
       const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255, lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
       const light = (c) => Math.round(c + (255 - c) * (lum > 0.3 ? 0.72 : 0.3)); // кант светлее ткани
-      layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex: (light(r) << 16) | (light(g) << 8) | light(b) });
+      // Шортики однотонные, без светлых резинок.
+      layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex });
+      // Капроновые чулки: полупрозрачная ткань поверх кожи (кожа просвечивает), сверху — плотная полоса.
+      if (kl === 'nylon') { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: 'nylon', hex: nh, alpha: 0.6 }, { kind: 'nylon:trim', hex: nh, alpha: 0.5 }); }
     }
     if (kt) {
       const hex = clothHex(wear.topHex ?? 0xf1edf6);

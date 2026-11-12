@@ -2988,6 +2988,8 @@ const PIECE_SOURCES = [
   { id: 'p_minihigh', name: 'Мини высокая', paint: { gen: 'minihigh' }, cats: ['bottoms'], names: { bottoms: 'Мини с высокой талией' }, colors: { bottoms: 0x2b2530 } },
   // «Без чулок»: голые ноги (под лосины, шорты и юбки).
   { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
+  // Длинные капроновые чулки: нарисованы поверх голой ноги, кожа просвечивает.
+  { id: 'p_nylon', name: 'Капрон', paint: { legs: 'nylon' }, cats: ['legs'], names: { legs: 'Капроновые чулки' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
 ].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x))
   // Чёрная плиссе из отдельных полосок («дырявая» при наклонах) тоже убрана.
@@ -3066,7 +3068,7 @@ function applyWear() {
   const defHex = (id, cat) => PIECE_SOURCES.find((x) => x.id === id)?.colors?.[cat];
   // Чулки и гольфы остаются поверх лосин; колготки под лосинами не видны.
   w.keepStockings = !isPaint(w.legs) && legwear() !== 'tights';
-  if (isPaint(w.legs)) { /* «без чулок» — красить нечего */ }
+  if (isPaint(w.legs)) { w.legsHex = TINTS[wearTint[`legs:${w.legs}`] ?? 0]?.hex ?? defHex(w.legs, 'legs'); } // «без чулок» — красить нечего; капрон — свой цвет
   else if (lt?.name === 'Глубокий чёрный') w.legsTint = 0x0b090d; // настоящий чёрный на любых чулках, и на белых тоже
   else if (lt?.hex != null) w.legsTint = lt.hex;
   if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
@@ -4621,7 +4623,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 162;
+const WAIFU_BUILD = 163;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
