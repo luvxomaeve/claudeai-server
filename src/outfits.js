@@ -1194,7 +1194,8 @@ export class PieceWardrobe {
     // глубокий тон, чтобы вещь всегда читалась как одежда.
     const clothHex = (hx) => {
       const r0 = (hx >> 16) & 255, g0 = (hx >> 8) & 255, b0 = hx & 255;
-      if (r0 > 190 && r0 >= g0 && r0 >= b0 && g0 > 120 && b0 > 110 && r0 - Math.min(g0, b0) < 110) return (Math.round(r0 * 0.88) << 16) | (Math.round(g0 * 0.60) << 8) | Math.round(b0 * 0.72);
+      // Только то, что почти совпадает с кожей (персик/беж). Розовый и остальные цвета — как выбраны.
+      if (r0 > 225 && g0 >= 172 && g0 <= 220 && b0 >= 140 && b0 <= 215 && g0 >= b0) return (Math.round(r0 * 0.95) << 16) | (Math.round(g0 * 0.80) << 8) | Math.round(b0 * 0.74);
       return hx;
     };
     const layers = [];
