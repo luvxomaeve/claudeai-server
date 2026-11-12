@@ -547,7 +547,7 @@ export class PieceWardrobe {
     for (const m of this.base.pieces.bottoms ?? []) installTuck(vrm, m);
     installHems(this.base.pieces);
     for (const m of this.base.pieces.bottoms ?? []) installDroop(vrm, m);
-    for (const m of this.base.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); installEdgeShade(m); }
+    for (const m of this.base.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); installEdgeShade(m); try { installFolds(vrm, m); } catch (e) { console.warn('folds', e); } }
     for (const m of this.base.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
     // Облегающая юбка — своя сетка по её телу (материал берём у любой её вещи, без рисунка).
     try {
@@ -1207,6 +1207,8 @@ export class PieceWardrobe {
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     map = this.paintLayers(map, layers);
+    // Где ткань закрывает суставы — там при сгибе будут складочки (см. installFolds).
+    FOLD_ON.set(kt === 'top' || kt === 'tank' || kt === 'tee' || kt === 'polo' ? 1 : 0, kb ? 1 : 0, kb === 'leggings' || kb === 'capri' ? 1 : 0, kt === 'top' || kt === 'longcrop' ? 1 : 0);
     this.setSkin(map);
     onSkin?.(map);
   }
@@ -1684,6 +1686,64 @@ export function tuneSkirt(vrm) {
 // при сгибе бедра (присед, колени, сидя) кожа модели на сгибе «сминается» — мы выпукло
 // выталкиваем её наружу пропорционально сгибу каждой ноги (HIP_FLEX), стоя — почти ноль.
 export const HIP_FLEX = { value: new THREE.Vector2() };
+// Складочки на облегающей (нарисованной) ткани: мягкие тени-заломы у талии, в паху, под коленями и на локтях —
+// только там, где сустав согнут, и только если это место закрыто тканью. Тело не двигается: это рисунок света.
+// x — талия, y — сгиб бедра, z — колено, w — локоть. FOLD_ON — что закрыто тканью; FOLD_L/R — сила по сторонам.
+export const FOLD_ON = new THREE.Vector4();
+export const FOLD_L = { value: new THREE.Vector4() };
+export const FOLD_R = { value: new THREE.Vector4() };
+function installFolds(vrm, mesh) {
+  const g = mesh.geometry, pos = g.getAttribute('position'), nor = g.getAttribute('normal');
+  if (!mesh.isSkinnedMesh || !pos || !nor || g.getAttribute('aFold')) return;
+  const bind = (name) => bindBone(vrm, mesh, name);
+  const hips = bind('hips'), spine = bind('spine'), LU = bind('leftUpperLeg'), RU = bind('rightUpperLeg'), LK = bind('leftLowerLeg'), RK = bind('rightLowerLeg');
+  const LE = bind('leftLowerArm'), RE = bind('rightLowerArm'), LS = bind('leftUpperArm');
+  if (!hips || !spine || !LU || !RU || !LK || !RK) return;
+  const k0 = Math.max(0.25, LU.y - LK.y) / 0.4;
+  const waistY = (hips.y + spine.y) / 2 + 0.02 * k0, halfW = LS ? Math.abs(LS.x - hips.x) * 1.05 : 0.2 * k0;
+  const arr = new Float32Array(pos.count * 4), v = new THREE.Vector3();
+  const near = (c, sg) => { const d = v.distanceTo(c) / sg; return d < 2.4 ? Math.exp(-d * d) : 0; };
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
+    const torso = Math.abs(v.x - hips.x) < halfW ? 1 : 0;
+    const dy = (v.y - waistY) / (0.05 * k0);
+    arr[i * 4] = torso && Math.abs(dy) < 2.4 ? Math.exp(-dy * dy) : 0;
+    arr[i * 4 + 1] = Math.max(near(LU, 0.06 * k0), near(RU, 0.06 * k0)) * (v.y < LU.y + 0.05 * k0 ? 1 : 0.4);
+    arr[i * 4 + 2] = Math.max(near(LK, 0.055 * k0), near(RK, 0.055 * k0));
+    arr[i * 4 + 3] = LE && RE ? Math.max(near(LE, 0.045 * k0), near(RE, 0.045 * k0)) : 0;
+  }
+  g.setAttribute('aFold', new THREE.BufferAttribute(arr, 4));
+  const leftSign = Math.sign(LU.x - hips.x) || 1, freq = (300 / k0).toFixed(1);
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m || m.isOutline || m.userData.folds) continue;
+    m.userData.folds = true;
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (sh, r) => {
+      prev?.call(m, sh, r);
+      const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
+      if (!sh.fragmentShader.includes(at) || !sh.vertexShader.includes('#include <begin_vertex>')) return;
+      sh.uniforms.uFoldL = FOLD_L; sh.uniforms.uFoldR = FOLD_R;
+      sh.vertexShader = 'attribute vec4 aFold;\nuniform vec4 uFoldL;\nuniform vec4 uFoldR;\nvarying vec2 vFold;\n' + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+  {
+    float fdK = dot( aFold, position.x * ${leftSign.toFixed(1)} > 0.0 ? uFoldL : uFoldR );
+    // Заломы идут поперёк сгиба: на теле и ногах — горизонтально, на руках (в позе покоя они в стороны) — вдоль тела.
+    float fdC = mix( position.y, position.x, step( max( aFold.x, max( aFold.y, aFold.z ) ), aFold.w ) );
+    vFold = vec2( fdK, fdC * ${freq} + sin( position.x * 61.0 + position.z * 83.0 ) * 1.3 );
+  }`);
+      sh.fragmentShader = 'varying vec2 vFold;\n' + sh.fragmentShader.replace(at, `${at}
+  if ( vFold.x > 0.004 ) {
+    float fdS = sin( vFold.y );
+    // Заломы разной глубины (не «зебра»); на тёмной ткани их видно по светлым гребням.
+    float fdA = vFold.x * ( 0.55 + 0.45 * sin( vFold.y * 0.37 + 1.7 ) );
+    col *= 1.0 - 0.17 * fdA * smoothstep( 0.0, 1.0, fdS );
+    col += vec3( 0.035 ) * fdA * smoothstep( 0.3, 1.0, -fdS );
+  }`);
+    };
+    const pk = m.customProgramCacheKey?.bind(m);
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|folds`;
+    m.needsUpdate = true;
+  }
+}
 function patchBulge(mat) {
   if (!mat || mat.userData.bulgePatched) return;
   mat.userData.bulgePatched = true;

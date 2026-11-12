@@ -1004,7 +1004,8 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!character) return;
   // Открыт список поз — касание по сцене просто закрывает его.
   if (!$('pose-list').hidden && !poseMode) { setPoseListOpen(false); return; }
-  canvas.setPointerCapture(e.pointerId);
+  if (e.isPrimary && touches.size) touches.clear(); // первый палец, а в списке кто-то остался — это «залипший»
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size === 1) flickStart = { x: e.clientX, y: e.clientY, t: performance.now(), onHer: !!zoneAt(e) || nearHerOnScreen(e) };
   pointerActive = true;
@@ -1013,9 +1014,8 @@ canvas.addEventListener('pointerdown', (e) => {
   // Два пальца в любом режиме — щипок: приблизить/отдалить.
   if (touches.size === 2) {
     // Двойной тап двумя пальцами — чистый экран: пропадает весь интерфейс, остаётся только она. Ещё раз — вернуть.
-    const n2 = performance.now();
-    if (n2 - (window.__twoTapAt ?? 0) < 420) { window.__twoTapAt = 0; setCleanScreen(!document.body.classList.contains('cleanscreen')); }
-    else window.__twoTapAt = n2;
+    // Считаются только настоящие короткие тапы (см. endPointer): щипки и сдвиги камеры подряд экран не прячут.
+    twoTap = { t: performance.now(), start: [...touches.entries()].map(([id, v]) => [id, v.x, v.y]) };
     pinchDist = pinchDistance();
     poseDrag = null;
     orbitDrag = null;
@@ -1385,7 +1385,18 @@ function checkFlick(e) {
 }
 
 let autoTap = null;
+let twoTap = null; // два пальца коснулись: когда и где (для «двойного тапа двумя пальцами»)
+let twoTapAt = 0;
 function endPointer(e) {
+  if (twoTap && touches.size === 2) {
+    const now = performance.now();
+    const still = twoTap.start.every(([id, x, y]) => { const c = touches.get(id); return c && Math.hypot(c.x - x, c.y - y) < 14; });
+    if (e.type === 'pointerup' && still && now - twoTap.t < 300) {
+      if (now - twoTapAt < 550) { twoTapAt = 0; setCleanScreen(!document.body.classList.contains('cleanscreen')); }
+      else twoTapAt = now;
+    } else twoTapAt = 0;
+    twoTap = null;
+  }
   if (e.type === 'pointerup') checkFlick(e);
   // «Авто»: двойной тап по ней — переодевается сама; двойной тап по фону — крупно / в полный рост.
   if (autoMode && e.type === 'pointerup' && touches.size === 1) {
@@ -1427,6 +1438,9 @@ function endPointer(e) {
   }
 }
 canvas.addEventListener('pointerup', endPointer);
+// Система забрала палец без «отпускания» (жест навигации, шторка) — не оставляем «залипший» палец:
+// из-за него один палец считался бы вторым, и жесты с долгим тапом переставали работать.
+canvas.addEventListener('lostpointercapture', (e) => { if (touches.has(e.pointerId)) endPointer(e); });
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   zoomBy(Math.exp(e.deltaY * 0.001));
@@ -3133,6 +3147,26 @@ const SELF_DRESS_LINES = {
   outfit: ['Я решила сменить наряд~ Специально для тебя ♥', 'Переоделась для тебя~ Как тебе?', 'Новый образ! Нравится? ♥', 'Хи, сюрприз — новый прикид~'],
   base: ['Вернула свой любимый образ~', 'Снова в своём ♥ Скучал по нему?'],
 };
+// 🎲 Случайный облегающий наряд: верх + лосины/шорты или облегающая юбка — из нарисованных вещей.
+let dicing = false;
+async function diceOutfit() {
+  if (dicing || selfDressing || !character) return;
+  dicing = true;
+  try {
+    const P = PIECE_SOURCES.filter((x) => x.paint);
+    const of = (cat, cur) => { const a = P.filter((x) => x.cats.includes(cat) && x.id !== cur); return a.length ? a[Math.floor(Math.random() * a.length)].id : null; };
+    const top = of('tops', wear.tops);
+    if (top) await pickPiece('tops', top, true);
+    if (Math.random() < 0.65) {
+      const l = of('leggings', wear.leggings);
+      if (l) { await pickPiece('bottoms', 'none', true); await pickPiece('leggings', l, true); }
+    } else {
+      const sk = of('bottoms', wear.bottoms);
+      if (sk) { await pickPiece('bottoms', sk, true); await pickPiece('leggings', 'none', true); }
+    }
+    character.react({ expression: 'happy', motion: 'sway' });
+  } catch (e) { console.warn('dice', e); } finally { dicing = false; }
+}
 async function updateSelfDress(dt) {
   if (!character || !PIECE_SOURCES.length || selfDressing || suggestion) return;
   if (!unlocked('wardrobe') || pointerActive || poseMode || character.sleep > 0.3 || !$('wardrobe').classList.contains('hidden')) return;
@@ -4537,7 +4571,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 135;
+const WAIFU_BUILD = 136;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4553,10 +4587,11 @@ for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, 
 function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
-  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', '']]) {
+  // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна, только когда спит.
+  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ...(autoState === 'sleep' ? [['lie', '🛏', lieName]] : []), ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : autoState === id || (id === 'freeze' && autoState === 'hold');
-    b.className = on ? 'active' : '';
+    b.className = (on ? 'active' : '') + (id === 'cam' ? ' sep' : '');
     // Без подписей: что включено, видно по самому значку (он меняется) и подсветке.
     b.innerHTML = id === 'lie' ? `<svg viewBox="0 0 24 24" aria-hidden="true">${LIE_ICONS[lieMode] ?? LIE_ICONS.side}</svg>` : `<i>${icon}</i>`;
     b.title = name;
@@ -4568,6 +4603,7 @@ function renderAutoStates() {
         showAutoStates(3500);
         return;
       }
+      if (id === 'dice') { diceOutfit(); showAutoStates(3500); return; }
       if (id === 'home') {
         // Домик, как в ручном виде: камера спереди, она встаёт ровно; сон, «замри» и повтор снимаются.
         camOnly = false; setAutoState('live'); autoReturn(); autoCentered = false; showAutoStates(900);
@@ -4620,10 +4656,11 @@ function showAutoStates(ms = 4500) {
   const cancel = () => { if (lp) { clearTimeout(lp.t); lp = null; } };
   window.addEventListener('pointerdown', (e) => {
     cancel();
-    if (!autoMode || e.target !== canvas || touches.size > 1 || document.body.classList.contains('cleanscreen')) return;
-    const onHer = !!zoneAt(e, true);
-    if (!onHer) return;
-    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } showAutoStates(); }, 480) };
+    if (!autoMode || e.target !== canvas || touches.size > 1) return;
+    // Чистый экран и режим «Камера»: долгий тап в любом месте (по ней можно и не попасть) — значки возвращаются.
+    const clean = document.body.classList.contains('cleanscreen');
+    if (!clean && !camOnly && !zoneAt(e, true)) return;
+    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); showAutoStates(); }, 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => { if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel(); }, { capture: true, passive: true });
   for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, cancel, { capture: true, passive: true });
@@ -4645,7 +4682,7 @@ function setAutoState(st) {
 }
 function setCleanScreen(on) {
   document.body.classList.toggle('cleanscreen', on);
-  if (on) { autoMenu.hidden = true; autoHint.hidden = true; }
+  if (on) { autoMenu.hidden = true; autoHint.hidden = true; showToast('Чистый экран. Долгий тап — вернуть кнопки'); }
 }
 // Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
 const autoMenu = document.createElement('div');

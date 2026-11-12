@@ -1699,7 +1699,7 @@ body:has(.panel:not(.hidden)) #auto-states, body:has(#auto-menu:not([hidden])) #
 body.automode #wish:not(#_) { z-index: 8; }
 /* Чистый экран: только она */
 body.cleanscreen #hud, body.cleanscreen #auto-exit, body.cleanscreen #auto-help, body.cleanscreen #auto-states, body.cleanscreen #wish,
-body.cleanscreen #bubble, body.cleanscreen #toast, body.cleanscreen #auto-rep, body.cleanscreen #hint, body.cleanscreen #auto-hint,
+body.cleanscreen #bubble, body.cleanscreen #auto-rep, body.cleanscreen #hint, body.cleanscreen #auto-hint,
 body.cleanscreen #poses, body.cleanscreen #sit-slider, body.cleanscreen #sit-slider2, body.cleanscreen #cam-controls, body.cleanscreen #handles,
 body.cleanscreen .float-heart, body.cleanscreen .fx-banner, body.cleanscreen #suggest { display: none !important; }
 body.cleanscreen #hud:not(#_):not(#__), body.cleanscreen .fx-p { display: none !important; }
@@ -1727,3 +1727,7 @@ body.automode #auto-states.show:not(#_) { opacity: 1; pointer-events: auto; tran
 
 /* открыто меню ☰ — облачко с фразой не просвечивает сквозь него */
 body:has(#auto-menu:not([hidden])) #bubble { opacity: 0; }
+
+/* Значки по долгому тапу: две группы — состояния и инструменты. */
+#auto-states button.sep { margin-left: 10px; }
+#auto-states:not(#_):not(#__) { gap: 6px !important; }
