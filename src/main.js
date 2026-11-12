@@ -3065,9 +3065,11 @@ function applyWear() {
   const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
   const defHex = (id, cat) => PIECE_SOURCES.find((x) => x.id === id)?.colors?.[cat];
   // Чулки и гольфы остаются поверх лосин; колготки под лосинами не видны.
-  w.keepStockings = !isPaint(w.legs) && legwear() !== 'tights';
+  // Колготки тоже поверх лосин, но тонкие — лосины сквозь них просвечивают.
+  w.keepStockings = !isPaint(w.legs);
+  w.sheerTights = !isPaint(w.legs) && legwear() === 'tights';
   if (isPaint(w.legs)) { /* «без чулок» — красить нечего */ }
-  else if (lt?.name === 'Глубокий чёрный') w.legsDark = 0.8;
+  else if (lt?.name === 'Глубокий чёрный') w.legsTint = 0x0b090d; // настоящий чёрный на любых чулках, и на белых тоже
   else if (lt?.hex != null) w.legsTint = lt.hex;
   if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
   if (isPaint(w.bottoms)) w.bottomHex = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]?.hex ?? defHex(w.bottoms, 'bottoms');
@@ -4621,7 +4623,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 154;
+const WAIFU_BUILD = 155;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

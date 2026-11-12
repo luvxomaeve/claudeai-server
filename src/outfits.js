@@ -1041,7 +1041,7 @@ export class PieceWardrobe {
     if (!map?.image || !this.base || !layers.length) return map;
     this.paintTexCache ??= new Map();
     const donors = [...this.skinDonors.entries(), ...this.sources.entries()].filter(([, x]) => x.skinMap?.image);
-    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
+    const key = `${map.uuid}|${layers.map((l) => `${l.kind}:${l.hex}:${l.keep ? 1 : 0}${l.sheer ? 's' : ''}`).join(',')}|${donors.map(([id]) => id).join(',')}`;
     if (this.paintTexCache.has(key)) { const t = this.paintTexCache.get(key); this.paintTexCache.delete(key); this.paintTexCache.set(key, t); return t; }
     const img = map.image, w = img.width, h = img.height;
     // Кожа под снятой одеждой уже подготовлена заранее (prepUpper) — здесь только ткань.
@@ -1062,7 +1062,7 @@ export class PieceWardrobe {
     const data = prep, d = data.data;
     const isSkin = (i) => d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150;
     this.idxCache ??= new Map();
-    for (const { kind, hex, keep } of layers) {
+    for (const { kind, hex, keep, sheer } of layers) {
       const m = this.clothMask(kind, w, h);
       let idx = this.idxCache.get(`${kind}|${w}`);
       if (!idx) {
@@ -1078,8 +1078,9 @@ export class PieceWardrobe {
       const R = (hex >> 16) & 255, G = (hex >> 8) & 255, Bl = hex & 255;
       for (let q = 0; q < idx.length; q++) {
         const p = idx[q], i = p * 4;
-        if (zone && zone[p] < 128 && um[p] < 8 && !isSkin(i)) continue;
-        const al = m[p] / 255; // на краю ткань плавно сходит на нет
+        let al = m[p] / 255; // на краю ткань плавно сходит на нет
+        // Чулки остаются поверх лосин. Колготки — тоже поверх, но тонкие: лосины просвечивают сквозь них.
+        if (zone && zone[p] < 128 && um[p] < 8 && !isSkin(i)) { if (!sheer) continue; al *= 0.5; }
         d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
       }
     }
@@ -1208,7 +1209,8 @@ export class PieceWardrobe {
     }
     if (kb) {
       const hex = wear.leggingsHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
-      layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
+      const sheer = keep && !!wear.sheerTights;
+      layers.push({ kind: kb, hex, keep, sheer }, { kind: `${kb}:trim`, hex: trimOf(hex), keep, sheer });
     }
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
@@ -1453,7 +1455,9 @@ export class PieceWardrobe {
       if (m[i + 3] < 128) continue;
       const r0 = d[i], g0 = d[i + 1], b0 = d[i + 2];
       const mx = Math.max(r0, g0, b0), mn = Math.min(r0, g0, b0);
-      if (mx - mn > 26) continue; // кожа (розовая) — не трогаем
+      // Кожа — тёплая (красного больше всего) и заметно цветная: её не трогаем. Белые чулки с холодным оттенком
+      // (сиреневатые, голубоватые) раньше принимались за кожу и не красились — теперь красятся.
+      if (mx - mn > 26 && r0 === mx && r0 > 140 && g0 >= b0 - 6) continue;
       const l = (r0 + g0 + b0) / 765;
       const k = 0.35 + 0.9 * l; // тёмные колготки — насыщенный цвет, белые чулки — светлый
       d[i] = Math.min(255, cr * k); d[i + 1] = Math.min(255, cg * k); d[i + 2] = Math.min(255, cb * k);
