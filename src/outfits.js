@@ -411,7 +411,7 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
   }
   if (pts.length < 50) return null;
   // Плотная «стрейч»-юбка: сетка гуще (ткань ложится глаже), зазор до тела маленький — сидит по фигуре.
-  const RINGS = 22, SEG = 56, margin = 0.008;
+  const RINGS = 26, SEG = 64, margin = 0.009;
   const positions = [], skinI = [], skinW = [], uvs = [], hemW = [];
   const sgn = Math.sign(hipJ.x - cx) || 1;
   let prevR = null;
@@ -431,6 +431,23 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
         if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.max(best, t);
       }
       radii.push(best || (prevR ? prevR[k] : 0.12));
+    }
+    // Облегание: «натянутая плёнка» (выпуклый контур) идёт по прямой между выступами и не повторяет талию, прогиб
+    // поясницы и бока. Берём настоящий контур тела по каждому направлению и сглаживаем его по соседним
+    // направлениям (ткань тянется между бёдрами, а не западает между ними) — юбка садится по фигуре, как лосины.
+    if (H) {
+      const real = new Float32Array(SEG);
+      for (const p of band) {
+        const dx = p[0] - cx, dz = p[1] - cz, rr = Math.hypot(dx, dz);
+        let k = Math.round((Math.atan2(dz, dx) / (Math.PI * 2)) * SEG); k = ((k % SEG) + SEG) % SEG;
+        if (rr > real[k]) real[k] = rr;
+      }
+      const sm = new Float32Array(SEG);
+      for (let k = 0; k < SEG; k++) { let m = 0; for (let j = -3; j <= 3; j++) m = Math.max(m, real[(k + j + SEG) % SEG]); sm[k] = m; }
+      // Только в талии и на верхе бёдер. Ниже ткань натянута между ногами ровно (как у настоящей узкой юбки):
+      // если и там повторять тело, она западает между ног и мнётся.
+      const fit = THREE.MathUtils.smoothstep(y, hipJ.y - 0.01, hipJ.y + 0.06);
+      for (let k = 0; k < SEG; k++) if (sm[k] > 0.02) radii[k] = Math.min(radii[k], radii[k] * (1 - fit) + (sm[k] * 0.3 + Math.max(sm[k], radii[k] * 0.9) * 0.7) * fit);
     }
     // Юбка книзу не сужается резко: каждое кольцо не уже 96% предыдущего (прямой силуэт, а не «штаны»).
     if (prevR) for (let k = 0; k < SEG; k++) radii[k] = Math.max(radii[k], prevR[k] * 0.93); // книзу может слегка сужаться по бедру, но не «штанами»
