@@ -2990,6 +2990,7 @@ const PIECE_SOURCES = [
   { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
   // Длинные капроновые чулки: нарисованы поверх голой ноги, кожа просвечивает.
   { id: 'p_nylon', name: 'Капрон', paint: { legs: 'nylon' }, cats: ['legs'], names: { legs: 'Капроновые чулки' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
+  { id: 'p_nylon2', name: 'Капрон короче', paint: { legs: 'nylonmid' }, cats: ['legs'], names: { legs: 'Капроновые чулки покороче' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
 ].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x))
   // Чёрная плиссе из отдельных полосок («дырявая» при наклонах) тоже убрана.
@@ -3153,6 +3154,7 @@ async function pickPiece(cat, id, quiet = false) {
 // Гардероб-шкаф: вкладки по частям (верх, низ, обувь, аксессуары, ноги) и карточки вещей с названиями.
 const PIECE_ICONS = { tops: '👚', bottoms: '👗', leggings: '🩳', shoes: '👠', acc: '🎀', legs: '🧦' };
 const BASE_NAMES = GIRL?.baseNames ?? window.WAIFU_BASE_NAMES ?? {};
+let closetOld = false; // раздел «Прежняя одежда» раскрыт?
 let closetTab = 'tops';
 function pieceName(srcId, cat) {
   if (srcId === 'none') return { shoes: 'Босиком', acc: 'Без аксессуара', bottoms: 'Без юбки', leggings: 'Без лосин' }[cat] ?? 'Без';
@@ -3320,9 +3322,15 @@ function renderPieces() {
       box.appendChild(sh);
     }
   }
+  // Верх и низ: сначала нарисованные вещи; прежняя одежда (модели из VRoid) убрана в сворачиваемый раздел внизу.
+  const split = c.id === 'tops' || c.id === 'bottoms';
+  const isOld = (id) => split && id !== 'none' && !isPaint(id);
+  const oldIds = opts.filter(isOld);
+  const showOld = closetOld === true;
+  const shown = split ? [...opts.filter((id) => !isOld(id)), ...(showOld ? oldIds : [])] : opts;
   const grid = document.createElement('div');
   grid.className = 'closet-grid';
-  for (const id of opts) {
+  for (const id of shown) {
     const b = document.createElement('button');
     b.className = 'closet-item' + (id === cur ? ' active' : '');
     b.innerHTML = `<span class="ci-icon">${id === 'none' ? '✕' : PIECE_ICONS[c.id]}</span><span class="ci-name">${pieceName(id, c.id)}</span>`;
@@ -3340,6 +3348,14 @@ function renderPieces() {
     grid.appendChild(b);
   }
   box.appendChild(grid);
+  if (split && oldIds.length) {
+    const ob = document.createElement('button');
+    ob.className = 'panel-big' + (showOld ? ' active' : '');
+    const worn = oldIds.includes(cur) ? ` · надето: ${pieceName(cur, c.id)}` : '';
+    ob.textContent = showOld ? '📦 Прежняя одежда — свернуть' : `📦 Прежняя одежда (${oldIds.length})${worn}`;
+    ob.addEventListener('click', () => { closetOld = !closetOld; renderPieces(); });
+    box.appendChild(ob);
+  }
   // Палитра для надетой вещи: тапнул цвет — сразу перекрасилась (не нужно листать по кругу).
   if (cur !== 'none') {
     const pal = document.createElement('div');
@@ -4623,7 +4639,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 166;
+const WAIFU_BUILD = 167;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
