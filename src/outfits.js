@@ -1190,17 +1190,25 @@ export class PieceWardrobe {
       const f = (c) => Math.round(lum > 0.45 ? c * 0.8 : c + (255 - c) * 0.2);
       return (f(r) << 16) | (f(g) << 8) | f(b);
     };
+    // Облегающая ткань цвета кожи (розовый, персик, беж) выглядела бы как голое тело — такие цвета уводим в более
+    // глубокий тон, чтобы вещь всегда читалась как одежда.
+    const clothHex = (hx) => {
+      const r0 = (hx >> 16) & 255, g0 = (hx >> 8) & 255, b0 = hx & 255;
+      if (r0 > 190 && r0 >= g0 && r0 >= b0 && g0 > 120 && b0 > 110 && r0 - Math.min(g0, b0) < 110) return (Math.round(r0 * 0.88) << 16) | (Math.round(g0 * 0.60) << 8) | Math.round(b0 * 0.72);
+      return hx;
+    };
     const layers = [];
     // Бельё (шортики под одеждой): ровная ткань с аккуратным кантом, в тон чулок.
     {
       // По умолчанию нежно-розовые с белым кантом; выбрал цвет чулок вручную — шортики в тон им.
-      const hex = wear.legsDark ? 0x17151c : (wear.legsTint ?? 0xf4a9c4);
+      let hex = wear.legsDark ? 0x17151c : (wear.legsTint ?? 0xf4a9c4);
+      hex = clothHex(hex);
       const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255, lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
       const light = (c) => Math.round(c + (255 - c) * (lum > 0.3 ? 0.72 : 0.3)); // кант светлее ткани
       layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex: (light(r) << 16) | (light(g) << 8) | light(b) });
     }
     if (kt) {
-      const hex = wear.topHex ?? 0xf1edf6;
+      const hex = clothHex(wear.topHex ?? 0xf1edf6);
       layers.push({ kind: kt, hex }, { kind: `${kt}:trim`, hex: trimOf(hex) });
       if (kt === 'polo') {
         // Воротник — светлый на тёмном поло и тёмный на светлом.
@@ -1209,7 +1217,7 @@ export class PieceWardrobe {
       }
     }
     if (kb) {
-      const hex = wear.leggingsHex ?? 0x24222c, keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
+      const hex = clothHex(wear.leggingsHex ?? 0x24222c), keep = !!wear.keepStockings && (kb === 'leggings' || kb === 'capri');
       const sheer = keep && !!wear.sheerTights;
       layers.push({ kind: kb, hex, keep, sheer }, { kind: `${kb}:trim`, hex: trimOf(hex), keep, sheer });
     }
@@ -1791,7 +1799,8 @@ function installSheenFull(mesh) {
   if ( uSheen.x > 0.0 ) {
     float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + normalize( vViewPosition ) ) ), 0.0 );
     float shS = pow( shH, 3.0 );
-    col *= 1.0 - 0.20 * ( 1.0 - shS );
+    float shLum = smoothstep( 0.30, 0.75, dot( col, vec3( 0.30, 0.59, 0.11 ) ) );
+    col *= 1.0 - mix( 0.20, 0.40, shLum ) * ( 1.0 - shS );
     col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS;
   }`);
     };
@@ -1824,7 +1833,10 @@ function installSheen(mesh) {
       // Один и тот же свет на всей нарисованной ткани (верх, лосины, шортики, чулки): широкий мягкий отсвет без
       // ярких точек. На светлой ткани добавлять свет некуда — там всё вне отсвета чуть темнеет (атлас).
       float shS = pow( shH, 3.0 ), shM = min( shL + shT, 1.0 );
-      col *= 1.0 - 0.20 * shM * ( 1.0 - shS );
+      // Светлая ткань — затемнение сильнее (иначе блик на ней не читается), тёмная — как было.
+      float shLum = smoothstep( 0.30, 0.75, dot( col, vec3( 0.30, 0.59, 0.11 ) ) );
+      // На верхе усиление мягче, чем на лосинах и чулках: сильная светотень там прорисовывала бы тело под тканью.
+      col *= 1.0 - min( mix( 0.20, 0.40, shLum ) * shL + mix( 0.20, 0.30, shLum ) * shT, 0.40 ) * ( 1.0 - shS );
       col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS * shM;${SKIN_SHEEN_GLSL(1)}
     }
   }`);
