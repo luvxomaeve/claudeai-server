@@ -410,13 +410,14 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
     }
   }
   if (pts.length < 50) return null;
-  const RINGS = 12, SEG = 40, margin = 0.011;
+  // Плотная «стрейч»-юбка: сетка гуще (ткань ложится глаже), зазор до тела маленький — сидит по фигуре.
+  const RINGS = 22, SEG = 56, margin = 0.008;
   const positions = [], skinI = [], skinW = [], uvs = [], hemW = [];
   const sgn = Math.sign(hipJ.x - cx) || 1;
   let prevR = null;
   for (let r = 0; r <= RINGS; r++) {
     const y = top + (hem - top) * (r / RINGS);
-    const band = pts.filter((p) => Math.abs(p[1] - y) < 0.022).map((p) => [p[0], p[2]]);
+    const band = pts.filter((p) => Math.abs(p[1] - y) < 0.016).map((p) => [p[0], p[2]]);
     const H = band.length >= 3 ? hull2d(band) : null;
     const radii = [];
     for (let k = 0; k < SEG; k++) {
@@ -432,7 +433,7 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
       radii.push(best || (prevR ? prevR[k] : 0.12));
     }
     // Юбка книзу не сужается резко: каждое кольцо не уже 96% предыдущего (прямой силуэт, а не «штаны»).
-    if (prevR) for (let k = 0; k < SEG; k++) radii[k] = Math.max(radii[k], prevR[k] * 0.96);
+    if (prevR) for (let k = 0; k < SEG; k++) radii[k] = Math.max(radii[k], prevR[k] * 0.93); // книзу может слегка сужаться по бедру, но не «штанами»
     prevR = radii;
     const below = THREE.MathUtils.clamp((hipJ.y + 0.03 - y) / (hipJ.y + 0.03 - hem), 0, 1);
     const wLeg = 0.92 * Math.pow(below, 0.8);
@@ -559,7 +560,7 @@ export class PieceWardrobe {
       for (const [kind, kTop, kHem] of [['skirt', 0.42, 0.5], ['mini', 0.34, 0.33], ['minihigh', 0.54, 0.33]]) {
         const m = dm ? buildTightSkirt(vrm, this.base.skins, dm, kTop, kHem) : null;
         if (!m) continue;
-        installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.014); installEdgeShade(m);
+        installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.011); installEdgeShade(m);
         this.tightSkirts[kind] = m;
         try { installSheenFull(m); } catch { /* ignore */ }
       }
@@ -1288,7 +1289,13 @@ export class PieceWardrobe {
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     // Капроновые чулки: тонкая ткань поверх всего, что на ногах (кожа или лосины просвечивают), сверху плотная полоса.
-    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: kl === 'nylontights' ? 0.84 : 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); } // поверх лосин/шорт колготки ровные по всей длине: отдельной «верхней» полосы нет (иначе у края шорт рваная кайма)
+    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: kl === 'nylontights' ? 0.84 : 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 });
+      if (kl === 'nylontights') {
+        // Колготки обволакивают лосины одним тоном с ногами: там, где под ними лосины, приводим цвет к тому же,
+        // что получается на ноге (кожа под капроном), — лосины под ними лишь едва угадываются.
+        const mixc = (k) => Math.round(((0xeec3b4 >> k) & 255) * 0.16 + ((nh >> k) & 255) * 0.84);
+        layers.push({ kind: kb, hex: (mixc(16) << 16) | (mixc(8) << 8) | mixc(0), alpha: 0.88 });
+      } } // поверх лосин/шорт колготки ровные по всей длине: отдельной «верхней» полосы нет (иначе у края шорт рваная кайма)
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
@@ -1341,6 +1348,8 @@ export class PieceWardrobe {
               else if (mn && mn[p] >= 128) r = 0;
               else if (r && keepSt && Math.abs(px[i] - lR) + Math.abs(px[i + 1] - lG) + Math.abs(px[i + 2] - lB) > 60) r = 0;
             }
+            // Блеск чулок выключен — капрон матовый везде, где он лежит, и поверх лосин тоже (иначе верх блестит, низ нет).
+            if (!sheenWant.stock && mn && mn[p] >= 128) r = 0;
             d[i] = r; d[i + 1] = mt ? mt[p] : 0; d[i + 2] = cloth;
           }
         }
@@ -1703,7 +1712,7 @@ export class PieceWardrobe {
       EDGE_RIM.value.setRGB(a, a * (0.82 + 0.06 * Math.sin(t * 0.23)), a * (0.96 + 0.04 * Math.sin(t * 0.31 + 2)));
     }
     // Облегающая юбка: чем сильнее согнуты ноги, тем увереннее рисуется поверх тела (бедро не проглядывает).
-    for (const sk of Object.values(this.tightSkirts ?? {})) if (sk.visible) setLift(sk, 0.022 + 0.05 * SQUAT_FLEX.value);
+    for (const sk of Object.values(this.tightSkirts ?? {})) if (sk.visible) setLift(sk, 0.017 + 0.05 * SQUAT_FLEX.value);
     const bh = this.base.vrm.humanoid;
     for (const [, s] of this.sources) {
       if (!s.active) continue;
