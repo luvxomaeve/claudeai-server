@@ -336,17 +336,8 @@ function zoomBy(factor) {
   autoCentered = false;
   if (!freeCam && touches.size === 2) {
     enterManualCam();
-    // Приближаем к точке между пальцами (а не к центру экрана).
-    const [a, b] = [...touches.values()];
-    const ndc = new THREE.Vector2(((a.x + b.x) / 2 / window.innerWidth) * 2 - 1, -((a.y + b.y) / 2 / window.innerHeight) * 2 + 1);
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(ndc, camera);
-    const P = ray.ray.at(manualCam.dist, new THREE.Vector3());
-    const T = camAnchor().clone().add(manualCam.off);
-    const nd = THREE.MathUtils.clamp(manualCam.dist * factor, 0.12 * camBase.S, 6 * camBase.S);
-    const real = nd / manualCam.dist;
-    manualCam.off.addScaledVector(P.sub(T), 1 - real);
-    manualCam.dist = nd;
+    // Ближе/дальше ровно по центру кадра: то, на что навёл, остаётся в центре.
+    manualCam.dist = THREE.MathUtils.clamp(manualCam.dist * factor, 0.12 * camBase.S, 6 * camBase.S);
     applyOrbit();
     return;
   }
@@ -994,6 +985,7 @@ let stroking = null;
 let lastOnHerAt = 0; // когда последний раз палец был на ней (для «Авто»: промах ≠ жест камерой)
 let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
+const pinch2 = { mode: null, d0: null, x0: 0, y0: 0 }; // что делает текущий жест двумя пальцами: 'zoom' | 'pan'
 let pinchMidY = null;
 let pinchMidX = 0;
 let pinchAng = 0;
@@ -1196,14 +1188,21 @@ canvas.addEventListener('pointermove', (e) => {
   if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size === 2 && pinchDist > 0) {
     const d = pinchDistance();
-    zoomBy(pinchDist / d);
-    pinchDist = d;
-    // Два пальца: щипок — ближе/дальше к тому месту, где пальцы; вести — сдвинуть кадр.
+    // Два пальца — одно из двух за жест: щипок (ближе/дальше, центр кадра остаётся на месте) или сдвиг кадра
+    // (ведёшь оба пальца вместе). Раньше делалось сразу и то и другое, и при щипке центровка съезжала.
     const [a, b] = [...touches.values()];
     const midX = (a.x + b.x) / 2;
     const midY = (a.y + b.y) / 2;
     const ang = 0;
-    if (pinchMidY != null) {
+    if (!pinch2.mode) {
+      // Смотрим на итог с начала жеста (события приходят по одному пальцу, по шагам судить нельзя).
+      if (pinch2.d0 == null) { pinch2.d0 = d; pinch2.x0 = midX; pinch2.y0 = midY; }
+      const nd = Math.abs(d - pinch2.d0), nm = Math.hypot(midX - pinch2.x0, midY - pinch2.y0);
+      if (Math.max(nd, nm) > 14) pinch2.mode = nd > nm * 1.15 ? 'zoom' : 'pan';
+    }
+    if (pinch2.mode === 'zoom') zoomBy(pinchDist / d);
+    pinchDist = d;
+    if (pinchMidY != null && pinch2.mode === 'pan') {
       const dx = midX - pinchMidX;
       const dy = midY - pinchMidY;
       if (freeCam) {
@@ -1451,7 +1450,7 @@ function endPointer(e) {
   touches.delete(e.pointerId);
   poseDrag = null;
   bgSwipe = null;
-  if (touches.size < 2) { if (pinchDist && manualCam) lockCamBone(); pinchDist = 0; pinchMidY = null; }
+  if (touches.size < 2) { if (pinchDist && manualCam) lockCamBone(); pinchDist = 0; pinchMidY = null; pinch2.mode = null; pinch2.d0 = null; }
   orbitDrag = null;
   if (touches.size > 0) return;
   pointerActive = false;
@@ -4600,7 +4599,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 149;
+const WAIFU_BUILD = 150;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
