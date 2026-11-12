@@ -1213,14 +1213,14 @@ export class PieceWardrobe {
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
       const lk = { leggings: 1, capri: 1, shorts: 1, minishorts: 1 }[kb] ? kb : null, w = map.image.width, h = map.image.height;
-      const key = `${lk}|${kt}|${w}|${lk ? map.uuid : ''}`;
+      const key = `${lk}|${kt}|${w}|${map.uuid}`;
       if (key !== sheenWant.key) {
         sheenWant.key = key;
         const mb = lk ? this.clothMask(lk, w, h) : null, mt = kt ? this.clothMask(kt, w, h) : null, d = sheenTex.image.data, N = SHEEN_N;
-        // Чулки под лосинами/шортами блестят так же, как сами лосины, — по всей длине, одним тоном (иначе ниже края
-        // капри они были бы другого оттенка). Чулок — это всё на ногах, что не голая кожа (смотрим готовый рисунок).
+        // Чулки блестят так же, как лосины, — всегда, когда блики включены, по всей длине и одним тоном.
+        // Чулок — это всё на ногах, что не голая кожа (смотрим готовый рисунок).
         let legs = null, px = null;
-        if (lk) {
+        {
           legs = this.zoneMask('legsall', w, h);
           const cv = (this.sheenCv ??= document.createElement('canvas'));
           cv.width = N; cv.height = N;
@@ -1239,7 +1239,7 @@ export class PieceWardrobe {
         }
         sheenTex.needsUpdate = true;
       }
-      sheenWant.leg = lk ? 1 : 0; sheenWant.top = kt ? 1 : 0;
+      sheenWant.leg = 1; sheenWant.top = kt ? 1 : 0;
     } catch (e) { sheenWant.leg = 0; sheenWant.top = 0; console.warn('sheen', e); }
     setSheenOn(sheenWant.on);
     this.setSkin(map);
