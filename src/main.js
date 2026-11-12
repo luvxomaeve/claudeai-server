@@ -1455,6 +1455,7 @@ function endPointer(e) {
   activeHandle = null;
   snapAnchor = null;
   touches.delete(e.pointerId);
+  if (poseDrag?.grab) grabRelease();
   poseDrag = null;
   bgSwipe = null;
   if (touches.size < 2) { if (pinchDist && manualCam) lockCamBone(); pinchDist = 0; pinchMidY = null; pinch2.mode = null; pinch2.both = false; pinch2.d0 = null; }
@@ -2566,12 +2567,56 @@ function showLabel(text) {
   clearTimeout(labelTimer);
   labelTimer = setTimeout(() => el.classList.remove('on'), 1200);
 }
+// ---------- Простой вид: долгий тап и потянуть — взять её за точку (колено, кисть, ступню, голову, корпус) ----------
+// Отпустил — она спрашивает «Так?»: ✓ оставляет позу (и запоминает её), ✕ возвращает как было.
+// Обычные жесты не меняются: без долгого тапа всё работает как раньше; долгий тап без движения — значки.
+let grabForce = null;
+let grab = null; // { snap } — что было до того, как взял
+const grabAsk = document.createElement('div');
+grabAsk.id = 'grab-ask';
+grabAsk.style.display = 'none';
+grabAsk.innerHTML = '<span>Так?</span><button data-a="yes">✓ Да</button><button data-a="no">✕ Нет</button>';
+grabAsk.style.cssText = 'position:fixed;left:50%;top:80%;transform:translate(-50%,-50%);z-index:32;display:none;gap:8px;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
+document.body.appendChild(grabAsk);
+for (const ev of ['pointerdown', 'touchstart']) grabAsk.addEventListener(ev, (e) => e.stopPropagation());
+let grabAskTimer = 0;
+function grabDone(keep) {
+  clearTimeout(grabAskTimer);
+  grabAsk.style.display = 'none';
+  if (!grab) return;
+  if (!keep) { try { character.importTouchPose(grab.snap); } catch { /* ignore */ } showToast('Вернула как было'); }
+  else { showToast('Запомнила ♥'); try { saveLeft(); } catch { /* ignore */ } }
+  grab = null;
+}
+grabAsk.addEventListener('click', (e) => { const a = e.target?.dataset?.a; if (a) grabDone(a === 'yes'); });
+for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:800;color:#fff;background:rgba(255,255,255,.18);cursor:pointer';
+function grabStart(e0) {
+  if (!character || !autoMode || poseMode) return false;
+  const hit = nearestHandle(e0, 70) ?? zoneAt(e0, true);
+  if (!hit) return false;
+  if (!grab) grab = { snap: character.exportTouchPose() };
+  clearTimeout(grabAskTimer); grabAsk.style.display = 'none';
+  stroking = null; petting = null; bgSwipe = null;
+  stopAuto(true);
+  grabForce = hit;
+  try { poseDragStart(e0); } finally { grabForce = null; }
+  if (!poseDrag || poseDrag.kind === 'bg' || poseDrag.kind === 'sitdrag') { poseDrag = null; return false; }
+  poseDrag.grab = true;
+  try { navigator.vibrate?.(8); } catch { /* ignore */ }
+  return true;
+}
+function grabRelease() {
+  // Отпустил точку — спрашивает, оставить ли так. Не ответил за 8 секунд — оставляет.
+  grabAsk.style.display = 'flex';
+  clearTimeout(grabAskTimer);
+  grabAskTimer = setTimeout(() => grabDone(true), 8000);
+}
 function poseDragStart(e) {
   snapPose();
-  const camBusy = performance.now() - lastCamMove < 450;
+  const camBusy = !grabForce && performance.now() - lastCamMove < 450;
   // Точку берём, только если палец прямо на ней (≈ размер кружка); иначе ведёшь по ней —
-  // работает как правая полоса.
-  const handleHit = camBusy ? null : nearestHandle(e, 24);
+  // работает как правая полоса. (grabForce — простой вид: точку уже выбрали долгим тапом.)
+  const handleHit = grabForce ?? (camBusy ? null : nearestHandle(e, 24));
   const hit = camBusy ? null : (handleHit ?? zoneAt(e, true));
   // Водишь по ней (мимо точек) вверх-вниз — как правая полоса: сесть/лечь/встать.
   if (hit && !handleHit && !['hand', 'arm', 'knee'].includes(hit.zone)) {
@@ -4644,7 +4689,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 178;
+const WAIFU_BUILD = 179;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4744,7 +4789,7 @@ function showAutoStates(ms = 4500) {
   autoStatesTimer = setTimeout(() => autoStates.classList.remove('show'), ms);
 }
 {
-  let lp = null;
+  let lp = null, held = null;
   const cancel = () => { if (lp) { clearTimeout(lp.t); lp = null; } };
   window.addEventListener('pointerdown', (e) => {
     cancel();
@@ -4752,10 +4797,18 @@ function showAutoStates(ms = 4500) {
     // Чистый экран и режим «Камера»: долгий тап в любом месте (по ней можно и не попасть) — значки возвращаются.
     const clean = document.body.classList.contains('cleanscreen');
     if (!clean && !camOnly && !zoneAt(e, true)) return;
-    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); showAutoStates(); }, 480) };
+    const e0 = { clientX: e.clientX, clientY: e.clientY };
+    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, 480) };
   }, { capture: true, passive: true });
-  window.addEventListener('pointermove', (e) => { if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel(); }, { capture: true, passive: true });
-  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, cancel, { capture: true, passive: true });
+  window.addEventListener('pointermove', (e) => {
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel();
+    // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
+    if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
+      const h = held; held = null;
+      if (touches.size === 1 && grabStart(h.e0)) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
+    }
+  }, { capture: true, passive: true });
+  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, () => { cancel(); held = null; }, { capture: true, passive: true });
 }
 function setAutoState(st) {
   autoState = st;
@@ -4994,6 +5047,7 @@ function autoReturn() {
   character.sitRate = 1;
   if (character.sit > 0.01) sitBy(-character.sit / 0.004);
   autoBendTarget = 0;
+  grabDone(true); try { character.importTouchPose(null); } catch { /* ignore */ }
   resetView();
 }
 // Свайп-команда в «Авто». dir: +1 — вниз, −1 — вверх.
@@ -5336,7 +5390,7 @@ function saveLeft() {
   const r = reps.home;
   const v = {
     sit: +(r.on ? 0 : character.sit).toFixed(3), bend: +(r.on ? 0 : autoBendTarget ?? character.bodyOffset.hipsRotX).toFixed(3),
-    st: autoState === 'hold' ? 'freeze' : autoState, cam,
+    st: autoState === 'hold' ? 'freeze' : autoState, cam, touch: (() => { try { return character.exportTouchPose(); } catch { return null; } })(),
   };
   try { localStorage.setItem(LEFT_KEY, JSON.stringify(v)); } catch { /* ignore */ }
 }
@@ -5352,6 +5406,7 @@ function restoreLeft() {
       character.sitS = character.sit; // сразу в позе, без «садится на глазах»
     }
     if (Number.isFinite(v.bend) && Math.abs(v.bend) > 0.01) character.bodyOffset.hipsRotX = THREE.MathUtils.clamp(v.bend, BEND_MIN, BEND_MAX);
+    if (v.touch) { try { character.importTouchPose(v.touch); } catch { /* ignore */ } }
     if (v.st === 'sleep' || v.st === 'freeze') setAutoState(v.st);
     const c = v.cam;
     if (c && [c.yaw, c.pitch, c.zoom].every(Number.isFinite)) {
