@@ -4623,7 +4623,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 156;
+const WAIFU_BUILD = 157;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4755,7 +4755,7 @@ function renderAutoMenu() {
     ['🎵', 'Анимации и танцы', () => $('btn-anims').click()],
     ['📷', 'Фото', () => $('cam-photo').click()],
     [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
-    ['✨', sheenOn ? 'Блики на ткани: вкл' : 'Блики на ткани: выкл', () => { sheenOn = !sheenOn; try { localStorage.setItem('waifu-sheen', sheenOn ? '1' : '0'); } catch { /* ignore */ } setSheenOn(sheenOn); }, true],
+    ['✨', sheenOn ? 'Блики (ткань и кожа): вкл' : 'Блики (ткань и кожа): выкл', () => { sheenOn = !sheenOn; try { localStorage.setItem('waifu-sheen', sheenOn ? '1' : '0'); } catch { /* ignore */ } setSheenOn(sheenOn); }, true],
     // «Взгляд» и «домой» — в значках по долгому тапу на ней; в ручном виде возврат оставляем здесь.
     ...(autoMode ? [] : [['↩️', 'Вернуть как было', () => resetView()]]),
     autoMode ? ['🎛', 'Ручное управление: полосы, позы, точки', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],

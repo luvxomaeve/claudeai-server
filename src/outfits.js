@@ -548,6 +548,7 @@ export class PieceWardrobe {
     installHems(this.base.pieces);
     for (const m of this.base.pieces.bottoms ?? []) installDroop(vrm, m);
     for (const m of this.base.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); installEdgeShade(m); installSheen(m); }
+    try { vrm.scene.traverse((o) => { if (o.isMesh && !this.base.skins.includes(o) && [].concat(o.material).some((mm) => /Face_\d+_SKIN/i.test(mm?.name ?? ''))) installSkinSheen(o); }); } catch (e) { console.warn('face sheen', e); }
     for (const m of this.base.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
     // Облегающая юбка — своя сетка по её телу (материал берём у любой её вещи, без рисунка).
     try {
@@ -1237,15 +1238,16 @@ export class PieceWardrobe {
           const row = Math.min(h - 1, Math.floor(((y + 0.5) / N) * h)) * w;
           for (let x = 0; x < N; x++, i += 4) {
             const p = row + Math.min(w - 1, Math.floor(((x + 0.5) / N) * w));
-            let r = mb ? mb[p] : 0;
+            let r = mb ? mb[p] : 0, cloth = Math.max(r, mt ? mt[p] : 0);
             if (legs && legs[p] >= 128) {
               const skin = px[i] > px[i + 1] && px[i + 1] >= px[i + 2] && px[i] - px[i + 2] > 18 && px[i] > 150;
+              if (!skin) cloth = 255;
               if (sheenWant.stock) { if (!skin) r = 255; }
               // Блеск чулок выключен: под лосинами, из-под которых выглядывают чулки, блестит только сама ткань лосин
               // (по её цвету) — чулок остаётся матовым по всей длине.
               else if (r && keepSt && Math.abs(px[i] - lR) + Math.abs(px[i + 1] - lG) + Math.abs(px[i + 2] - lB) > 60) r = 0;
             }
-            d[i] = r; d[i + 1] = mt ? mt[p] : 0;
+            d[i] = r; d[i + 1] = mt ? mt[p] : 0; d[i + 2] = cloth;
           }
         }
         sheenTex.needsUpdate = true;
@@ -1744,7 +1746,35 @@ export const SHEEN = { value: new THREE.Vector2() };
 const sheenWant = { leg: 0, top: 0, on: true, stock: true, key: '' };
 // Блеск чулок — отдельной настройкой (в гардеробе, раздел «Чулки»). После смены нужно перерисовать наряд.
 export function setStockSheen(on) { sheenWant.stock = !!on; }
-export function setSheenOn(on) { sheenWant.on = !!on; SHEEN.value.set(sheenWant.on ? sheenWant.leg : 0, sheenWant.on ? sheenWant.top : 0); }
+// Кожа: тот же мягкий свет, но слабее и теплее — видны изгибы рук, ног, живота, шеи и лица.
+const SHEEN_SKIN = { value: 1 };
+export function setSheenOn(on) { sheenWant.on = !!on; SHEEN.value.set(sheenWant.on ? sheenWant.leg : 0, sheenWant.on ? sheenWant.top : 0); SHEEN_SKIN.value = sheenWant.on ? 1 : 0; }
+const SKIN_SHEEN_GLSL = (k) => `
+      float skS = pow( shH, 5.0 );
+      col *= 1.0 - ${(0.07 * k).toFixed(3)} * shSk * ( 1.0 - pow( shH, 2.0 ) );
+      col += vec3( 0.20, 0.15, 0.14 ) * ${(0.30 * k).toFixed(3)} * skS * shSk;`;
+// Лицо и уши — отдельные сетки без рисунка одежды: свет кожи на весь материал, слабее, чем на теле.
+function installSkinSheen(mesh, k = 0.55) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m || m.isOutline || m.userData.sheen) continue;
+    m.userData.sheen = true;
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (sh, r) => {
+      prev?.call(m, sh, r);
+      const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
+      if (!sh.fragmentShader.includes(at)) return;
+      sh.uniforms.uSheenSkin = SHEEN_SKIN;
+      sh.fragmentShader = 'uniform float uSheenSkin;\n' + sh.fragmentShader.replace(at, `${at}
+  if ( uSheenSkin > 0.0 ) {
+    float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + normalize( vViewPosition ) ) ), 0.0 );
+    float shSk = uSheenSkin;${SKIN_SHEEN_GLSL(k)}
+  }`);
+    };
+    const pk = m.customProgramCacheKey?.bind(m);
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|skinSheen${k}`;
+    m.needsUpdate = true;
+  }
+}
 function installSheenFull(mesh) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     if (!m || m.isOutline || m.userData.sheen) continue;
@@ -1777,13 +1807,15 @@ function installSheen(mesh) {
       prev?.call(m, sh, r);
       const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
       if (!sh.fragmentShader.includes(at) || !sh.fragmentShader.includes('mapUv')) return;
-      sh.uniforms.uSheen = SHEEN; sh.uniforms.uSheenMap = SHEEN_MAP;
-      sh.fragmentShader = 'uniform vec2 uSheen;\nuniform sampler2D uSheenMap;\n' + sh.fragmentShader.replace(at, `${at}
-  if ( uSheen.x + uSheen.y > 0.0 ) {
-    vec2 shK = smoothstep( 0.45, 0.95, texture2D( uSheenMap, mapUv ).rg );
+      sh.uniforms.uSheen = SHEEN; sh.uniforms.uSheenMap = SHEEN_MAP; sh.uniforms.uSheenSkin = SHEEN_SKIN;
+      sh.fragmentShader = 'uniform vec2 uSheen;\nuniform float uSheenSkin;\nuniform sampler2D uSheenMap;\n' + sh.fragmentShader.replace(at, `${at}
+  if ( uSheen.x + uSheen.y + uSheenSkin > 0.0 ) {
+    vec4 shK4 = texture2D( uSheenMap, mapUv );
+    vec2 shK = smoothstep( 0.45, 0.95, shK4.rg );
+    float shSk = uSheenSkin * ( 1.0 - smoothstep( 0.2, 0.7, shK4.b ) ); // всё, что не ткань
     // Где лосины лежат поверх низа кофточки — это лосины: отсвет верха туда не добавляем (иначе широкая серая полоса у пояса).
     float shL = uSheen.x * shK.r, shT = uSheen.y * shK.g * ( 1.0 - shK.r );
-    if ( shL + shT > 0.0 ) {
+    if ( shL + shT + shSk > 0.0 ) {
       vec3 shV = normalize( vViewPosition );
       float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + shV ) ), 0.0 );
       // Атласный блик: яркий гребень + мягкий отсвет ткани.
@@ -1791,7 +1823,7 @@ function installSheen(mesh) {
       // ярких точек. На светлой ткани добавлять свет некуда — там всё вне отсвета чуть темнеет (атлас).
       float shS = pow( shH, 3.0 ), shM = min( shL + shT, 1.0 );
       col *= 1.0 - 0.20 * shM * ( 1.0 - shS );
-      col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS * shM;
+      col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS * shM;${SKIN_SHEEN_GLSL(1)}
     }
   }`);
     };
