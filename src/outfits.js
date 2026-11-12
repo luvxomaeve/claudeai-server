@@ -695,7 +695,7 @@ export class PieceWardrobe {
       } else if (lo != null) {
         const under = base === 'under';
         const nylon = base === 'nylon' || base === 'nylonmid', ntights = base === 'nylontights'; // капроновые колготки — до талии, как лосины // капроновые чулки: от пальцев до верха бедра, сверху плотная полоса
-        const topY = under ? hipJ.y + leg * 0.2 : nylon ? hipJ.y - leg * 0.17 - (base === 'nylonmid' ? 0.10 * (leg / 0.42) : 0) : waist; // nylonmid — на ~10 см короче // бельё — та же форма шортиков, что была, только ровная
+        const topY = under ? hipJ.y + leg * 0.2 : nylon ? hipJ.y - leg * 0.262 - (base === 'nylonmid' ? 0.10 * (leg / 0.42) : 0) : waist; // чулки начинаются ровно под шортиками (без наложения на них) // nylonmid — на ~10 см короче // бельё — та же форма шортиков, что была, только ровная
         const body = (x, y) => y < topY && y > lo;
         const tw = under ? 0.009 : TW; // у шортиков резинки тоньше
         inside = trim === 'seam'
@@ -708,6 +708,7 @@ export class PieceWardrobe {
         upper: (x, y) => y > hipJ.y + leg * 0.19, // всё выше шортиков (для заливки кожи под снятым верхом)
         bust: (x, y) => { const c = B('chest') ?? B('spine'); return y > (c ? c.y - 0.01 : hipJ.y + leg * 0.75) && y < neck.y - 0.03 && ax(x) < ux + 0.02; }, // грудная клетка: тут тени делаем совсем мягкими
         waistgap: (x, y) => y > hipJ.y + leg * 0.19 && y < hipJ.y + leg * 0.5, // над шортиками: тут торчала бы серая резинка модели
+        nylonpanty: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // верх колготок: от талии до ног
         all: () => true, // вся развёртка тела (чтобы знать, где между её кусками пусто)
         legsall: (x, y) => y < hipJ.y - leg * 0.26, // ноги ниже белья (для «без чулок»)
       }[kind];
@@ -1257,8 +1258,10 @@ export class PieceWardrobe {
       layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex });
       // Капрон — тонкая ткань (кожа просвечивает), сверху плотная полоса. Под шортами и колготки под любыми лосинами —
       // рисуем сейчас (они окажутся снизу); чулки поверх длинных лосин и капри — в самом конце (см. ниже).
-      nylonTop = isNylon && kl !== 'nylontights' && (kb === 'leggings' || kb === 'capri');
-      if (isNylon && !nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: 0.6 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); }
+      // Колготки — поверх любых лосин и шорт (так просили); чулки — поверх длинных лосин и капри.
+      nylonTop = isNylon && !!kb && (kl === 'nylontights' || kb === 'leggings' || kb === 'capri');
+      // У колготок верх (над ногами) плотнее — видно, что они надеты поверх шортиков, до талии.
+      if (isNylon && !nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: 0.6 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); if (kl === 'nylontights') layers.push({ kind: 'nylonpanty', hex: nh, alpha: 0.5 }); }
     }
     if (kt) {
       const hex = clothHex(wear.topHex ?? 0xf1edf6);
@@ -1283,7 +1286,7 @@ export class PieceWardrobe {
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     // Капроновые чулки: тонкая ткань поверх всего, что на ногах (кожа или лосины просвечивают), сверху плотная полоса.
-    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); }
+    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); if (kl === 'nylontights') layers.push({ kind: 'nylonpanty', hex: nh, alpha: 0.35 }); }
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {

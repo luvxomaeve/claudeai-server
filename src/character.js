@@ -2285,7 +2285,9 @@ export class Character {
       {
         const st = this.stanceNow ??= { w: 0, f: 0 };
         if (L) { const a = 1 - Math.exp(-(this.lastDt ?? 0.016) * 3); st.w += ((this.stanceW ?? 0) - st.w) * a; st.f += ((this.stanceF ?? 0) - st.f) * a; }
-        const sk = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.12, 0.4);
+        // Действует стоя и в приседе (приседает на расставленных ногах); на коленях и ниже — как обычно.
+        const sk = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.47, 0.6);
+        this.stanceK = st.w * sk;
         target.x += outSign * st.w * S * sk;
         target.z += (L ? 1 : -1) * st.f * S * sk;
       }
@@ -2304,7 +2306,8 @@ export class Character {
       // не перекрещиваются и не заламываются. Отвели ногу — колено туда же;
       // подняли — колено вперёд-вверх; на коленях — вперёд-вниз.
       const knee = lower.getWorldPosition(new THREE.Vector3());
-      const lateral = footOff ? footOff.x * 1.5 : 0;
+      // Ступни шире (стойка) — колени разворачиваются наружу вместе с ними, а не сводятся «иксом».
+      const lateral = (footOff ? footOff.x * 1.5 : 0) + outSign * (this.stanceK ?? 0) * S * 2.4;
       const kneeUp = footOff ? footOff.y * 1.2 : 0;
       const pole = new THREE.Vector3(
         rest.pos.x + outSign * (0.03 + 0.06 * p1 * (1 - p3)) * S + lateral + 0.4 * p3, // колени чуть врозь; сидя боком — влево-вперёд
