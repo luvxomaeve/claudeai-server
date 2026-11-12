@@ -985,7 +985,7 @@ let stroking = null;
 let lastOnHerAt = 0; // когда последний раз палец был на ней (для «Авто»: промах ≠ жест камерой)
 let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
-const pinch2 = { mode: null, d0: null, x0: 0, y0: 0 }; // что делает текущий жест двумя пальцами: 'zoom' | 'pan'
+const pinch2 = { mode: null, both: false, d0: null, x0: 0, y0: 0 }; // что делает текущий жест двумя пальцами: 'zoom' | 'pan'
 let pinchMidY = null;
 let pinchMidX = 0;
 let pinchAng = 0;
@@ -1199,10 +1199,15 @@ canvas.addEventListener('pointermove', (e) => {
       if (pinch2.d0 == null) { pinch2.d0 = d; pinch2.x0 = midX; pinch2.y0 = midY; }
       const nd = Math.abs(d - pinch2.d0), nm = Math.hypot(midX - pinch2.x0, midY - pinch2.y0);
       if (Math.max(nd, nm) > 14) pinch2.mode = nd > nm * 1.15 ? 'zoom' : 'pan';
+    } else if (!pinch2.both) {
+      // Второе действие подключается, только если его делают заметно: при щипке повёл пальцы в сторону —
+      // кадр поедет; при сдвиге развёл пальцы — начнёт приближать. Случайное дрожание ничего не сбивает.
+      const nd = Math.abs(d - pinch2.d0), nm = Math.hypot(midX - pinch2.x0, midY - pinch2.y0);
+      if ((pinch2.mode === 'zoom' ? nm : nd) > 28) pinch2.both = true;
     }
-    if (pinch2.mode === 'zoom') zoomBy(pinchDist / d);
+    if (pinch2.mode === 'zoom' || pinch2.both) zoomBy(pinchDist / d);
     pinchDist = d;
-    if (pinchMidY != null && pinch2.mode === 'pan') {
+    if (pinchMidY != null && (pinch2.mode === 'pan' || pinch2.both)) {
       const dx = midX - pinchMidX;
       const dy = midY - pinchMidY;
       if (freeCam) {
@@ -1434,7 +1439,9 @@ function endPointer(e) {
       if (autoTap && now - autoTap.t < 340 && autoTap.her === !!herTap && Math.hypot(e.clientX - autoTap.x, e.clientY - autoTap.y) < 48) {
         autoTap = null;
         if (herTap) {
-          // Двойной тап по ней — камера подлетает к этому месту и держит его в центре, пока она двигается.
+          // В обычном режиме двойной тап по ней — это просто два касания (её тыкают): камеру не трогаем.
+        } else if (camOnly && zoneAt(e, true)) {
+          // Режим «🎥 Камера»: двойной тап по ней — камера подлетает к этому месту и держит его в центре.
           focusAt(e); autoCentered = false;
         } else {
           // Первый двойной тап — камера возвращается по центру (она продолжает, что делала);
@@ -1450,7 +1457,7 @@ function endPointer(e) {
   touches.delete(e.pointerId);
   poseDrag = null;
   bgSwipe = null;
-  if (touches.size < 2) { if (pinchDist && manualCam) lockCamBone(); pinchDist = 0; pinchMidY = null; pinch2.mode = null; pinch2.d0 = null; }
+  if (touches.size < 2) { if (pinchDist && manualCam) lockCamBone(); pinchDist = 0; pinchMidY = null; pinch2.mode = null; pinch2.both = false; pinch2.d0 = null; }
   orbitDrag = null;
   if (touches.size > 0) return;
   pointerActive = false;
@@ -4599,7 +4606,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 150;
+const WAIFU_BUILD = 151;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
