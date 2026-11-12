@@ -2771,7 +2771,21 @@ export class Character {
       // Локоть смотрит вниз-назад и немного наружу, как у человека.
       const shoulder = upper.getWorldPosition(new THREE.Vector3());
       const outward = Math.sign(shoulder.x - chest.getWorldPosition(new THREE.Vector3()).x) || 1;
-      const pole = lower.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(outward * 0.3, -0.5, -0.3));
+      // Куда смотрит локоть. Рука внизу — вниз-назад и чуть наружу (как было). Кисть выше плеча — локоть уходит
+      // наружу, а не остаётся «внизу» (иначе рука выворачивается). Лёжа «низ» считаем от её тела, а не от пола.
+      // Направление меняется плавно, без перескоков.
+      const cq = chest.getWorldQuaternion(new THREE.Quaternion());
+      const upC = new THREE.Vector3(0, 1, 0).applyQuaternion(cq);
+      const high = THREE.MathUtils.smoothstep(target.clone().sub(shoulder).dot(upC) / (0.5 * this.scale), -0.1, 0.7);
+      const lieK = THREE.MathUtils.smoothstep(this.sitS, 0.85, 1.15);
+      const dirW = new THREE.Vector3(outward * (0.3 + 0.5 * high), -0.5 + 0.45 * high, -0.3 - 0.1 * high);
+      if (lieK > 0) {
+        const outC = Math.sign(chest.worldToLocal(shoulder.clone()).x) || 1;
+        dirW.lerp(new THREE.Vector3(outC * (0.3 + 0.5 * high), -0.5 + 0.45 * high, -0.3).applyQuaternion(cq), lieK);
+      }
+      const pd = ((this.elbowDir ??= {})[side] ??= dirW.clone());
+      pd.lerp(dirW, 1 - Math.exp(-(this.lastDt ?? 0.016) * 8));
+      const pole = lower.getWorldPosition(new THREE.Vector3()).add(pd);
       // Тянут дальше, чем достаёт рука, — корпус наклоняется следом.
       const rest = this.limbRest.get(upper.uuid);
       if (rest) {
