@@ -4623,7 +4623,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 155;
+const WAIFU_BUILD = 156;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5195,6 +5195,65 @@ function updateWishes(dt) {
   character.react({ expression: 'relaxed', motion: 'tiltHead' });
   say(pick(def.ask), 'happy');
 }
+// ---------- Флирт ----------
+// Когда её не трогают, она сама кокетничает: взгляд из-под ресниц, подмигивание, поправляет волосы, палец к губам,
+// оглядывается через плечо, чуть наклоняется к тебе, покачивает бёдрами. Жест + мимика + взгляд + реплика.
+// Чем выше симпатия, тем смелее и чаще. Коснулся её — сразу бросает и реагирует на тебя.
+let flirtGazeUntil = 0;
+let flirtTimer = 16;
+let flirtLast = '';
+let flirtUndo = null; // вернуть наклон/поворот после жеста
+const FLIRTS = [
+  { id: 'coy', run: () => { character.coy(4); character.setExpression('relaxed', 0.45, 3.6); setTimeout(() => character?.wink(), 1700); },
+    lines: [['Чего смотришь?.. Хи~', 'Привет~'], ['Нравлюсь тебе?~', 'Я знаю, что ты смотришь~'], ['Иди ближе ♥', 'Только на меня и смотри ♥']] },
+  { id: 'hair', run: () => { character.playMotion('twirl'); character.coy(3.5); character.setExpression('happy', 0.4, 3.5); },
+    lines: [['Волосы запутались~'], ['Тебе нравятся мои волосы?', 'Хи, залюбовался?'], ['Хочешь потрогать?~ ♥', 'Для тебя прихорашиваюсь ♥']] },
+  { id: 'lips', run: () => { character.playMotion('lips'); character.coy(3.2); character.setExpression('relaxed', 0.5, 3.4); },
+    lines: [['Хм… о чём бы подумать~'], ['Тсс… это секрет~', 'Угадай, о чём я думаю~'], ['О тебе думаю ♥', 'Мм… иди сюда~ ♥']], minTier: 1 },
+  { id: 'hairBack', run: () => { character.playMotion('hairBack'); character.setExpression('happy', 0.45, 3.5); setTimeout(() => character?.wink(), 2200); },
+    lines: [['Жарко сегодня~'], ['Как тебе так?~', 'Смотри на меня~'], ['Красивая? ♥', 'Не отводи взгляд ♥']] },
+  { id: 'waist', run: () => { character.playMotion('waistSlide'); character.coy(3); character.setExpression('happy', 0.35, 3.4); },
+    lines: [['Наряд сидит хорошо?'], ['Мне идёт, правда?~', 'Нравится, как сидит?'], ['Для тебя выбирала ♥', 'Скажи, что я красивая~ ♥']], minTier: 1 },
+  { id: 'behind', run: () => { character.playMotion('behindBack'); character.coy(4); character.setExpression('happy', 0.5, 3.8); },
+    lines: [['Хи… что?~'], ['Угадай, что я задумала~', 'А у меня сюрприз~'], ['Скучала по тебе ♥', 'Я вся твоя~ ♥']] },
+  { id: 'lean', stand: true, run: () => {
+      autoBendTarget = 0.32; character.setExpression('happy', 0.5, 3.6); character.coy(3.6); setTimeout(() => character?.wink(), 1900);
+      flirtUndo = { at: performance.now() + 4200, fn: () => { if (!poseDrag && !reps.home.on) autoBendTarget = 0; } };
+    },
+    lines: [['Что там у тебя?~'], ['Ближе~ Не бойся', 'Дай рассмотрю тебя~'], ['Хочу поближе к тебе ♥', 'Ммм… привет ♥']], minTier: 1 },
+  { id: 'shoulder', stand: true, move: true, run: () => {
+      const sg = Math.random() < 0.5 ? 1 : -1;
+      character.turnTo(sg * 1.75); // вполоборота спиной: голова ещё дотягивается посмотреть на тебя через плечо character.setExpression('happy', 0.45, 4.5); setTimeout(() => character?.wink(), 3000);
+      flirtUndo = { at: performance.now() + 6000, fn: () => character.turnTo(0) };
+    },
+    lines: [['Сейчас вернусь~'], ['Смотришь?~', 'Хи, поймал взгляд~'], ['Нравится вид? ♥', 'Знаю, что смотришь ♥']], minTier: 1 },
+  { id: 'sway', stand: true, run: () => { character.playMotion('handOnHip'); character.setExpression('happy', 0.4, 4); const r = AUTO_ROUTINES.find((x) => x.name === 'покачивание'); if (r && !auto) auto = { keys: r.keys, t: 0, last: null }; },
+    lines: [['Ла-ла-ла~'], ['Потанцуем?~', 'Музыка в голове играет~'], ['Смотри, как я умею ♥', 'Только для тебя ♥']] },
+];
+function updateFlirt(dt) {
+  if (!character || !autoMode) return;
+  const now = performance.now();
+  const touching = !!poseDrag || pointerActive && now - lastOnHerAt < 300 || now - lastOnHerAt < 1200;
+  if (flirtUndo && (now > flirtUndo.at || touching)) { const u = flirtUndo; flirtUndo = null; try { u.fn(); } catch { /* ignore */ } }
+  if (touching) { flirtGazeUntil = 0; flirtTimer = Math.max(flirtTimer, 7); return; }
+  const ok = autoState === 'live' && !poseMode && !reps.home.on && !auto && (character.sleep ?? 0) < 0.1 && !character.dancing && !character.mixer && !character.loop
+    && character.sitS < 0.9 && $('wardrobe').classList.contains('hidden') && !character.turnGoal && !character.motions.length;
+  if (!ok) return;
+  flirtTimer -= dt;
+  if (flirtTimer > 0) return;
+  const t = tier();
+  flirtTimer = (t === 2 ? 13 : t === 1 ? 17 : 22) + Math.random() * 9;
+  const standing = character.sit < 0.02 && Math.abs(character.bodyOffset.hipsRotX) < 0.2;
+  const camMine = !!manualCam || !!freeCam;
+  const opts = FLIRTS.filter((f) => f.id !== flirtLast && (f.minTier ?? 0) <= t && (!f.stand || standing) && (!f.move || !camMine));
+  if (!opts.length) return;
+  const f = opts[Math.floor(Math.random() * opts.length)];
+  flirtLast = f.id;
+  flirtGazeUntil = now + 4500;
+  try { f.run(); } catch (e) { console.warn('flirt', e); }
+  say(pick(f.lines[t] ?? f.lines[0]));
+  idleTime = 0;
+}
 // Сама прохаживается, когда её не трогают: пара шагов в сторону или к тебе, потом обратно. Коснулся — стоит,
 // где стоит, и слушается; усадил/уложил — возвращается на место. Ничего на экране для этого нет.
 let walkTimer = 10;
@@ -5301,7 +5360,8 @@ function tick() {
     }
     lookPoint.add(saccade);
     // Взгляд «на меня»: глаза в камеру, голова к тебе.
-    if (gazeMode === 'me') lookPoint.copy(camera.position).add(saccade);
+    const flirtLook = gazeMode !== 'closed' && performance.now() < flirtGazeUntil;
+    if (gazeMode === 'me' || flirtLook) lookPoint.copy(camera.position).add(saccade);
     // Камера близко к лицу — она это чувствует (смущение, улыбка); смущаясь, отводит глаза.
     {
       const hp = character.bones.head.getWorldPosition(new THREE.Vector3());
@@ -5318,7 +5378,7 @@ function tick() {
     if (gazeMode === 'follow') lookNdc.set(pointer.x * facing, pointer.y * facing);
     else lookNdc.set(0, 0);
     character.eyesShut = gazeMode === 'closed' ? 1 : 0;
-    character.gazeTarget = gazeMode === 'me' ? camera.position : null;
+    character.gazeTarget = gazeMode === 'me' || flirtLook ? camera.position : null;
     character.gazeUp = (character.gazeUp ?? new THREE.Vector3()).set(0, 1, 0).applyQuaternion(camera.quaternion);
     character.headLook.lerp(lookNdc, 1 - Math.exp(-dt * 4));
 
@@ -5339,6 +5399,7 @@ function tick() {
     }
 
     autoWalk(dt);
+    updateFlirt(dt);
     character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
     character.update(dt);
     pieceWardrobe.sync(dt);

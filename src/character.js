@@ -280,6 +280,7 @@ export class Character {
     if (motion && !this.forceSleep && !this.frozen) this.playMotion(motion, side);
   }
 
+  coy(sec = 3.5) { this.coyT = sec; this.coySide = Math.random() < 0.5 ? 1 : -1; }
   wink(side = Math.random() < 0.5 ? 'left' : 'right') {
     this.winkSide = side;
     this.winkT = 0.45;
@@ -1033,6 +1034,15 @@ export class Character {
     // Голова чуть поворачивается за пальцем/курсором.
     const bendHL = 1 - 0.6 * THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.2, 0.7);
     pose.headY += this.headLook.x * 0.35 * bendHL * (1 - (this.sleep ?? 0));
+    // Кокетливый взгляд (см. флирт в main.js): подбородок чуть вниз, голова набок — смотрит из-под ресниц.
+    {
+      this.coyT = Math.max(0, (this.coyT ?? 0) - dt);
+      this.coyK = (this.coyK ?? 0) + ((this.coyT > 0 ? 1 : 0) - (this.coyK ?? 0)) * (1 - Math.exp(-dt * 3));
+      const ck = this.coyK * (1 - (this.sleep ?? 0));
+      pose.headX += 0.13 * ck;
+      pose.headZ += 0.09 * ck * (this.coySide ?? 1);
+      pose.spineZ -= 0.03 * ck * (this.coySide ?? 1);
+    }
     // Смущение, когда камера близко к лицу: сначала смотрит в глаза и улыбается,
     // потом (чем выше симпатия, тем мягче и чаще) отводит взгляд и голову, краснеет — и снова смотрит.
     {
