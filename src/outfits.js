@@ -1221,7 +1221,7 @@ export class PieceWardrobe {
         }
         sheenTex.needsUpdate = true;
       }
-      sheenWant.leg = lk ? 1 : 0; sheenWant.top = kt ? 1 : 0;
+      sheenWant.leg = lk ? 1 : 0; sheenWant.top = kt ? 0.85 : 0;
     } catch (e) { sheenWant.leg = 0; sheenWant.top = 0; console.warn('sheen', e); }
     setSheenOn(sheenWant.on);
     this.setSkin(map);
@@ -1729,8 +1729,10 @@ function installSheen(mesh) {
     if ( shL + shT > 0.0 ) {
       vec3 shV = normalize( vViewPosition );
       float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + shV ) ), 0.0 );
-      // Одна и та же ткань на всей вещи: атласный блик с гребнем и мягкий отсвет — и на лосинах, и на верхе.
-      col += vec3( 0.20, 0.19, 0.25 ) * ( pow( shH, 26.0 ) + 0.22 * pow( shH, 5.0 ) ) * min( shL + shT, 1.0 );
+      // Атласный блик: яркий гребень + мягкий отсвет ткани.
+      // На лосинах — блик с ярким гребнем. На верхе — только ровный мягкий отсвет: яркий гребень там прорисовывал
+      // бы тело под тканью, а это уже за рамками 16+.
+      col += vec3( 0.20, 0.19, 0.25 ) * ( pow( shH, 26.0 ) * shL + 0.22 * pow( shH, 4.0 ) * min( shL + shT, 1.0 ) );
     }
   }`);
     };
