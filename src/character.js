@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { tuneSkirt, shapeHips, HIP_FLEX, SQUAT_FLEX, FOLD_ON, FOLD_L, FOLD_R } from './outfits.js';
+import { tuneSkirt, shapeHips, HIP_FLEX, SQUAT_FLEX } from './outfits.js';
 const HEAD_LEAN_SIGN = -1; // знак наклона головы «к пальцу» (проверено тестом)
 
 const EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
@@ -1406,17 +1406,6 @@ export class Character {
       const amt = 0.038 * (this.scale ?? 1);
       HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
-      // Складочки ткани: насколько согнут каждый сустав (0…1) × закрыт ли он тканью.
-      const P = (n) => b[n]?.getWorldPosition(new THREE.Vector3());
-      const joint = (a, m, c) => {
-        const A = P(a), M = P(m), C = P(c);
-        if (!A || !M || !C) return 0;
-        const ang = M.clone().sub(A).normalize().angleTo(C.sub(M).normalize());
-        return THREE.MathUtils.smoothstep(ang, 0.3, 1.6);
-      };
-      const waist = THREE.MathUtils.smoothstep(Math.abs(pose.spineX) + Math.abs(pose.spineZ) * 0.7, 0.12, 0.8);
-      FOLD_L.value.set(waist, flex('left'), joint('leftUpperLeg', 'leftLowerLeg', 'leftFoot'), joint('leftUpperArm', 'leftLowerArm', 'leftHand')).multiply(FOLD_ON);
-      FOLD_R.value.set(waist, flex('right'), joint('rightUpperLeg', 'rightLowerLeg', 'rightFoot'), joint('rightUpperArm', 'rightLowerArm', 'rightHand')).multiply(FOLD_ON);
     }
 
     this.calmArms(dt);
