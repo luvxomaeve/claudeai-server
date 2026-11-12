@@ -1306,8 +1306,12 @@ export class PieceWardrobe {
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     // Капроновые чулки: тонкая ткань поверх всего, что на ногах (кожа или лосины просвечивают), сверху плотная полоса.
-    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: kl === 'nylontights' ? 0.84 : 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 });
-      if (kl === 'nylontights') {
+    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; // Колготки поверх лосин просвечивают: цвет лосин виден сквозь капрон. Только если лосины почти того же тона,
+      // что капрон (чёрные под чёрным), делаем всё одним ровным тоном — иначе верх выглядел бы отдельным куском.
+      const lh = wear.leggingsHex ?? 0x24222c, cd = (k) => Math.abs(((lh >> k) & 255) - ((nh >> k) & 255));
+      const sameTone = kl === 'nylontights' && cd(16) + cd(8) + cd(0) < 90;
+      layers.push({ kind: kl, hex: nh, alpha: kl === 'nylontights' ? (sameTone ? 0.84 : 0.55) : 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 });
+      if (sameTone) {
         // Колготки обволакивают лосины одним тоном с ногами: там, где под ними лосины, приводим цвет к тому же,
         // что получается на ноге (кожа под капроном), — лосины под ними лишь едва угадываются.
         const mixc = (k) => Math.round(((0xeec3b4 >> k) & 255) * 0.16 + ((nh >> k) & 255) * 0.84);
