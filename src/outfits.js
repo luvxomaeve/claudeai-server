@@ -682,7 +682,7 @@ export class PieceWardrobe {
         tank: { hem: cropHem, sl: null, r: 0.082 }, polo: { hem, sl: shortSleeve, r: 0 },
       };
       // Низ: верхний край — талия, нижний (lo).
-      const BOTS = { under: hipJ.y - leg * 0.26, leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26, nylon: foot.y - 1, nylonmid: foot.y - 1 };
+      const BOTS = { under: hipJ.y - leg * 0.26, leggings: foot.y + 0.03, capri: knee.y - (knee.y - foot.y) * 0.5, shorts: hipJ.y - leg * 0.4, minishorts: hipJ.y - leg * 0.26, nylon: foot.y - 1, nylonmid: foot.y - 1, nylontights: foot.y - 1 };
       const [base, trim] = kind.split(':');
       const T = TOPS[base], lo = BOTS[base];
       const TW = 0.011; // ширина канта (манжета, ворот, пояс, низ)
@@ -694,20 +694,21 @@ export class PieceWardrobe {
           : body;
       } else if (lo != null) {
         const under = base === 'under';
-        const nylon = base === 'nylon' || base === 'nylonmid'; // капроновые чулки: от пальцев до верха бедра, сверху плотная полоса
+        const nylon = base === 'nylon' || base === 'nylonmid', ntights = base === 'nylontights'; // капроновые колготки — до талии, как лосины // капроновые чулки: от пальцев до верха бедра, сверху плотная полоса
         const topY = under ? hipJ.y + leg * 0.2 : nylon ? hipJ.y - leg * 0.17 - (base === 'nylonmid' ? 0.10 * (leg / 0.42) : 0) : waist; // nylonmid — на ~10 см короче // бельё — та же форма шортиков, что была, только ровная
         const body = (x, y) => y < topY && y > lo;
         const tw = under ? 0.009 : TW; // у шортиков резинки тоньше
         inside = trim === 'seam'
           // тонкий боковой шов (лосины, шорты)
           ? (x, y, z) => body(x, y) && y < topY - tw * 1.6 && y > lo + tw && Math.abs(z - hips.z) < 0.0045 && ax(x) > 0.05
-          : trim ? (nylon ? (x, y) => body(x, y) && y > topY - 0.034 : (x, y) => body(x, y) && (y > topY - tw * (under ? 1 : 1.6) || y < lo + tw)) : body;
+          : trim ? (nylon ? (x, y) => body(x, y) && y > topY - 0.034 : ntights ? (x, y) => body(x, y) && y > topY - 0.02 : (x, y) => body(x, y) && (y > topY - tw * (under ? 1 : 1.6) || y < lo + tw)) : body;
       } else inside = {
         polocollar: (x, y, z) => y < neck.y + 0.03 && !vOpen(x, y, z)
           && (((z - hips.z) * front > 0.0 && y > vBottom - 0.012 && ax(x) < (y - vBottom) * 0.55 + 0.05) || (y > neck.y - 0.022 && ax(x) < 0.085)),
         upper: (x, y) => y > hipJ.y + leg * 0.19, // всё выше шортиков (для заливки кожи под снятым верхом)
         bust: (x, y) => { const c = B('chest') ?? B('spine'); return y > (c ? c.y - 0.01 : hipJ.y + leg * 0.75) && y < neck.y - 0.03 && ax(x) < ux + 0.02; }, // грудная клетка: тут тени делаем совсем мягкими
         waistgap: (x, y) => y > hipJ.y + leg * 0.19 && y < hipJ.y + leg * 0.5, // над шортиками: тут торчала бы серая резинка модели
+        all: () => true, // вся развёртка тела (чтобы знать, где между её кусками пусто)
         legsall: (x, y) => y < hipJ.y - leg * 0.26, // ноги ниже белья (для «без чулок»)
       }[kind];
       const v = new THREE.Vector3(), idx = g.index, n = idx ? idx.count : pos.count;
@@ -1116,6 +1117,25 @@ export class PieceWardrobe {
         d[i] = d[i] * (1 - al) + R * al; d[i + 1] = d[i + 1] * (1 - al) + G * al; d[i + 2] = d[i + 2] * (1 - al) + Bl * al; d[i + 3] = 255;
       }
     }
+    // Между кусками развёртки остаются пустые полоски со старым рисунком (тёмная кайма белья, край чулка). При
+    // сглаживании текстуры они «подтекают» на швы — отсюда пунктирные линии на ткани. Заливаем эти полоски цветом
+    // соседней закрашенной точки (несколько проходов — на ширину шва).
+    try {
+      const cov = this.zoneMask('all', w, h);
+      let cur = new Uint8Array(w * h);
+      for (let p = 0; p < cur.length; p++) cur[p] = cov[p] >= 128 ? 1 : 0;
+      for (let pass = 0; pass < 4; pass++) {
+        const nx = cur.slice();
+        for (let y = 1; y < h - 1; y++) for (let x = 1, p = y * w + 1; x < w - 1; x++, p++) {
+          if (cur[p]) continue;
+          const q = cur[p - 1] ? p - 1 : cur[p + 1] ? p + 1 : cur[p - w] ? p - w : cur[p + w] ? p + w : -1;
+          if (q < 0) continue;
+          const i = p * 4, j = q * 4;
+          d[i] = d[j]; d[i + 1] = d[j + 1]; d[i + 2] = d[j + 2]; d[i + 3] = 255; nx[p] = 1;
+        }
+        cur = nx;
+      }
+    } catch (e) { console.warn('pad', e); }
     const canvas = document.createElement('canvas');
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d');
@@ -1214,7 +1234,7 @@ export class PieceWardrobe {
     // Облегающие вещи рисуются поверх: сначала кофточка, потом лосины (пояс лосин — сверху).
     const kt = this.paints.get(wear.tops)?.tops, kb = this.paints.get(wear.leggings)?.leggings, kl = this.paints.get(wear.legs)?.legs;
     // (у облегающей юбки рисунка по телу нет — это отдельная сетка, см. tightSkirt)
-    const isNylon = kl === 'nylon' || kl === 'nylonmid';
+    const isNylon = kl === 'nylon' || kl === 'nylonmid' || kl === 'nylontights';
     if (kl === 'bare' || isNylon) map = this.bareLegs(map); // капрон рисуем поверх голой ноги
     // Кант (манжеты, ворот, пояс, низ) — чуть темнее светлой ткани и чуть светлее тёмной: края выглядят аккуратно.
     const trimOf = (hex) => {
@@ -1225,6 +1245,7 @@ export class PieceWardrobe {
     // Цвета — ровно те, что выбраны в палитре (персик/беж тоже: без сдвига тона).
     const clothHex = (hx) => hx;
     const layers = [];
+    let nylonTop = false;
     // Бельё (шортики под одеждой): ровная ткань с аккуратным кантом, в тон чулок.
     {
       // По умолчанию нежно-розовые с белым кантом; выбрал цвет чулок вручную — шортики в тон им.
@@ -1234,7 +1255,10 @@ export class PieceWardrobe {
       const light = (c) => Math.round(c + (255 - c) * (lum > 0.3 ? 0.72 : 0.3)); // кант светлее ткани
       // Шортики однотонные, без светлых резинок.
       layers.push({ kind: 'under', hex }, { kind: 'under:trim', hex });
-      // (капрон рисуется последним — поверх лосин, см. ниже)
+      // Капрон — тонкая ткань (кожа просвечивает), сверху плотная полоса. Под шортами и колготки под любыми лосинами —
+      // рисуем сейчас (они окажутся снизу); чулки поверх длинных лосин и капри — в самом конце (см. ниже).
+      nylonTop = isNylon && kl !== 'nylontights' && (kb === 'leggings' || kb === 'capri');
+      if (isNylon && !nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: 0.6 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); }
     }
     if (kt) {
       const hex = clothHex(wear.topHex ?? 0xf1edf6);
@@ -1247,7 +1271,7 @@ export class PieceWardrobe {
     }
     if (kb) {
       let hex = clothHex(wear.leggingsHex ?? 0x24222c);
-      if (isNylon) {
+      if (nylonTop) {
         // Капрон того же тона, что лосины, не был бы виден — тогда лосины чуть светлее (тёмные) или темнее (светлые).
         const nh = wear.legsHex ?? 0x1b171d, c = (h, k) => (h >> k) & 255;
         if (Math.abs(c(nh, 16) - c(hex, 16)) + Math.abs(c(nh, 8) - c(hex, 8)) + Math.abs(c(nh, 0) - c(hex, 0)) < 75) {
@@ -1259,12 +1283,12 @@ export class PieceWardrobe {
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     // Капроновые чулки: тонкая ткань поверх всего, что на ногах (кожа или лосины просвечивают), сверху плотная полоса.
-    if (isNylon) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: kb ? 0.72 : 0.6 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); }
+    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); }
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
       const lk = { leggings: 1, capri: 1, shorts: 1, minishorts: 1 }[kb] ? kb : null, w = map.image.width, h = map.image.height;
-      const key = `${lk}|${kt}|${w}|${map.uuid}|${sheenWant.stock ? 1 : 0}|${wear.leggingsHex}`;
+      const key = `${lk}|${kt}|${w}|${map.uuid}|${sheenWant.stock ? 1 : 0}|${wear.leggingsHex}|${nylonTop ? kl : ''}`;
       if (key !== sheenWant.key) {
         sheenWant.key = key;
         const mb = lk ? this.clothMask(lk, w, h) : null, mt = kt ? this.clothMask(kt, w, h) : null, d = sheenTex.image.data, N = SHEEN_N;
@@ -1273,6 +1297,7 @@ export class PieceWardrobe {
         let legs = null, px = null;
         const lhex = wear.leggingsHex ?? 0x24222c, lR = (lhex >> 16) & 255, lG = (lhex >> 8) & 255, lB = lhex & 255;
         const keepSt = !!wear.keepStockings && (lk === 'leggings' || lk === 'capri');
+        const mn = nylonTop ? this.clothMask(kl, w, h) : null;
         {
           legs = this.zoneMask('legsall', w, h);
           const cv = (this.sheenCv ??= document.createElement('canvas'));
@@ -1308,9 +1333,40 @@ export class PieceWardrobe {
               if (sheenWant.stock) { if (!skin) r = 255; }
               // Блеск чулок выключен: под лосинами, из-под которых выглядывают чулки, блестит только сама ткань лосин
               // (по её цвету) — чулок остаётся матовым по всей длине.
+              else if (mn && mn[p] >= 128) r = 0;
               else if (r && keepSt && Math.abs(px[i] - lR) + Math.abs(px[i + 1] - lG) + Math.abs(px[i + 2] - lB) > 60) r = 0;
             }
             d[i] = r; d[i + 1] = mt ? mt[p] : 0; d[i + 2] = cloth;
+          }
+        }
+        // Между кусками развёртки в маске пусто (ноль) — при сглаживании это давало на швах пунктир без блика.
+        // Заливаем пустоты значением соседней точки.
+        {
+          const cov = this.zoneMask('all', w, h);
+          let cur = new Uint8Array(N * N);
+          for (let y = 0, q = 0; y < N; y++) { const row = Math.min(h - 1, Math.floor(((y + 0.5) / N) * h)) * w; for (let x = 0; x < N; x++, q++) cur[q] = cov[row + Math.min(w - 1, Math.floor(((x + 0.5) / N) * w))] >= 128 ? 1 : 0; }
+          for (let pass = 0; pass < 10; pass++) {
+            const nx = cur.slice();
+            for (let y = 1; y < N - 1; y++) for (let x = 1, q = y * N + 1; x < N - 1; x++, q++) {
+              if (cur[q]) continue;
+              const o = cur[q - 1] ? q - 1 : cur[q + 1] ? q + 1 : cur[q - N] ? q - N : cur[q + N] ? q + N : -1;
+              if (o < 0) continue;
+              d[q * 4] = d[o * 4]; d[q * 4 + 1] = d[o * 4 + 1]; d[q * 4 + 2] = d[o * 4 + 2]; nx[q] = 1;
+            }
+            cur = nx;
+          }
+        }
+        // Тонкие щели в маске (на стыке «лосины / зона ног») давали пунктир без блика: если по обе стороны от точки
+        // в пределах трёх точек есть ткань — это тоже ткань.
+        for (const ch of [0, 2]) {
+          const src = new Uint8Array(N * N);
+          for (let q = 0; q < src.length; q++) src[q] = d[q * 4 + ch];
+          const on = (q) => src[q] >= 128;
+          for (let y = 3; y < N - 3; y++) for (let x = 3, q = y * N + 3; x < N - 3; x++, q++) {
+            if (on(q)) continue;
+            const v = (on(q - N) || on(q - 2 * N) || on(q - 3 * N)) && (on(q + N) || on(q + 2 * N) || on(q + 3 * N));
+            const hz = (on(q - 1) || on(q - 2) || on(q - 3)) && (on(q + 1) || on(q + 2) || on(q + 3));
+            if (v || hz) d[q * 4 + ch] = 255;
           }
         }
         sheenTex.needsUpdate = true;
@@ -1855,8 +1911,8 @@ function installSheenFull(mesh) {
     float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + normalize( vViewPosition ) ) ), 0.0 );
     float shS = pow( shH, 3.0 );
     float shLum = smoothstep( 0.30, 0.75, dot( col, vec3( 0.30, 0.59, 0.11 ) ) );
-    col *= 1.0 - mix( 0.20, 0.40, shLum ) * ( 1.0 - shS );
-    col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS;
+    col *= 1.0 - mix( 0.30, 0.46, shLum ) * ( 1.0 - shS );
+    col += vec3( 0.20, 0.19, 0.25 ) * ( 0.58 * shS + 0.30 * pow( shH, 14.0 ) );
   }`);
     };
     const pk = m.customProgramCacheKey?.bind(m);
@@ -1891,8 +1947,9 @@ function installSheen(mesh) {
       // Светлая ткань — затемнение сильнее (иначе блик на ней не читается), тёмная — как было.
       float shLum = smoothstep( 0.30, 0.75, dot( col, vec3( 0.30, 0.59, 0.11 ) ) );
       // На верхе усиление мягче, чем на лосинах и чулках: сильная светотень там прорисовывала бы тело под тканью.
-      col *= 1.0 - min( mix( 0.20, 0.40, shLum ) * shL + mix( 0.20, 0.30, shLum ) * shT, 0.40 ) * ( 1.0 - shS );
-      col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS * shM;${SKIN_SHEEN_GLSL(1)}
+      col *= 1.0 - min( mix( 0.30, 0.46, shLum ) * shL + mix( 0.20, 0.30, shLum ) * shT, 0.46 ) * ( 1.0 - shS );
+      // Лосины, шорты, чулки — сочнее: отсвет ярче и с мягким гребнем. Верх — как был.
+      col += vec3( 0.20, 0.19, 0.25 ) * ( 0.40 * shS * shT * ( 1.0 - shK.r ) + ( 0.58 * shS + 0.30 * pow( shH, 14.0 ) ) * shL );${SKIN_SHEEN_GLSL(1)}
     }
   }`);
     };

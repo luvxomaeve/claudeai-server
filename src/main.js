@@ -2991,6 +2991,7 @@ const PIECE_SOURCES = [
   // Длинные капроновые чулки: нарисованы поверх голой ноги, кожа просвечивает.
   { id: 'p_nylon', name: 'Капрон', paint: { legs: 'nylon' }, cats: ['legs'], names: { legs: 'Капроновые чулки' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
   { id: 'p_nylon2', name: 'Капрон короче', paint: { legs: 'nylonmid' }, cats: ['legs'], names: { legs: 'Капроновые чулки покороче' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
+  { id: 'p_nylon3', name: 'Капрон колготки', paint: { legs: 'nylontights' }, cats: ['legs'], names: { legs: 'Капроновые колготки' }, legsKind: 'tights', colors: { legs: 0x1b171d } },
 // Большое платье убрано из шкафа (туфли и чулки от него остались).
 ].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x))
   // Чёрная плиссе из отдельных полосок («дырявая» при наклонах) тоже убрана.
@@ -4639,7 +4640,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 167;
+const WAIFU_BUILD = 168;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
