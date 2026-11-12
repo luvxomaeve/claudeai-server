@@ -520,7 +520,7 @@ async function loadModel(source) {
     frameCamera();
     $('loading').classList.add('done');
     // Минималистичный вид (только она + меню ☰) — по умолчанию; классический со всеми кнопками — если выбрал его.
-    setTimeout(() => { let ui = null; try { ui = localStorage.getItem('waifu-ui'); } catch { /* ignore */ } if (ui !== 'classic' && !autoMode) setAutoMode(true); }, 0);
+    setTimeout(() => { let ui = null; try { ui = localStorage.getItem('waifu-ui'); } catch { /* ignore */ } if (ui !== 'classic' && !autoMode) setAutoMode(true); restoreLeft(); }, 0);
     if (firstLoad) {
       gameReady();
       greetOnLoad();
@@ -4537,7 +4537,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 132;
+const WAIFU_BUILD = 133;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4648,8 +4648,8 @@ function renderAutoMenu() {
     ['🎵', 'Анимации и танцы', () => $('btn-anims').click()],
     ['📷', 'Фото', () => $('cam-photo').click()],
     [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
-    ['👁', { follow: 'Взгляд: за пальцем', me: 'Взгляд: на тебя', closed: 'Взгляд: глаза закрыты' }[gazeMode] ?? 'Взгляд', () => $('btn-gaze').click(), true],
-    ['↩️', 'Вернуть как было', () => (autoMode ? autoReturn() : resetView())],
+    // «Взгляд» и «домой» — в значках по долгому тапу на ней; в ручном виде возврат оставляем здесь.
+    ...(autoMode ? [] : [['↩️', 'Вернуть как было', () => resetView()]]),
     autoMode ? ['🎛', 'Ручное управление: полосы, позы, точки', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],
   ];
   // В ручном виде выход в простой — первым пунктом, чтобы не искать.
@@ -5082,10 +5082,46 @@ function updateWishes(dt) {
   character.react({ expression: 'relaxed', motion: 'tiltHead' });
   say(pick(def.ask), 'happy');
 }
+// Какой её оставил — такой и встретит: поза (сидит/лежит, наклон), состояние (спит/замерла) и ракурс
+// запоминаются и возвращаются при следующем запуске. Только простой вид; повторы не храним.
+const LEFT_KEY = girlKey('waifu-left');
+let leftReady = false;
+function saveLeft() {
+  if (!leftReady || !character || !autoMode || poseMode) return;
+  const cam = freeCam ? null : { ...camState(), yaw: camYaw + camEase.yaw, manual: manualCam ? { off: manualCam.off.toArray(), dist: manualCam.dist } : null };
+  const r = reps.home;
+  const v = {
+    sit: +(r.on ? 0 : character.sit).toFixed(3), bend: +(r.on ? 0 : autoBendTarget ?? character.bodyOffset.hipsRotX).toFixed(3),
+    st: autoState === 'hold' ? 'freeze' : autoState, cam,
+  };
+  try { localStorage.setItem(LEFT_KEY, JSON.stringify(v)); } catch { /* ignore */ }
+}
+function restoreLeft() {
+  leftReady = true;
+  if (!autoMode || !character) return;
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(LEFT_KEY) || 'null'); } catch { v = null; }
+  if (!v || typeof v !== 'object') return;
+  try {
+    if (Number.isFinite(v.sit) && v.sit > 0.01) {
+      character.sit = THREE.MathUtils.clamp(v.sit, 0, sitMax());
+      character.sitS = character.sit; // сразу в позе, без «садится на глазах»
+    }
+    if (Number.isFinite(v.bend) && Math.abs(v.bend) > 0.01) character.bodyOffset.hipsRotX = THREE.MathUtils.clamp(v.bend, BEND_MIN, BEND_MAX);
+    if (v.st === 'sleep' || v.st === 'freeze') setAutoState(v.st);
+    const c = v.cam;
+    if (c && [c.yaw, c.pitch, c.zoom].every(Number.isFinite)) {
+      applyCamState({ yaw: c.yaw, pitch: c.pitch, zoom: c.zoom, lift: c.lift, pan: c.pan, full: c.full });
+      if (c.manual && Array.isArray(c.manual.off) && Number.isFinite(c.manual.dist)) manualCam = { off: new THREE.Vector3().fromArray(c.manual.off), dist: c.manual.dist };
+    }
+  } catch { /* битая запись — просто встречает как обычно */ }
+}
+setInterval(saveLeft, 4000);
+window.addEventListener('pagehide', saveLeft);
 // Вернулся в игру после перерыва больше минуты — пауза для рекламы (лимит — в ads.js).
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (document.hidden) { hiddenAt = Date.now(); saveLeft(); return; }
   if (hiddenAt && Date.now() - hiddenAt > 60000) setTimeout(() => interstitial(), 800);
   hiddenAt = 0;
 });
@@ -5161,6 +5197,7 @@ function tick() {
       }
     }
 
+    character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
     character.update(dt);
     pieceWardrobe.sync(dt);
 

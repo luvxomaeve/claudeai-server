@@ -296,6 +296,8 @@ export class Character {
       const seated = { hop: 'squirm', bounce: 'tiltHead', shift: 'tiltHead', sway: 'tiltHead', shyLegs: 'squirm', stretch: 'sigh', lookAround: 'lookAround' };
       if (name in seated) name = seated[name];
     }
+    // Её сейчас тормошат (ведут наклон/присед) — жесты руками не начинает: руки не мечутся.
+    if (this.handsQuiet && (TOUCH_MOTIONS[name] || ARM_MOTIONS.has(name))) return;
     const durations = {
       tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6,
       lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4, lieTurn: 2.6,
@@ -1106,7 +1108,12 @@ export class Character {
     // выворачивало), а плавно переходят в позу реакции и обратно.
     for (const m of this.motions) {
       m.t += dt;
-      const e = envelope(m.t, m.dur);
+      // Начала тормошить посреди жеста — он плавно гаснет (и не возвращается).
+      if (TOUCH_MOTIONS[m.name] || ARM_MOTIONS.has(m.name)) {
+        if (this.handsQuiet) m.quit = true;
+        if (m.quit) { m.fade = (m.fade ?? 1) * Math.exp(-dt * 5); if (m.fade < 0.02) m.t = m.dur + 1; }
+      }
+      const e = envelope(m.t, m.dur) * (m.fade ?? 1);
       const s = m.side === 'left' ? 1 : -1;
       const arm = (side, target) => blendArm(pose, side, target, e);
       switch (m.name) {
@@ -1397,7 +1404,27 @@ export class Character {
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
     }
 
+    this.calmArms(dt);
     this.finishFrame(dt);
+  }
+
+  // Пока её тормошат, руки идут за телом с лёгкой инерцией (сглаживаем повороты плеча/локтя/кисти):
+  // при резких «туда-сюда» они не дёргаются по кадрам. В покое и при обычных движениях — без изменений.
+  calmArms(dt) {
+    const want = this.handsQuiet ? 1 : 0;
+    this.quietK = (this.quietK ?? 0) + (want - (this.quietK ?? 0)) * (1 - Math.exp(-dt * (want ? 9 : 1.6)));
+    const k = this.quietK;
+    this.armPrev ??= new Map();
+    for (const n of ['leftShoulder', 'rightShoulder', 'leftUpperArm', 'rightUpperArm', 'leftLowerArm', 'rightLowerArm', 'leftHand', 'rightHand']) {
+      const b = this.bones[n];
+      if (!b) continue;
+      let q = this.armPrev.get(n);
+      if (!q) this.armPrev.set(n, (q = b.quaternion.clone()));
+      if (k > 0.02 && dt > 0) {
+        q.slerp(b.quaternion, 1 - Math.exp(-dt * (70 - 52 * k)));
+        b.quaternion.copy(q);
+      } else q.copy(b.quaternion);
+    }
   }
 
   // Поворот нормализованной кости. У VRM 0.x модель развёрнута на 180°,
@@ -1759,7 +1786,7 @@ export class Character {
       const touch = TOUCH_MOTIONS[m.name];
       if (!touch && !ARM_MOTIONS.has(m.name)) continue;
       if (touch && !touch.both && m.side && m.side !== side) continue;
-      k = Math.max(k, m.dur ? envelope(m.t, m.dur) : 1);
+      k = Math.max(k, (m.dur ? envelope(m.t, m.dur) : 1) * (m.fade ?? 1));
     }
     return k;
   }
@@ -1835,7 +1862,7 @@ export class Character {
     const bq = new THREE.Quaternion();
     for (const m of active) {
       const def = TOUCH_MOTIONS[m.name];
-      const e = envelope(m.t, m.dur);
+      const e = envelope(m.t, m.dur) * (m.fade ?? 1);
       if (e <= 0) continue;
       const sides = def.both ? ['left', 'right'] : [m.side];
       for (const side of sides) {
