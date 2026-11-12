@@ -177,6 +177,29 @@ function updateHipsTrack(dt) {
   if (wk) { h.x -= wk.out.x; h.z -= wk.out.z; }
   if (!hipsTrackInit) { hipsTrack.copy(h); hipsTrackInit = true; }
   hipsTrack.lerp(h, 1 - Math.exp(-dt * 4));
+  // Камера «прицеплена» к части тела (см. lockCamBone): плавно идёт за ней.
+  if (manualCam?.bone) manualCam.track.lerp(manualCam.bone.getWorldPosition(camBoneV), 1 - Math.exp(-dt * 7));
+}
+// Подстроил камеру к какому-то месту (голова, грудь, бёдра, колени, ступни…) — оно остаётся в центре кадра,
+// как бы она ни двигалась: камера цепляется к ближайшей кости и идёт за ней. Сдвинул двумя пальцами —
+// цепляется к новому месту. Домик / двойной тап по фону — отпускает.
+const camBoneV = new THREE.Vector3();
+const CAM_BONES = ['head', 'neck', 'chest', 'spine', 'hips', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot', 'leftHand', 'rightHand', 'leftLowerArm', 'rightLowerArm'];
+const camAnchor = () => (manualCam?.bone ? manualCam.track : hipsTrack);
+function lockCamBone() {
+  if (!manualCam || !character) return;
+  const T = camAnchor().clone().add(manualCam.off);
+  let best = null, bd = Infinity;
+  for (const n of CAM_BONES) {
+    const b = character.bones[n];
+    if (!b) continue;
+    const d = b.getWorldPosition(camBoneV).distanceTo(T);
+    if (d < bd) { bd = d; best = b; }
+  }
+  if (!best) return;
+  manualCam.bone = best;
+  manualCam.track = best.getWorldPosition(new THREE.Vector3());
+  manualCam.off = T.sub(manualCam.track);
 }
 function enterManualCam() {
   if (manualCam) return;
@@ -188,11 +211,12 @@ function enterManualCam() {
   camYaw = Math.atan2(v.x, v.z);
   camPitch = Math.asin(THREE.MathUtils.clamp(v.y / dist, -1, 1));
   manualCam = { off: T.sub(hipsTrack), dist };
+  lockCamBone();
   camTween = 1;
 }
 function exitManualCam() { manualCam = null; }
 function manualTarget(out) {
-  const T = hipsTrack.clone().add(manualCam.off);
+  const T = camAnchor().clone().add(manualCam.off);
   const cp = Math.cos(camPitch);
   out.look.copy(T);
   out.pos.set(T.x + Math.sin(camYaw) * manualCam.dist * cp, T.y + Math.sin(camPitch) * manualCam.dist, T.z + Math.cos(camYaw) * manualCam.dist * cp);
@@ -318,7 +342,7 @@ function zoomBy(factor) {
     const ray = new THREE.Raycaster();
     ray.setFromCamera(ndc, camera);
     const P = ray.ray.at(manualCam.dist, new THREE.Vector3());
-    const T = hipsTrack.clone().add(manualCam.off);
+    const T = camAnchor().clone().add(manualCam.off);
     const nd = THREE.MathUtils.clamp(manualCam.dist * factor, 0.12 * camBase.S, 6 * camBase.S);
     const real = nd / manualCam.dist;
     manualCam.off.addScaledVector(P.sub(T), 1 - real);
@@ -989,7 +1013,7 @@ function focusAt(e) {
   enterManualCam();
   // Плавно: точка взгляда — туда, куда тапнул, и камера ближе.
   const from = { off: manualCam.off.clone(), dist: manualCam.dist };
-  const to = { off: hit.point.clone().sub(hipsTrack), dist: Math.min(manualCam.dist, 0.7 * camBase.S) };
+  const to = { off: hit.point.clone().sub(camAnchor()), dist: Math.min(manualCam.dist, 0.7 * camBase.S) };
   let t0 = performance.now();
   const step = () => {
     if (!manualCam) return;
@@ -999,6 +1023,7 @@ function focusAt(e) {
     manualCam.dist = from.dist + (to.dist - from.dist) * e2;
     applyOrbit();
     if (k < 1) requestAnimationFrame(step);
+    else lockCamBone(); // подлетела — цепляемся к этому месту
   };
   step();
 }
@@ -1410,7 +1435,8 @@ function endPointer(e) {
       if (autoTap && now - autoTap.t < 340 && autoTap.her === !!herTap && Math.hypot(e.clientX - autoTap.x, e.clientY - autoTap.y) < 48) {
         autoTap = null;
         if (herTap) {
-          // Двойной тап по ней больше не переодевает: смена наряда подтормаживала и срабатывала случайно.
+          // Двойной тап по ней — камера подлетает к этому месту и держит его в центре, пока она двигается.
+          focusAt(e); autoCentered = false;
         } else {
           // Первый двойной тап — камера возвращается по центру (она продолжает, что делала);
           // второй подряд — всё возвращается: она встаёт ровно, повтор снимается.
@@ -1425,7 +1451,7 @@ function endPointer(e) {
   touches.delete(e.pointerId);
   poseDrag = null;
   bgSwipe = null;
-  if (touches.size < 2) { pinchDist = 0; pinchMidY = null; }
+  if (touches.size < 2) { if (pinchDist && manualCam) lockCamBone(); pinchDist = 0; pinchMidY = null; }
   orbitDrag = null;
   if (touches.size > 0) return;
   pointerActive = false;
@@ -4574,7 +4600,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 148;
+const WAIFU_BUILD = 149;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5177,7 +5203,7 @@ const LEFT_KEY = girlKey('waifu-left');
 let leftReady = false;
 function saveLeft() {
   if (!leftReady || !character || !autoMode || poseMode) return;
-  const cam = freeCam ? null : { ...camState(), yaw: camYaw + camEase.yaw, manual: manualCam ? { off: manualCam.off.toArray(), dist: manualCam.dist } : null };
+  const cam = freeCam ? null : { ...camState(), yaw: camYaw + camEase.yaw, manual: manualCam ? { off: camAnchor().clone().add(manualCam.off).sub(hipsTrack).toArray(), dist: manualCam.dist } : null };
   const r = reps.home;
   const v = {
     sit: +(r.on ? 0 : character.sit).toFixed(3), bend: +(r.on ? 0 : autoBendTarget ?? character.bodyOffset.hipsRotX).toFixed(3),
@@ -5201,7 +5227,7 @@ function restoreLeft() {
     const c = v.cam;
     if (c && [c.yaw, c.pitch, c.zoom].every(Number.isFinite)) {
       applyCamState({ yaw: c.yaw, pitch: c.pitch, zoom: c.zoom, lift: c.lift, pan: c.pan, full: c.full });
-      if (c.manual && Array.isArray(c.manual.off) && Number.isFinite(c.manual.dist)) manualCam = { off: new THREE.Vector3().fromArray(c.manual.off), dist: c.manual.dist };
+      if (c.manual && Array.isArray(c.manual.off) && Number.isFinite(c.manual.dist)) { manualCam = { off: new THREE.Vector3().fromArray(c.manual.off), dist: c.manual.dist }; lockCamBone(); }
     }
   } catch { /* битая запись — просто встречает как обычно */ }
 }
