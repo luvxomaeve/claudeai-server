@@ -1071,7 +1071,9 @@ export class PieceWardrobe {
     let sk = null;
     if (layers.some((l) => l.keep)) {
       sk = new Uint8Array(w * h);
-      for (let p = 0, i = 0; p < sk.length; p++, i += 4) sk[p] = d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150 ? 1 : 0;
+      // Пустоты между кусками развёртки кожей не считаем (там случайный цвет — из-за него вдоль шва ноги шла тёмная линия).
+      const covA = this.zoneMask('all', w, h);
+      for (let p = 0, i = 0; p < sk.length; p++, i += 4) sk[p] = covA[p] >= 128 && d[i] > d[i + 1] && d[i + 1] >= d[i + 2] && d[i] - d[i + 2] > 18 && d[i] > 150 ? 1 : 0;
     }
     // Кружево и узор по верху чулка — вперемешку ткань и кожа; оставлять их кусками поверх лосин нельзя (выходит
     // рябь). Поэтому чулком считаем только место, вокруг которого кожи нет на заметном расстоянии.
@@ -1274,7 +1276,7 @@ export class PieceWardrobe {
     }
     if (kb) {
       let hex = clothHex(wear.leggingsHex ?? 0x24222c);
-      if (nylonTop) {
+      if (nylonTop && kl !== 'nylontights') { // колготки обволакивают лосины целиком — их, наоборот, не отделяем
         // Капрон того же тона, что лосины, не был бы виден — тогда лосины чуть светлее (тёмные) или темнее (светлые).
         const nh = wear.legsHex ?? 0x1b171d, c = (h, k) => (h >> k) & 255;
         if (Math.abs(c(nh, 16) - c(hex, 16)) + Math.abs(c(nh, 8) - c(hex, 8)) + Math.abs(c(nh, 0) - c(hex, 0)) < 75) {
@@ -1286,7 +1288,7 @@ export class PieceWardrobe {
       layers.push({ kind: kb, hex, keep }, { kind: `${kb}:trim`, hex: trimOf(hex), keep });
     }
     // Капроновые чулки: тонкая ткань поверх всего, что на ногах (кожа или лосины просвечивают), сверху плотная полоса.
-    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); } // поверх лосин/шорт колготки ровные по всей длине: отдельной «верхней» полосы нет (иначе у края шорт рваная кайма)
+    if (nylonTop) { const nh = wear.legsHex ?? 0x1b171d; layers.push({ kind: kl, hex: nh, alpha: kl === 'nylontights' ? 0.84 : 0.72 }, { kind: `${kl}:trim`, hex: nh, alpha: 0.55 }); } // поверх лосин/шорт колготки ровные по всей длине: отдельной «верхней» полосы нет (иначе у края шорт рваная кайма)
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {
