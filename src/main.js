@@ -4571,7 +4571,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 146;
+const WAIFU_BUILD = 147;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5148,7 +5148,12 @@ function autoWalk(dt) {
   const bodyCalm = autoMode && autoState === 'live' && !poseMode && !reps.home.on && character.sit < 0.02 && (character.sleep ?? 0) < 0.1
     && Math.abs(character.bodyOffset.hipsRotX) < 0.25 && !character.dancing && !character.mixer && !character.loop && $('wardrobe').classList.contains('hidden');
   if (character.turnGoal && (!bodyCalm || poseDrag || performance.now() - lastOnHerAt < 400)) character.turnTo(0, true);
-  if (!calm) { walkTimer = Math.max(walkTimer, 5); return; }
+  // Камеру настроил сам (приблизил, сдвинул, повернул) — она не уходит из кадра: стоит на месте, пока ракурс не
+  // вернут домиком или двойным тапом. Иначе кадр «уплывал» бы за ней и сбивался.
+  const cs = `${camYaw.toFixed(3)}|${camPitch.toFixed(3)}|${camZoom.toFixed(3)}|${camLift.toFixed(3)}|${camPanH.x.toFixed(3)}|${camPanH.z.toFixed(3)}`;
+  if (cs !== autoWalk.cs) { autoWalk.cs = cs; autoWalk.camAt = performance.now(); }
+  const camMine = !!manualCam || !!freeCam || performance.now() - (autoWalk.camAt ?? 0) < 20000;
+  if (!calm || camMine) { walkTimer = Math.max(walkTimer, 5); return; }
   walkTimer -= dt;
   if (walkTimer > 0) return;
   walkTimer = 9 + Math.random() * 11;

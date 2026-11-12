@@ -560,6 +560,7 @@ export class PieceWardrobe {
         if (!m) continue;
         installClothPoke(m); installDroop(vrm, m); installHipKeep(vrm, m, true); setLift(m, 0.014); installEdgeShade(m);
         this.tightSkirts[kind] = m;
+        try { installSheenFull(m); } catch { /* ignore */ }
       }
     } catch (e) { console.warn('tight skirt', e); this.tightSkirts = {}; }
   }
@@ -1730,6 +1731,29 @@ const SHEEN_MAP = { value: sheenTex };
 export const SHEEN = { value: new THREE.Vector2() };
 const sheenWant = { leg: 0, top: 0, on: true, key: '' };
 export function setSheenOn(on) { sheenWant.on = !!on; SHEEN.value.set(sheenWant.on ? sheenWant.leg : 0, sheenWant.on ? sheenWant.top : 0); }
+function installSheenFull(mesh) {
+  for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+    if (!m || m.isOutline || m.userData.sheen) continue;
+    m.userData.sheen = true;
+    const prev = m.onBeforeCompile;
+    m.onBeforeCompile = (sh, r) => {
+      prev?.call(m, sh, r);
+      const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
+      if (!sh.fragmentShader.includes(at)) return;
+      sh.uniforms.uSheen = SHEEN;
+      sh.fragmentShader = 'uniform vec2 uSheen;\n' + sh.fragmentShader.replace(at, `${at}
+  if ( uSheen.x > 0.0 ) {
+    float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + normalize( vViewPosition ) ) ), 0.0 );
+    float shS = pow( shH, 3.0 );
+    col *= 1.0 - 0.20 * ( 1.0 - shS );
+    col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS;
+  }`);
+    };
+    const pk = m.customProgramCacheKey?.bind(m);
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|sheenFull`;
+    m.needsUpdate = true;
+  }
+}
 function installSheen(mesh) {
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     if (!m || m.isOutline || m.userData.sheen) continue;
@@ -1749,13 +1773,11 @@ function installSheen(mesh) {
       vec3 shV = normalize( vViewPosition );
       float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + shV ) ), 0.0 );
       // Атласный блик: яркий гребень + мягкий отсвет ткани.
-      // На лосинах — блик с ярким гребнем. На верхе — только ровный мягкий отсвет: яркий гребень там прорисовывал
-      // бы тело под тканью, а это уже за рамками 16+.
-      // На светлой ткани добавлять свет некуда — там блик читается наоборот: всё, что вне отсвета, чуть темнеет
-      // (атлас). На тёмной это незаметно, так что эффект виден на любом цвете сразу.
-      float shS = pow( shH, 3.0 );
-      col *= 1.0 - ( 0.20 * shT + 0.12 * shL ) * ( 1.0 - shS );
-      col += vec3( 0.20, 0.19, 0.25 ) * ( pow( shH, 26.0 ) * shL + 0.22 * pow( shH, 4.0 ) * shL + 0.40 * shS * shT );
+      // Один и тот же свет на всей нарисованной ткани (верх, лосины, шортики, чулки): широкий мягкий отсвет без
+      // ярких точек. На светлой ткани добавлять свет некуда — там всё вне отсвета чуть темнеет (атлас).
+      float shS = pow( shH, 3.0 ), shM = min( shL + shT, 1.0 );
+      col *= 1.0 - 0.20 * shM * ( 1.0 - shS );
+      col += vec3( 0.20, 0.19, 0.25 ) * 0.40 * shS * shM;
     }
   }`);
     };
