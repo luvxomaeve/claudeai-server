@@ -1727,14 +1727,19 @@ function installSheen(mesh) {
       sh.fragmentShader = 'uniform vec2 uSheen;\nuniform sampler2D uSheenMap;\n' + sh.fragmentShader.replace(at, `${at}
   if ( uSheen.x + uSheen.y > 0.0 ) {
     vec2 shK = smoothstep( 0.45, 0.95, texture2D( uSheenMap, mapUv ).rg );
-    float shL = uSheen.x * shK.r, shT = uSheen.y * shK.g;
+    // Где лосины лежат поверх низа кофточки — это лосины: отсвет верха туда не добавляем (иначе широкая серая полоса у пояса).
+    float shL = uSheen.x * shK.r, shT = uSheen.y * shK.g * ( 1.0 - shK.r );
     if ( shL + shT > 0.0 ) {
       vec3 shV = normalize( vViewPosition );
       float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + shV ) ), 0.0 );
       // Атласный блик: яркий гребень + мягкий отсвет ткани.
       // На лосинах — блик с ярким гребнем. На верхе — только ровный мягкий отсвет: яркий гребень там прорисовывал
       // бы тело под тканью, а это уже за рамками 16+.
-      col += vec3( 0.20, 0.19, 0.25 ) * ( pow( shH, 26.0 ) * shL + 0.22 * pow( shH, 4.0 ) * shL + 0.40 * pow( shH, 3.0 ) * shT );
+      // На светлой ткани добавлять свет некуда — там блик читается наоборот: всё, что вне отсвета, чуть темнеет
+      // (атлас). На тёмной это незаметно, так что эффект виден на любом цвете сразу.
+      float shS = pow( shH, 3.0 );
+      col *= 1.0 - ( 0.20 * shT + 0.12 * shL ) * ( 1.0 - shS );
+      col += vec3( 0.20, 0.19, 0.25 ) * ( pow( shH, 26.0 ) * shL + 0.22 * pow( shH, 4.0 ) * shL + 0.40 * shS * shT );
     }
   }`);
     };
