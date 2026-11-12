@@ -1748,7 +1748,9 @@ const sheenWant = { leg: 0, top: 0, on: true, stock: true, key: '' };
 export function setStockSheen(on) { sheenWant.stock = !!on; }
 // Кожа: тот же мягкий свет, но слабее и теплее — видны изгибы рук, ног, живота, шеи и лица.
 const SHEEN_SKIN = { value: 1 };
-export function setSheenOn(on) { sheenWant.on = !!on; SHEEN.value.set(sheenWant.on ? sheenWant.leg : 0, sheenWant.on ? sheenWant.top : 0); SHEEN_SKIN.value = sheenWant.on ? 1 : 0; }
+export function setSheenOn(on) { sheenWant.on = !!on; SHEEN.value.set(sheenWant.on ? sheenWant.leg : 0, sheenWant.on ? sheenWant.top : 0); }
+// Свет на коже включается отдельно от ткани.
+export function setSkinSheenOn(on) { SHEEN_SKIN.value = on ? 1 : 0; }
 const SKIN_SHEEN_GLSL = (k) => `
       float skS = pow( shH, 5.0 );
       col *= 1.0 - ${(0.07 * k).toFixed(3)} * shSk * ( 1.0 - pow( shH, 2.0 ) );

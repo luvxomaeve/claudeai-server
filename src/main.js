@@ -6,7 +6,7 @@ import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
 import { parseMixamo, mixamoClip } from './mixamo.js';
 import { MOCAP, loadMocap, mocapClip, mocapUpperClip } from './mocap.js';
-import { PieceWardrobe, PIECE_CATS, setSheenOn, setStockSheen } from './outfits.js';
+import { PieceWardrobe, PIECE_CATS, setSheenOn, setStockSheen, setSkinSheenOn } from './outfits.js';
 import { Character, POSES, LOOPS } from './character.js';
 import { initPlatform, gameReady, rewarded as adsRewarded, interstitial, onAdPause, hasAds } from './ads.js';
 import { REACTIONS, STROKES, IDLE_LINES, pick } from './dialogue.js';
@@ -4623,7 +4623,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 157;
+const WAIFU_BUILD = 158;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4743,6 +4743,9 @@ autoMenu.hidden = true;
 document.body.appendChild(autoMenu);
 for (const ev of ['pointerdown', 'touchstart']) autoMenu.addEventListener(ev, (e) => e.stopPropagation());
 // ✨ Блики на облегающей ткани (лосины, кофточки): можно выключить в меню.
+let skinSheen = true;
+try { skinSheen = localStorage.getItem('waifu-sheen-skin') !== '0'; } catch { /* ignore */ }
+setSkinSheenOn(skinSheen);
 let stockSheen = true;
 try { stockSheen = localStorage.getItem('waifu-sheen-legs') !== '0'; } catch { /* ignore */ }
 setStockSheen(stockSheen);
@@ -4755,7 +4758,8 @@ function renderAutoMenu() {
     ['🎵', 'Анимации и танцы', () => $('btn-anims').click()],
     ['📷', 'Фото', () => $('cam-photo').click()],
     [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
-    ['✨', sheenOn ? 'Блики (ткань и кожа): вкл' : 'Блики (ткань и кожа): выкл', () => { sheenOn = !sheenOn; try { localStorage.setItem('waifu-sheen', sheenOn ? '1' : '0'); } catch { /* ignore */ } setSheenOn(sheenOn); }, true],
+    ['✨', sheenOn ? 'Блики на ткани: вкл' : 'Блики на ткани: выкл', () => { sheenOn = !sheenOn; try { localStorage.setItem('waifu-sheen', sheenOn ? '1' : '0'); } catch { /* ignore */ } setSheenOn(sheenOn); }, true],
+    ['🌟', skinSheen ? 'Блики на коже: вкл' : 'Блики на коже: выкл', () => { skinSheen = !skinSheen; try { localStorage.setItem('waifu-sheen-skin', skinSheen ? '1' : '0'); } catch { /* ignore */ } setSkinSheenOn(skinSheen); }, true],
     // «Взгляд» и «домой» — в значках по долгому тапу на ней; в ручном виде возврат оставляем здесь.
     ...(autoMode ? [] : [['↩️', 'Вернуть как было', () => resetView()]]),
     autoMode ? ['🎛', 'Ручное управление: полосы, позы, точки', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],
