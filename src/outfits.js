@@ -1122,7 +1122,9 @@ export class PieceWardrobe {
     installHems(idx.pieces);
     idx.skins.forEach(patchDonorSkin);
     for (const m of idx.pieces.bottoms ?? []) installDroop(vrm, m);
-    for (const m of idx.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); installEdgeShade(m); }
+    // Тело донора закрывает дыры под чужими вещами и местами выходит вперёд нашего — блик на нём тот же,
+    // иначе на ткани видны тёмные рваные пятна.
+    for (const m of idx.skins) { installCrotchFix(vrm, m); installHipKeep(vrm, m, false); installEdgeShade(m); installSheen(m); }
     for (const m of idx.pieces.bottoms ?? []) installHipKeep(vrm, m, true);
     // Новое тело-донор: зона ног на текстуре кожи пересчитывается (ступни/голени под другой обувью).
     this.legTris = null;
