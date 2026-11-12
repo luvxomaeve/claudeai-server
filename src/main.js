@@ -3002,7 +3002,7 @@ function loadSkinDonors() {
   })));
   return skinDonorsP;
 }
-setTimeout(() => loadSkinDonors().then(() => { applyWear(); pieceWardrobe.warm(); }), 3000); // подгружаем заранее, в фоне, и готовим заготовки вещей
+setTimeout(() => loadSkinDonors().then(() => { applyWear(); pieceWardrobe.warm(() => pointerActive || performance.now() - lastOnHerAt < 1500); }), 3000); // подгружаем заранее, в фоне, и готовим заготовки вещей
 const pieceLoading = new Map();
 function loadPieceSource(id) {
   if (pieceWardrobe.hasSource(id)) return Promise.resolve();
@@ -4571,7 +4571,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 136;
+const WAIFU_BUILD = 137;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5285,14 +5285,22 @@ function tick() {
     bubbleTimer -= dt;
     const bubble = $('bubble');
     if (bubbleTimer <= 0) bubble.classList.add('hidden');
-    character.headScreenAnchor(anchor).project(camera);
-    const x = (anchor.x * 0.5 + 0.5) * window.innerWidth;
-    const y = (-anchor.y * 0.5 + 0.5) * window.innerHeight;
-    const half = bubble.offsetWidth / 2 + 8;
-    bubble.style.left = `${THREE.MathUtils.clamp(x, half, window.innerWidth - half)}px`;
-    // Не залезаем под верхнюю панель (на телефоне она в две строки).
-    const hudBottom = $('hud').getBoundingClientRect().bottom + 12;
-    bubble.style.top = `${Math.max(y, bubble.offsetHeight + hudBottom)}px`;
+    // Облачко скрыто — ничего не меряем и не двигаем (раньше каждый кадр заставляли браузер пересчитывать вёрстку).
+    if (!bubble.classList.contains('hidden')) {
+      character.headScreenAnchor(anchor).project(camera);
+      const x = (anchor.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-anchor.y * 0.5 + 0.5) * window.innerHeight;
+      // Размеры облачка и панели меряем изредка (и сразу при новой реплике), а не каждый кадр.
+      const bm = (tick.bm ??= { n: 0, w: 0, h: 0, hud: 0, text: '' });
+      if (bm.n-- <= 0 || bm.text !== bubble.textContent) {
+        bm.n = 10; bm.text = bubble.textContent;
+        bm.w = bubble.offsetWidth; bm.h = bubble.offsetHeight; bm.hud = $('hud').getBoundingClientRect().bottom + 12;
+      }
+      const half = bm.w / 2 + 8;
+      bubble.style.left = `${THREE.MathUtils.clamp(x, half, window.innerWidth - half).toFixed(1)}px`;
+      // Не залезаем под верхнюю панель (на телефоне она в две строки).
+      bubble.style.top = `${Math.max(y, bm.h + bm.hud).toFixed(1)}px`;
+    }
 
     // Если долго не трогают — скучает.
     idleTime = pointerActive ? 0 : idleTime + dt;

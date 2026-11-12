@@ -967,7 +967,7 @@ export class PieceWardrobe {
   }
 
   // Готовим заготовки заранее, по одной за раз, чтобы первая смена одежды не подвисала.
-  warm() {
+  warm(busy) {
     const img = this.base?.skinMap?.image;
     if (!img || this.warmed) return;
     this.warmed = true;
@@ -976,7 +976,8 @@ export class PieceWardrobe {
     const jobs = [() => this.zoneMask('upper', w, h), () => this.zoneMask('waistgap', w, h), () => this.zoneMask('legsall', w, h), () => this.zoneMask('minishorts', w, h),
       ...['under', 'under:trim', 'leggings', 'leggings:trim', 'shorts', 'shorts:trim', 'minishorts', 'minishorts:trim', 'capri', 'capri:trim',
         'top', 'top:trim', 'crop', 'crop:trim', 'tank', 'tank:trim', 'longcrop', 'longcrop:trim', 'tee', 'tee:trim', 'polo', 'polo:trim', 'polocollar'].map((k) => () => this.clothMask(k, w, h))];
-    const step = () => { const j = jobs.shift(); if (!j) return; try { j(); } catch { /* ignore */ } setTimeout(step, 120); };
+    // Заготовки считаем, только пока её не трогают: палец на экране — ждём, чтобы жесты шли без подёргиваний.
+    const step = () => { if (busy?.()) { setTimeout(step, 500); return; } const j = jobs.shift(); if (!j) return; try { j(); } catch { /* ignore */ } setTimeout(step, 160); };
     setTimeout(step, 300);
   }
 
