@@ -1501,7 +1501,7 @@ export class Character {
       const amt = 0.038 * (this.scale ?? 1);
       HIP_FLEX.value.set(flexVol('left') * amt, flexVol('right') * amt);
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
-      { const upK = THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.15, 0.8); CROTCH_LIFT.value = SQUAT_FLEX.value * (0.6 + 0.4 * THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.3, 0.75)); void upK; } /* таз горизонтально (четвереньки) — втягивание слабее: по картинкам сзади при полном там рваное пятно, при 0.6 — чистый шов */ // по замеру ровности: втягивание равно сгибу ног в любой позе (ослабление давало бугор)
+      { const upK = THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.15, 0.8); CROTCH_LIFT.value = SQUAT_FLEX.value * 0.26; void upK; } /* Втягивание теперь слабое и одинаковое во всех позах: после того как стороны стали выходить наружу при сгибе, прежнее (полное) тянуло середину вверх и открывало щель при широких ногах; без него там торчит бугор. 0.22 подобрано по картинкам сзади-снизу: узкий и широкий присед, четвереньки. */ /* таз горизонтально (четвереньки) — втягивание слабее: по картинкам сзади при полном там рваное пятно, при 0.6 — чистый шов */ // по замеру ровности: втягивание равно сгибу ног в любой позе (ослабление давало бугор)
     }
 
     this.calmArms(dt);
