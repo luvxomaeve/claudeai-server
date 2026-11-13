@@ -2329,6 +2329,7 @@ export class Character {
       const wLie = 1 - ph0.b4 * (1 - this.liftKS);
       const kw = p2avg * (1 - p3) * (1 - ph0.c3);
       this.kneelK = kw * wLie;
+      this.sideK = Math.max(p3, ph0.p4);
       kp.wLie = wLie;
       const dtp = this.lastDt ?? 0.016;
       const has = kp.left && kp.right;
@@ -2663,7 +2664,7 @@ export class Character {
   // Кисть ушла под пол — рука сама сгибается и кладёт ладонь на пол (тело при этом не приподнимается).
   handFloorFix() {
     if (this.mixer) return;
-    const S = this.scale, minY = 0.022 * S, v = new THREE.Vector3();
+    const S = this.scale, minY = 0.05 * S, v = new THREE.Vector3(); // кость кисти выше пола на толщину ладони и пальцев (по замеру сетки)
     for (const side of ['left', 'right']) {
       const upper = this.bones[`${side}UpperArm`], lower = this.bones[`${side}LowerArm`], hand = this.bones[`${side}Hand`];
       if (!upper || !lower || !hand) continue;
@@ -2864,7 +2865,8 @@ export class Character {
       const hip = this.bones[`${side}UpperLeg`];
       if (hip) {
         const { swing, twistAngle } = Character.swingTwist(hip.quaternion, Y);
-        const twLim = 40 + 30 * (this.kneelK ?? 0); // на коленях голень лежит на полу и держится за ступню — бедру нужно скручиваться свободнее
+        const sdK = this.sideK ?? 0; // сидит боком: ноги сложены в сторону — бедру нужно больше свободы, иначе предел выдавливал ступни под пол
+        const twLim = 40 + 30 * (this.kneelK ?? 0) + 45 * sdK; // на коленях голень лежит на полу и держится за ступню — бедру нужно скручиваться свободнее
         const tw = THREE.MathUtils.clamp(twistAngle, -twLim * deg, twLim * deg);
         const dir = new THREE.Vector3(0, -1, 0).applyQuaternion(swing);
         // В «человеческих» осях: fwd — вперёд, lat — наружу, down — вниз.
@@ -2875,7 +2877,7 @@ export class Character {
         let roll = Math.asin(THREE.MathUtils.clamp(lat, -1, 1));
         // В глубоком приседе бедро поднимается к груди сильнее обычного предела — иначе ногу уводит внутрь и ступни
         // съезжаются. Вне приседа предел прежний.
-        const sqK = Math.max(this.squatK ?? 0, this.kneelK ?? 0), pitchMax = 114 + 18 * sqK; // и на коленях (садится на пятки) — тоже
+        const sqK = Math.max(this.squatK ?? 0, this.kneelK ?? 0, sdK), pitchMax = 114 + 18 * sqK; // и на коленях (садится на пятки) — тоже
         pitch = THREE.MathUtils.clamp(pitch, -25 * deg, pitchMax * deg);
         // Сильный сгиб + нога далеко в сторону одновременно — так сустав у человека не работает, а сетка модели
         // в этом месте сминается складками. Чем сильнее согнута нога, тем меньше её можно отвести вбок.
@@ -2883,7 +2885,7 @@ export class Character {
         // На коленях и четвереньках колено стоит на полу, а таз качается над ним — бедру нужно уходить внутрь дальше,
         // чем стоя (иначе предел срывал колено с места, и ноги перебирали по полу).
         const knK = this.kneelK ?? 0;
-        roll = THREE.MathUtils.clamp(roll, -(20 + 18 * knK) * deg, (rollMax + 10 * knK) * deg);
+        roll = THREE.MathUtils.clamp(roll, -(20 + 18 * knK + 30 * sdK) * deg, (rollMax + 10 * knK + 30 * sdK) * deg);
         const r = Math.cos(roll);
         const nd = new THREE.Vector3(Math.sin(roll) / (f * out), -r * Math.cos(pitch), (r * Math.sin(pitch)) / f);
         const newSwing = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), nd.normalize());
