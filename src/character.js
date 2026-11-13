@@ -2335,11 +2335,12 @@ export class Character {
       if (footOff) {
         target.add(footOff);
         // Ноги, выставленные на полу, не лежат «деревянно»: ступня чуть покачивается и переступает, колено дышит.
-        if (this.sitS > 0.3 && this.footOffK(side) > 0.5 && !(this.slideHold > 0)) {
+        // То же для ноги, поднятой в воздух стоя: она не висит неподвижно.
+        if ((this.sitS > 0.3 || footOff.y > 0.04 * S) && this.footOffK(side) > 0.5 && !(this.slideHold > 0)) {
           const lv = (1 - (this.sleep ?? 0)) * (this.frozen ? 0 : 1), tm = this.time, ph = L ? 0 : 2.1;
-          target.y += Math.max(0, Math.sin(tm * 0.7 + ph)) * 0.02 * S * lv;
-          target.z += Math.sin(tm * 0.45 + ph * 1.3) * 0.02 * S * lv;
-          target.x += Math.sin(tm * 0.33 + ph * 0.7) * 0.012 * S * lv;
+          target.y += (Math.max(0, Math.sin(tm * 0.7 + ph)) * 0.03 + Math.sin(tm * 1.7 + ph) * 0.006) * S * lv;
+          target.z += (Math.sin(tm * 0.45 + ph * 1.3) * 0.03 + Math.sin(tm * 1.1 + ph) * 0.008) * S * lv;
+          target.x += Math.sin(tm * 0.33 + ph * 0.7) * 0.018 * S * lv;
         }
       }
       if (this.sitS > 0.3) target.y = Math.max(target.y, 0.03 * S); // не сквозь пол
@@ -2533,8 +2534,11 @@ export class Character {
         const down = -dir.y;
         let pitch = Math.atan2(fwd, down);
         let roll = Math.asin(THREE.MathUtils.clamp(lat, -1, 1));
-        pitch = THREE.MathUtils.clamp(pitch, -25 * deg, 120 * deg);
-        roll = THREE.MathUtils.clamp(roll, -20 * deg, 45 * deg);
+        pitch = THREE.MathUtils.clamp(pitch, -25 * deg, 114 * deg);
+        // Сильный сгиб + нога далеко в сторону одновременно — так сустав у человека не работает, а сетка модели
+        // в этом месте сминается складками. Чем сильнее согнута нога, тем меньше её можно отвести вбок.
+        const rollMax = 45 - 14 * THREE.MathUtils.smoothstep(pitch, 98 * deg, 114 * deg);
+        roll = THREE.MathUtils.clamp(roll, -20 * deg, rollMax * deg);
         const r = Math.cos(roll);
         const nd = new THREE.Vector3(Math.sin(roll) / (f * out), -r * Math.cos(pitch), (r * Math.sin(pitch)) / f);
         const newSwing = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), nd.normalize());
