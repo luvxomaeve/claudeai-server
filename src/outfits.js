@@ -266,6 +266,10 @@ function hipKeepFill(e) {
       const r = new THREE.Vector3(0, v.y - J.y, v.z - J.z);
       if (r.lengthSq() > 1e-10) { r.normalize(); n.lerp(r, THREE.MathUtils.smoothstep(J.y - v.y, -0.01 * k0, 0.06 * k0)).normalize(); }
     }
+    // У средней линии сдвиг идёт строго назад-вниз, без боковой составляющей: стенки ложбинки не толкаются друг в
+    // друга, а её дно выходит вместе с ними. Раньше середину я просто не сдвигал — стороны уходили наружу на 4–5 см,
+    // а середина оставалась на месте, и ложбинка превращалась в глубокую тёмную щель («дырку»).
+    if (!cloth) { n.x *= THREE.MathUtils.smoothstep(Math.abs(v.x - (L.x + e.R.x) / 2), 0.0, 0.05 * k0); if (n.lengthSq() < 1e-8) n.copy(back); n.normalize(); }
     { const dg = n.clone().transformDirection(bindInv); dirs[i * 3] = dg.x; dirs[i * 3 + 1] = dg.y; dirs[i * 3 + 2] = dg.z; }
     // Тело: только то, что смотрит назад. Ткань: вся задняя половина и шире — она висит дальше от тела
     // и должна отойти не меньше, чем оно, иначе тело проглянет сквозь юбку.
@@ -282,7 +286,7 @@ function hipKeepFill(e) {
     const lowT = THREE.MathUtils.smoothstep(L.y - v.y, -0.01 * k0, 0.06 * k0);
     const midE = mid + (THREE.MathUtils.smoothstep(Math.abs(v.x - (L.x + e.R.x) / 2), 0.0, 0.018 * k0) - mid) * lowT;
     const sg = cloth ? sigma * 1.3 : sigma;
-    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : (0.55 + 0.45 * fold) * midE) : 0; }
+    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : (0.55 + 0.45 * fold)) : 0; } void midE;
   }
   g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
   g.setAttribute('hipDir', new THREE.BufferAttribute(dirs, 3));
