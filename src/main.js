@@ -2743,10 +2743,13 @@ function grabDone(keep) {
 }
 grabAsk.addEventListener('click', (e) => { const a = e.target?.dataset?.a; if (a) grabDone(a === 'rep' ? 'rep' : a === 'yes'); });
 for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:800;color:#fff;background:rgba(255,255,255,.18);cursor:pointer';
+var lastGrabAt = -1e9, lastGrabKey = null; // когда и за какую точку последний раз вели её (долгий тап)
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
-  let hit = nearestHandle(e0, 70, character.sitS > 0.3 ? { hips: 0.45 } : null) ?? zoneAt(e0, true);
+  // Только что вёл точку — та же точка берётся охотнее (продолжаешь то же движение, а не хватаешь соседнюю руку).
+  const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
+  let hit = nearestHandle(e0, 70, Object.keys(bias).length ? bias : null) ?? zoneAt(e0, true);
   if (!hit) return false;
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
   if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
@@ -2759,6 +2762,7 @@ function grabStart(e0) {
   try { poseDragStart(e0); } finally { grabForce = null; }
   if (!poseDrag || poseDrag.kind === 'bg' || poseDrag.kind === 'sitdrag') { poseDrag = null; return false; }
   poseDrag.grab = true;
+  lastGrabKey = hit.key ?? null; lastGrabAt = performance.now();
   try { navigator.vibrate?.(8); } catch { /* ignore */ }
   return true;
 }
@@ -2826,6 +2830,7 @@ const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
   if (poseDrag.kind !== 'bg') userPosed = true;
+  if (poseDrag.grab) lastGrabAt = performance.now();
   if (poseDrag.auto) {
     autoDragAt = performance.now();
     lastOnHerAt = autoDragAt;
@@ -4903,7 +4908,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 212;
+const WAIFU_BUILD = 213;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5042,6 +5047,9 @@ function showAutoStates(ms = 4500) {
     const clean = document.body.classList.contains('cleanscreen');
     if (!clean && !camOnly && !zoneAt(e, true)) return;
     const e0 = { clientX: e.clientX, clientY: e.clientY };
+    // Только что водил её за точку — следующее касание подхватывает сразу, без долгого тапа: можно отпускать палец
+    // и продолжать, не выжидая каждый раз (раньше быстрый жест принимался за поглаживание, и движения не было).
+    if (!clean && !camOnly && performance.now() - lastGrabAt < 6000) { held = { e0, x: e0.clientX, y: e0.clientY }; return; }
     lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {

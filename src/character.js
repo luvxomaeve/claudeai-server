@@ -2397,7 +2397,7 @@ export class Character {
 
       // Присед в каблуках: привстаёт на носки, ступни чуть вперёд, колени над носками.
       target.z += p1 * 0.1 * S;
-      target.y += p1 * 0.025 * S;
+      // Спортивный присед: ступни стоят на полу всей подошвой (раньше привставала на носки).
       target.x += outSign * p1 * (1 - p2) * 0.02 * S; // в приседе ступни чуть шире
       // На коленях: голени лежат на полу, ступни под ягодицами, носками назад.
       if (p2 > 0) {
@@ -2580,7 +2580,7 @@ export class Character {
       // нога наклоняют носок вниз. На коленях стопа продолжает линию голени
       // (носок назад, подъём на полу) — так голеностоп не выворачивается.
       const point = footOff ? Math.min(footOff.y / (0.3 * S), 1) * 0.7 : 0;
-      const pitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + Math.max(p1 * 0.55 * (1 - p2), hk * (this.heel?.angle ?? 0)));
+      const pitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), lift * 0.7 + point + Math.max(0, hk * (this.heel?.angle ?? 0)));
       let q = pitch.multiply(rest.quat.clone());
       if (p2 > 0 && QL) {
         // На коленях стопа жёстко продолжает голень и вытянута носком назад.
