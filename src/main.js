@@ -2416,13 +2416,16 @@ function updateHandles() {
 const sitSlider = $('sit-slider');
 // Лечь можно отключить (кнопка под полосой): тогда ниже «сидит боком» она не опускается.
 // Кнопка под полосой по кругу: на бок → на живот (спать) → не ложиться.
-let lieMode = 'side';
+// По умолчанию ложится на живот: стоя → корточки → колени → четвереньки → на живот.
+let lieMode = 'belly';
 try {
   const v = localStorage.getItem('waifu-lie');
   if (v === 'side' || v === 'belly' || v === 'back' || v === 'off') lieMode = v;
+  // Один раз переводим на новый стандарт тех, у кого был сохранён прежний (на бок); дальше выбор значком «кровать» сохраняется.
+  if (!localStorage.getItem('waifu-lie-std2')) { localStorage.setItem('waifu-lie-std2', '1'); if (lieMode === 'side') { lieMode = 'belly'; localStorage.setItem('waifu-lie', 'belly'); } }
   else if (localStorage.getItem('waifu-allow-lie') === '0') lieMode = 'off';
 } catch { /* ignore */ }
-if (!unlocked('lieStyles') && lieMode !== 'side') lieMode = 'side'; // пока не открыто — только на бок
+if (!unlocked('lieStyles') && lieMode !== 'belly' && lieMode !== 'off') lieMode = 'belly'; // пока другие позы не открыты — на живот
 let allowLie = lieMode !== 'off';
 const sitMax = () => (!unlocked('floor') ? 0.8 : allowLie ? 1.3 : 1.0);
 const LIE_ICONS = {
@@ -4908,7 +4911,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 213;
+const WAIFU_BUILD = 214;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4998,7 +5001,7 @@ function renderAutoStates() {
       if (id === 'lie') {
         // Поза сна по кругу: на бок → на живот → на спину. Если уже лежит — перекладывается.
         lieMode = { side: 'belly', belly: 'back', back: 'side', off: 'side' }[lieMode];
-        if (!unlocked('lieStyles')) lieMode = 'side';
+        if (!unlocked('lieStyles')) lieMode = 'belly';
         try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
         renderLieToggle();
         showToast({ side: '🛏 Ляжет на бок', belly: '🛏 Ляжет на живот', back: '🛏 Ляжет на спину' }[lieMode]);
