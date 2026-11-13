@@ -957,6 +957,9 @@ export class Character {
     for (const key in this.bodyOffset) {
       if (key === 'hipsFwd') continue; // сдвиг таза вперёд-назад на полу — отдельно, см. plantFeet
       let w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.hipsOffK() : 1;
+      // Подъём таза — только для положений на полу (колени, четвереньки, лёжа). Стоя и в приседе он поднял бы всё тело
+      // в воздух вместе со ступнями — там его гасим.
+      if (key === 'hipsY') w *= THREE.MathUtils.smoothstep(this.sitS, 0.5, 0.7);
       if (key === 'spineX' && this.bodyOffset.spineX > 0) w *= fwdLie;
       if ((key === 'spineX' || key === 'hipsRotX') && this.bodyOffset[key] > 0) w *= fwdCap;
       pose[key] += this.bodyOffset[key] * w;
