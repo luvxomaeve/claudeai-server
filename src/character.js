@@ -2332,7 +2332,16 @@ export class Character {
       const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
       (this.footBase ??= {})[side] = target.clone(); // где стопа стоит без сдвига
       const footOff = footRaw ? footRaw.clone().multiplyScalar(this.footOffK(side)) : null;
-      if (footOff) target.add(footOff);
+      if (footOff) {
+        target.add(footOff);
+        // Ноги, выставленные на полу, не лежат «деревянно»: ступня чуть покачивается и переступает, колено дышит.
+        if (this.sitS > 0.3 && this.footOffK(side) > 0.5 && !(this.slideHold > 0)) {
+          const lv = (1 - (this.sleep ?? 0)) * (this.frozen ? 0 : 1), tm = this.time, ph = L ? 0 : 2.1;
+          target.y += Math.max(0, Math.sin(tm * 0.7 + ph)) * 0.02 * S * lv;
+          target.z += Math.sin(tm * 0.45 + ph * 1.3) * 0.02 * S * lv;
+          target.x += Math.sin(tm * 0.33 + ph * 0.7) * 0.012 * S * lv;
+        }
+      }
       if (this.sitS > 0.3) target.y = Math.max(target.y, 0.03 * S); // не сквозь пол
       target.y = Math.max(target.y, rest.pos.y - 0.05 * S * p2);
 

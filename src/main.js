@@ -2818,8 +2818,8 @@ function poseDragMove(e) {
     poseDrag.lastY = e.clientY;
     return;
   }
-  const dx = e.clientX - poseDrag.lastX;
-  const dy = e.clientY - poseDrag.lastY;
+  let dx = e.clientX - poseDrag.lastX;
+  let dy = e.clientY - poseDrag.lastY;
   poseDrag.lastX = e.clientX;
   poseDrag.lastY = e.clientY;
   const facing = Math.cos(camYaw) >= 0 ? 1 : -1; // если смотрим сзади — влево/вправо наоборот
@@ -2857,8 +2857,21 @@ function poseDragMove(e) {
     character.hipsSetSit = character.sitS;
     // Размах шире (сборка 187): бёдра уходят вбок дальше, таз наклоняется сильнее — движение читается красивее.
     const lim = floor ? 0.3 : 0.17;
+    // Взял за таз долгим тапом: жест идёт по одной оси — вбок ИЛИ вверх-вниз (иначе, двигая таз вбок, случайно
+    // поднимал или усаживал её). На полу вверх-вниз — приподнять/опустить бёдра, а не встать.
+    if (poseDrag.grab) {
+      poseDrag.ax ??= 0; poseDrag.ay ??= 0; poseDrag.ax += Math.abs(dx); poseDrag.ay += Math.abs(dy);
+      if (!poseDrag.axis && poseDrag.ax + poseDrag.ay > 14) poseDrag.axis = poseDrag.ax >= poseDrag.ay ? 'x' : 'y';
+      if (!poseDrag.axis) return;
+      if (poseDrag.axis === 'y') dx = 0; else dy = 0;
+      if (floor) {
+        if (dy) { o.hipsY = clamp((o.hipsY ?? 0) - dy * 0.0007 * S, -0.03 * S, 0.14 * S); o.hipsRotX = clamp(o.hipsRotX - dy * 0.002, -0.5, 0.6); }
+        dy = 0;
+      }
+    }
     o.hipsX = clamp(o.hipsX + dx * 0.001 * facing * S, -lim * S, lim * S);
     o.hipsZ = clamp(o.hipsX / S * 1.6, -0.27, 0.27);
+    if (poseDrag.grab && !dy) return; // только вбок — посадку не трогаем
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
     // В 📌 при играющем повторе присед ведёт повтор — точкой бёдер только вбок.
     {
@@ -4756,7 +4769,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 193;
+const WAIFU_BUILD = 194;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
