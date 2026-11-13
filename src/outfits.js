@@ -459,9 +459,14 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
       const rr = radii[kk] + margin;
       const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr;
       positions.push(x, y, z);
-      const sL = THREE.MathUtils.smoothstep((x - cx) * sgn, -0.035, 0.035);
+      // Между ног ткань натянута: середина юбки идёт за обеими ногами поровну и сильнее держится за таз, поэтому при
+      // расставленных ногах подол тянется ровной линией от бедра к бедру, а не ломается складкой посередине.
+      const sx = (x - cx) * sgn;
+      const sL = THREE.MathUtils.smoothstep(sx, -0.085, 0.085);
+      const mid = 1 - THREE.MathUtils.smoothstep(Math.abs(sx), 0.0, 0.09);
+      const wl = wLeg * (1 - 0.35 * mid);
       skinI.push(iH, iL, iR, 0);
-      skinW.push(1 - wLeg, wLeg * sL, wLeg * (1 - sL), 0);
+      skinW.push(1 - wl, wl * sL, wl * (1 - sL), 0);
       uvs.push(k / SEG, r / RINGS);
       hemW.push(Math.pow(r / RINGS, 1.5));
     }
