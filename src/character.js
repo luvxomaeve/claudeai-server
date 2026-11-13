@@ -1483,9 +1483,22 @@ export class Character {
         const d = lo.getWorldPosition(new THREE.Vector3()).sub(up.getWorldPosition(new THREE.Vector3())).normalize();
         return THREE.MathUtils.smoothstep(Math.acos(THREE.MathUtils.clamp(d.dot(down), -1, 1)), 0.3, 1.75);
       };
-      // Только возврат объёма, потерянного сеткой при сгибе (см. installHipKeep): стоя — ноль.
+      // Возврат объёма, который сетка теряет при сгибе бедра (см. installHipKeep). Цель — ровно её собственная форма
+      // стоя, не больше. Сколько теряется, измерено по сетке: расстояние задней поверхности от сустава падает
+      // почти линейно с углом сгиба — примерно на 0.26 мм на градус после 29°. Раньше возврат насыщался на 100°:
+      // в полуприседе и на коленях получалось больше, чем стоя, а в глубоком приседе — меньше (сминало).
+      // Теперь возврат идёт по реальному углу и берётся с запасом 5% вниз.
+      const flexVol = (side) => {
+        const up = b[`${side}UpperLeg`];
+        const lo = b[`${side}LowerLeg`];
+        if (!up || !lo) return 0;
+        const d = lo.getWorldPosition(new THREE.Vector3()).sub(up.getWorldPosition(new THREE.Vector3())).normalize();
+        const deg = Math.acos(THREE.MathUtils.clamp(d.dot(down), -1, 1)) * 180 / Math.PI;
+        // В середине диапазона потеря чуть меньше прямой линии — берём 0.85, к глубокому сгибу выходим на полную.
+        return THREE.MathUtils.clamp(0.0122 * (deg - 29), 0, 1.3) * 0.95 * (0.85 + 0.15 * THREE.MathUtils.smoothstep(deg, 95, 125));
+      };
       const amt = 0.038 * (this.scale ?? 1);
-      HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
+      HIP_FLEX.value.set(flexVol('left') * amt, flexVol('right') * amt);
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
       { const upK = THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.15, 0.8); CROTCH_LIFT.value = SQUAT_FLEX.value; void upK; } // по замеру ровности: втягивание равно сгибу ног в любой позе (ослабление давало бугор)
     }
@@ -2557,7 +2570,7 @@ export class Character {
           const hj = upper.getWorldPosition(new THREE.Vector3());
           pole.y += (hj.y + 0.4 * S - pole.y) * sq;
           pole.z += (Math.max(pole.z, hj.z + 0.6 * S) - pole.z) * sq;
-          pole.x += outSign * (0.03 + 2.2 * Math.max(0, this.stanceK ?? 0)) * S * sq; // узкая стойка — колени вперёд, ровно; широкая — колени врозь над носками
+          pole.x += outSign * (0.1 + 2.2 * Math.max(0, this.stanceK ?? 0)) * S * sq; // узкая стойка — колени вперёд, ровно; широкая — колени врозь над носками
         }
       }
       // Болтает ножкой — колено не уходит под пол (иначе тело «всплывает»).

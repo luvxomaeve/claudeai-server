@@ -4914,7 +4914,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 215;
+const WAIFU_BUILD = 216;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5053,10 +5053,10 @@ function showAutoStates(ms = 4500) {
     const clean = document.body.classList.contains('cleanscreen');
     if (!clean && !camOnly && !zoneAt(e, true)) return;
     const e0 = { clientX: e.clientX, clientY: e.clientY };
-    // Только что водил её за точку — следующее касание подхватывает сразу, без долгого тапа: можно отпускать палец
-    // и продолжать, не выжидая каждый раз (раньше быстрый жест принимался за поглаживание, и движения не было).
-    if (!clean && !camOnly && performance.now() - lastGrabAt < 6000) { held = { e0, x: e0.clientX, y: e0.clientY }; return; }
-    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, 480) };
+    // Только что водил её за точку — для следующего взятия хватит короткой задержки (0.2 с вместо 0.5), значки при
+    // этом не всплывают. Сразу повёл палец — это обычный свайп (сесть, лечь, наклон), точка НЕ хватается.
+    const quick = !clean && !camOnly && performance.now() - lastGrabAt < 5000;
+    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
     if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel();
