@@ -882,6 +882,9 @@ export class Character {
         pose.hipsZ += lean * 0.04 * ph3.p3 * (1 - ph3.p4);
         pose.headZ -= lean * 0.06 * ph3.p3 * (1 - ph3.p4);
         const awake = 1 - (this.sleep ?? 0);
+        // На четвереньках (по дороге на живот) голова поднята и смотрит вперёд, спина чуть прогнута — живая поза,
+        // а не «уткнулась в пол».
+        { const four = ph3.b3 * (1 - ph3.b4) * awake; pose.headX -= 0.5 * four; pose.spineX -= 0.14 * four; }
         pose.headZ += Math.sin(t * 0.52) * 0.07 * ph3.b4 * awake;
         pose.spineY += Math.sin(t * 0.52) * 0.025 * ph3.b4 * awake;
         pose.spineX -= Math.max(0, Math.sin(t * 0.17)) * 0.08 * ph3.c4;
