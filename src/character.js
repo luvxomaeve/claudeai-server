@@ -2298,8 +2298,16 @@ export class Character {
     const kp = this.kneePin ??= { left: null, right: null, sit: -1, w: 0 };
     {
       const ph0 = this.sitPhases();
-      const kw = p2avg * (1 - p3) * (1 - ph0.b4) * (1 - ph0.c3);
-      this.kneelK = kw;
+      // Лёжа на животе колени тоже лежат на полу. Пока таз на полу — ноги свободны (болтает ножками); подняли таз —
+      // колени становятся опорой, как на четвереньках: таз идёт вверх по дуге вокруг них, голени остаются на полу
+      // (раньше ноги оставались прямыми и висели в воздухе вместе с тазом).
+      const liftK = THREE.MathUtils.smoothstep(Math.max(0, this.bodyOffset.hipsY ?? 0) / S, 0.015, 0.07);
+      // Включается и уходит плавно (иначе при сбросе позы ноги дёргались одним кадром).
+      if (this.liftTick !== this.time) { this.liftTick = this.time; this.liftKS = (this.liftKS ?? 0) + (liftK - (this.liftKS ?? 0)) * Math.min(1, (this.lastDt ?? 0.016) * 7); }
+      const wLie = 1 - ph0.b4 * (1 - this.liftKS);
+      const kw = p2avg * (1 - p3) * (1 - ph0.c3);
+      this.kneelK = kw * wLie;
+      kp.wLie = wLie;
       const dtp = this.lastDt ?? 0.016;
       const has = kp.left && kp.right;
       // Куда развёрнут таз по горизонтали: повернули корпус — старые точки колен уже не подходят.
@@ -2319,7 +2327,7 @@ export class Character {
       }
       if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.sit = -1; kp.bad = 0; }
       if (kp.w > 0 && kp.left && kp.right) {
-        const w = kp.w * kp.w * (3 - 2 * kp.w);
+        const w = kp.w * kp.w * (3 - 2 * kp.w) * wLie;
         const corr = new THREE.Vector3();
         let down = 0, vert = 0, vertN = 0;
         // Таз вперёд-назад по полу (ведут пальцем): с пяток вперёд на руки и обратно.
@@ -2531,7 +2539,7 @@ export class Character {
       { const sw = kp.sw ??= { left: 1, right: 1 }; if (this.kneeSwTick?.[side] !== this.time) { (this.kneeSwTick ??= {})[side] = this.time; sw[side] = THREE.MathUtils.clamp(sw[side] + (footOff ? -1 : 1) * (this.lastDt ?? 0.016) / 0.22, 0, 1); } }
       if (kp.w > 0 && kp[side] && kp.sw[side] > 0) {
         // Колено стоит на своём месте, голень лежит от него назад к ступне.
-        const w0 = kp.w * kp.sw[side], w = w0 * w0 * (3 - 2 * w0), P = kp[side];
+        const w0 = kp.w * kp.sw[side], w = w0 * w0 * (3 - 2 * w0) * (kp.wLie ?? 1), P = kp[side];
         const lr = this.limbRest.get(upper.uuid);
         const hj = upper.getWorldPosition(new THREE.Vector3());
         if (lr?.l1 && lr?.l2) {
