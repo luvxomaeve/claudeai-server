@@ -1774,3 +1774,12 @@ body:has(#auto-menu:not([hidden])) #bubble { opacity: 0; }
 @keyframes uiChip { from { opacity: 0; translate: 0 10px; scale: 0.8; } to { opacity: 1; translate: 0 0; scale: 1; } }
 #grab-ask { animation: uiRise 0.2s ease both; }
 @media (prefers-reduced-motion: reduce) { #auto-states.show button, #auto-menu.closing, #grab-ask { animation: none; } }
+
+/* ---------- Сборка 185 ---------- */
+.panel.closing { animation: uiSink 0.17s ease forwards; pointer-events: none; }
+@keyframes uiSink { to { opacity: 0; translate: 0 16px; } }
+/* Панели: большие кнопки одной высоты и с одинаковыми промежутками, заголовок и крестик на одной линии. */
+.panel .panel-big { min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }
+.panel .panel-body > .panel-big:first-child { margin-top: 0; }
+.panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
+@media (prefers-reduced-motion: reduce) { .panel.closing { animation: none; } }

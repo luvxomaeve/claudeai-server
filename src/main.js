@@ -2917,14 +2917,21 @@ wakeUi();
 function togglePanel(id, onOpen) {
   const panel = $(id);
   const willOpen = panel.classList.contains('hidden');
-  for (const p of document.querySelectorAll('.panel')) p.classList.add('hidden');
+  for (const p of document.querySelectorAll('.panel')) { if (p !== panel) { p.classList.remove('closing'); p.classList.add('hidden'); } }
   if (willOpen) {
     onOpen?.();
+    panel.classList.remove('closing');
     panel.classList.remove('hidden');
-  }
+  } else closePanel(panel);
+}
+// Панель закрывается плавно: уезжает вниз и гаснет, потом прячется.
+function closePanel(panel) {
+  if (panel.classList.contains('hidden') || panel.classList.contains('closing')) return;
+  panel.classList.add('closing');
+  setTimeout(() => { if (panel.classList.contains('closing')) { panel.classList.remove('closing'); panel.classList.add('hidden'); } }, 170);
 }
 for (const btn of document.querySelectorAll('.panel-close')) {
-  btn.addEventListener('click', () => btn.closest('.panel').classList.add('hidden'));
+  btn.addEventListener('click', () => closePanel(btn.closest('.panel')));
 }
 
 // ---------- Гардероб ----------
@@ -4687,7 +4694,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 184;
+const WAIFU_BUILD = 185;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
