@@ -3013,8 +3013,10 @@ function poseDragMove(e) {
       const k = clamp(o.hipsX / (lim * S), -1, 1);
       o.hipsZ = clamp(o.hipsX / S * 1.6, -0.36, 0.36);
       poseDrag.sp0 ??= { y: o.spineY + clamp(o.hipsX / (lim * S), -1, 1) * 0.42, z: o.spineZ - clamp(o.hipsX / (lim * S), -1, 1) * 0.16 }; // от уже выставленного скручивания
-      o.spineY = clamp(poseDrag.sp0.y - k * 0.42, -1.3, 1.3);
-      o.spineZ = clamp(poseDrag.sp0.z + k * 0.16, -0.95, 0.95);
+      // В глубоком наклоне корпус скручиваем втрое слабее: там он горизонтален, и то же скручивание перекашивало плечи.
+      const tw = 1 - 0.7 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.45, 1.2);
+      o.spineY = clamp(poseDrag.sp0.y - k * 0.42 * tw, -1.3, 1.3);
+      o.spineZ = clamp(poseDrag.sp0.z + k * 0.16 * tw, -0.95, 0.95);
       // Наклон таза — от того положения, в котором её взяли (в глубоком наклоне позу не сбрасываем), и не трогаем,
       // пока наклон ведёт повтор.
       poseDrag.rot0 ??= o.hipsRotX;
@@ -4921,7 +4923,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 233;
+const WAIFU_BUILD = 234;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5801,7 +5803,9 @@ function tick() {
     updateGrabLoops(dt);
     autoWalk(dt);
     updateFlirt(dt);
-    character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
+    // Руки спокойны и пока ведёшь её за точку (таз, корпус, ногу), и ещё немного после — иначе во время движения таза
+    // она всплёскивала руками и поправляла волосы, и позу перекашивало.
+    character.handsQuiet = autoMode && (!!poseDrag?.auto || !!poseDrag?.grab || performance.now() - autoDragAt < 700 || performance.now() - lastGrabAt < 1500);
     character.update(dt);
     pieceWardrobe.sync(dt);
 

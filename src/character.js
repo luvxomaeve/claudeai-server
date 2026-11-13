@@ -974,7 +974,9 @@ export class Character {
       // (кожа сзади модели на сильном сгибе сминается в плоскость): таз наклоняется
       // меньше, остальное берёт спина — наклон такой же глубокий, но дугой.
       const sitK = this.sitPhases().p1;
-      const lim = 1.25 - 0.5 * sitK;
+      // Присед стал глубоким (бедро уже у предела сгиба), поэтому в приседе таз почти не наклоняем: наклон целиком
+      // делает спина. Иначе бедро упиралось в предел, и одну ступню задирало на полметра («швыряло»).
+      const lim = 1.25 - 1.1 * sitK;
       const gate = this.bendW * (1 - this.sitPhases().b3); // не трогаем «лечь на живот»
       if (pose.hipsRotX > lim && gate > 0) {
         const ex = pose.hipsRotX - lim;
@@ -2694,11 +2696,12 @@ export class Character {
   // Пределы суставов применяются после расчёта ног и могут повернуть бедро — тогда ступня уезжает под пол
   // (или повисает над ним). Здесь колено доворачивается ровно настолько, чтобы ступня вернулась на свою высоту.
   footFloorFix() {
-    if (!(this.sitS > 0.3) || this.mixer) return;
+    if (!(this.sitS > 0.12) || this.mixer) return;
     const X = new THREE.Vector3(1, 0, 0), v = new THREE.Vector3(), S = this.scale;
     // На коленях и четвереньках голень лежит на полу: ступню возвращаем на её высоту в обе стороны — и если
     // провалилась, и если задралась в воздух (пределы сустава срывали колено, и ступня повисала у бедра).
-    const kneel = (this.kneelK ?? 0) > 0.5;
+    // …и в приседе тоже: при глубоком приседе с наклоном и сдвигом таза предел бедра задирал одну ступню на полметра.
+    const kneel = (this.kneelK ?? 0) > 0.5 || (this.squatK ?? 0) > 0.2;
     for (const side of ['left', 'right']) {
       const knee = this.bones[`${side}LowerLeg`], foot = this.bones[`${side}Foot`], want = this.footWantY?.[side];
       if (!knee || !foot || want == null) continue;
