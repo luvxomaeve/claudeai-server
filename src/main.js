@@ -2533,7 +2533,7 @@ const HANDLE_HIT = {
   hips: { zone: 'body', bone: 'hips' }, footL: { zone: 'legs', bone: 'leftFoot' }, footR: { zone: 'legs', bone: 'rightFoot' },
   kneeL: { zone: 'knee', side: 'left' }, kneeR: { zone: 'knee', side: 'right' },
 };
-function nearestHandle(e, radius = 40) {
+function nearestHandle(e, radius = 40, bias = null) {
   let best = null;
   // Только что крутили камеру — точки не хватаем (чтобы не зацепить случайно); радиус поменьше.
   if (performance.now() - lastCamMove < 450) return null;
@@ -2542,7 +2542,7 @@ function nearestHandle(e, radius = 40) {
     const p = handleWorld(k);
     if (!p) continue;
     handleV.copy(p).project(camera);
-    const d = Math.hypot((handleV.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-handleV.y * 0.5 + 0.5) * window.innerHeight - e.clientY);
+    const d = Math.hypot((handleV.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-handleV.y * 0.5 + 0.5) * window.innerHeight - e.clientY) * (bias?.[k] ?? 1);
     if (d < bestD) { bestD = d; best = { ...HANDLE_HIT[k], key: k }; }
   }
   return best;
@@ -2651,7 +2651,8 @@ grabAsk.addEventListener('click', (e) => { const a = e.target?.dataset?.a; if (a
 for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:800;color:#fff;background:rgba(255,255,255,.18);cursor:pointer';
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
-  const hit = nearestHandle(e0, 70) ?? zoneAt(e0, true);
+  // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
+  const hit = nearestHandle(e0, 70, character.sitS > 0.3 ? { hips: 0.55 } : null) ?? zoneAt(e0, true);
   if (!hit) return false;
   if (!grab) grab = { snap: character.exportTouchPose() };
   grab.rec = { start: performance.now(), S: [] }; // запись этого движения — для «Повторять»
