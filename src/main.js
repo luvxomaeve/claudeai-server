@@ -57,7 +57,7 @@ scene.add(ambient);
 
 // Пол: невидимый, только тень от неё + мягкая «контактная» тень под телом,
 // чтобы она стояла, сидела и лежала на полу, а не парила.
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMaterial({ opacity: 0.18 }));
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMaterial({ opacity: 0.42 }));
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
@@ -70,10 +70,11 @@ const floorDiscTex = (() => {
   const R = 500;
   // Само стекло: едва заметная светлая дымка, плотнее к краю (как торец стекла).
   const grd = g.createRadialGradient(512, 512, 0, 512, 512, R);
-  grd.addColorStop(0, 'rgba(255,255,255,0.035)');
-  grd.addColorStop(0.7, 'rgba(255,255,255,0.05)');
-  grd.addColorStop(0.94, 'rgba(255,255,255,0.10)');
-  grd.addColorStop(1, 'rgba(255,255,255,0.16)');
+  // Матовое стекло: под ней поверхность хорошо видна (иначе кажется, что она висит), к краю растворяется.
+  grd.addColorStop(0, 'rgba(205,195,255,0.20)');
+  grd.addColorStop(0.35, 'rgba(200,190,255,0.15)');
+  grd.addColorStop(0.75, 'rgba(200,190,255,0.07)');
+  grd.addColorStop(1, 'rgba(200,190,255,0.0)');
   g.fillStyle = grd;
   g.beginPath(); g.arc(512, 512, R, 0, Math.PI * 2); g.fill();
   // Блики: широкие мягкие полосы света поперёк плиты.
@@ -87,16 +88,14 @@ const floorDiscTex = (() => {
   }
   g.restore();
   // Край: яркая тонкая кромка и вторая, тусклая, чуть внутри (толщина стекла).
-  g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 3;
-  g.beginPath(); g.arc(512, 512, R - 2, 0, Math.PI * 2); g.stroke();
-  g.strokeStyle = 'rgba(255,255,255,0.16)'; g.lineWidth = 2;
-  g.beginPath(); g.arc(512, 512, R - 16, 0, Math.PI * 2); g.stroke();
+  // Яркого края больше нет: с низкой камеры он рисовался ниже её колен и рук и создавал ощущение,
+  // что пол где-то под ней. Теперь плита большая и просто тает к краям.
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 8;
   return t;
 })();
-const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 3.6), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false }));
+const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false }));
 floorDisc.rotation.x = -Math.PI / 2;
 floorDisc.position.y = 0.001;
 floorDisc.renderOrder = -2;
@@ -134,13 +133,13 @@ function updateTouchBlobs() {
     bone.getWorldPosition(touchV);
     // Высота низа этой части тела над полом (кость — в середине, отнимаем её «толщину»).
     const h = Math.max(0, touchV.y / S - rad);
-    const k = 1 - THREE.MathUtils.smoothstep(h, 0.0, 0.2);
+    const k = 1 - THREE.MathUtils.smoothstep(h, 0.0, 0.16);
     m.visible = k > 0.01;
     if (!m.visible) return;
     m.position.x = touchV.x; m.position.z = touchV.z;
     const sz = size * S * (1 + 1.3 * (1 - k)); // выше — пятно шире и бледнее
     m.scale.set(sz, sz, 1);
-    m.material.opacity = 0.75 * k * k;
+    m.material.opacity = 0.95 * k * k;
   });
 }
 const blobTex = (() => {
@@ -4866,7 +4865,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 204;
+const WAIFU_BUILD = 205;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
