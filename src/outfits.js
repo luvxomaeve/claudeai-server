@@ -214,6 +214,36 @@ function installCrotchFix(vrm, mesh) {
     const d = v.distanceTo(C) / sigma;
     arr[i] = d < 2.5 ? Math.exp(-d * d) * lift : 0;
   }
+  // Привязка сетки между ног. У модели эти вершины привязаны почти только к тазу: при сгибе ног всё вокруг уходит
+  // вместе с бёдрами, а они остаются на месте — торчит бугор. Часть их веса переносим поровну на левое и правое
+  // бедро: теперь это место само идёт за ногами в любой позе (приседе, широких ногах, на четвереньках), а не
+  // сдвигается на фиксированную величину. Стоя ничего не меняется — в исходной позе привязка на форму не влияет.
+  {
+    const bones = mesh.skeleton?.bones ?? [], si = g.getAttribute('skinIndex'), sw = g.getAttribute('skinWeight');
+    const idx = (name) => { const node = vrm.humanoid?.getRawBoneNode(name); let i = bones.indexOf(node); if (i < 0 && node) i = bones.findIndex((b) => b.name === node.name); return i; };
+    const iH = idx('hips'), iL = idx('leftUpperLeg'), iR = idx('rightUpperLeg');
+    if (iH >= 0 && iL >= 0 && iR >= 0 && si && sw && !g.userData.crotchRw) {
+      g.userData.crotchRw = true;
+      const SHARE = 0.55;
+      for (let i = 0; i < pos.count; i++) {
+        const k = Math.min(1, arr[i] / lift * 1.6);
+        if (k < 0.03) continue;
+        const I = [si.getX(i), si.getY(i), si.getZ(i), si.getW(i)], W = [sw.getX(i), sw.getY(i), sw.getZ(i), sw.getW(i)];
+        const h = I.findIndex((b, j) => b === iH && W[j] > 0);
+        if (h < 0) continue;
+        const t = W[h] * k * SHARE;
+        W[h] -= t;
+        for (const target of [iL, iR]) {
+          let j = I.findIndex((b, q) => b === target && q !== h);
+          if (j < 0) { j = -1; let best = Infinity; for (let q = 0; q < 4; q++) if (q !== h && W[q] < best && I[q] !== iL && I[q] !== iR) { best = W[q]; j = q; } if (j < 0) continue; W[h] += W[j]; W[j] = 0; I[j] = target; }
+          W[j] += t / 2;
+        }
+        const sum = W[0] + W[1] + W[2] + W[3] || 1;
+        si.setXYZW(i, I[0], I[1], I[2], I[3]); sw.setXYZW(i, W[0] / sum, W[1] / sum, W[2] / sum, W[3] / sum);
+      }
+      si.needsUpdate = true; sw.needsUpdate = true;
+    }
+  }
   g.setAttribute('aCrotch', new THREE.BufferAttribute(arr, 1));
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     if (!m || m.userData.crotchFix) continue;
