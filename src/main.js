@@ -2834,11 +2834,11 @@ function poseDragMove(e) {
       o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
       o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
     }
-    o.spineZ = clamp(o.spineZ - dx * 0.004 * facing, -0.5, 0.5);
+    o.spineZ = clamp(o.spineZ - dx * 0.005 * facing, -0.72, 0.72); // вбок корпусом — шире
   } else if (poseDrag.kind === 'twist') {
     // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
     const o = character.bodyOffset;
-    o.spineY = clamp(o.spineY + dx * 0.005 * facing, -0.8, 0.8);
+    o.spineY = clamp(o.spineY + dx * 0.006 * facing, -1.05, 1.05); // поворот корпуса — шире
     if (!repPlaying()) o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
   } else {
     // Таз: тянешь вниз — опускается (присед → на колени → сидит → лежит), вверх — встаёт;
@@ -2853,9 +2853,10 @@ function poseDragMove(e) {
       o.hipsX = 0; o.hipsZ = 0; o.hipsY = 0;
     }
     character.hipsSetSit = character.sitS;
-    const lim = floor ? 0.16 : 0.08;
-    o.hipsX = clamp(o.hipsX + dx * 0.0006 * facing * S, -lim * S, lim * S);
-    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+    // Размах шире (сборка 187): бёдра уходят вбок дальше, таз наклоняется сильнее — движение читается красивее.
+    const lim = floor ? 0.2 : 0.125;
+    o.hipsX = clamp(o.hipsX + dx * 0.0008 * facing * S, -lim * S, lim * S);
+    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.2, 0.2);
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
     // В 📌 при играющем повторе присед ведёт повтор — точкой бёдер только вбок.
     {
@@ -4753,7 +4754,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 186;
+const WAIFU_BUILD = 187;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
