@@ -277,8 +277,12 @@ function hipKeepFill(e) {
     const fold = THREE.MathUtils.smoothstep(v.y, L.y - 0.115 * k0, L.y - 0.05 * k0);
     // И у средней линии: там левая и правая стороны смотрят друг на друга, и выталкивание заставляло их пересекаться.
     const mid = THREE.MathUtils.smoothstep(Math.abs(v.x - (L.x + e.R.x) / 2), 0.008 * k0, 0.05 * k0);
+    // Ниже сустава сдвиг идёт без боковой составляющей (стороны друг в друга не толкаются), поэтому там ослабление у
+    // середины нужно только в узкой полосе — иначе низ каждой стороны срезался диагональю к середине (вид сзади).
+    const lowT = THREE.MathUtils.smoothstep(L.y - v.y, -0.01 * k0, 0.06 * k0);
+    const midE = mid + (THREE.MathUtils.smoothstep(Math.abs(v.x - (L.x + e.R.x) / 2), 0.0, 0.018 * k0) - mid) * lowT;
     const sg = cloth ? sigma * 1.3 : sigma;
-    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : (0.55 + 0.45 * fold) * mid) : 0; }
+    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : (0.55 + 0.45 * fold) * midE) : 0; }
   }
   g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
   g.setAttribute('hipDir', new THREE.BufferAttribute(dirs, 3));
