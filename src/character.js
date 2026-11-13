@@ -1735,7 +1735,9 @@ export class Character {
       const handPos = hand.getWorldPosition(new THREE.Vector3());
       const len = this.armLength(side) + 0.07 * S; // с кистью
       // Свои позы рук на полу уже есть: лёжа, сидя на полу, опора сбоку.
-      const own = Math.max(ph.p4, ph.b3, ph.c3, side === 'right' ? ph.p3 : 0);
+      // Свои позы рук — только когда уже лежит (на боку, на животе, на спине). По дороге туда — на четвереньках
+      // и полулёжа на спине — ладони ставит на пол опора: она стоит на руках, а не держит их в воздухе.
+      const own = Math.max(ph.p4, ph.b4, THREE.MathUtils.smoothstep(ph.c4, 0.75, 1), ph.c3 * (1 - THREE.MathUtils.smoothstep(ph.c4, 0.05, 0.3)), side === 'right' ? ph.p3 : 0);
       const busy = this.handTargets[side] || this.armPreset[side] ? 1 : this.gestureYield(side);
       const low = THREE.MathUtils.smoothstep(len * 1.12 - (shoulder.y - palmY), 0, len * 0.3);
       // Руки лежат на коленях (наклон стоя) — опора о пол не перехватывает.
