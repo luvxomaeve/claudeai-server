@@ -2402,6 +2402,18 @@ export class Character {
         b.hips.updateWorldMatrix(true, true);
       }
     }
+    // Широко расставленные ступни и глубокий присед: таз не может опуститься ниже, чем позволяют бёдра (нога отводится
+    // в сторону не больше ~58°). Раньше таз шёл вниз до конца, предел сустава срабатывал уже после, и ступни взлетали
+    // с пола в стороны — её «швыряло». Теперь таз останавливается на высоте, с которой ступни ещё стоят на полу.
+    {
+      const need = this.splitNeed ?? 0, dtp = this.lastDt ?? 0.016;
+      if (this.splitTick !== this.time) { this.splitTick = this.time; this.splitRaise = (this.splitRaise ?? 0) + (need - (this.splitRaise ?? 0)) * Math.min(1, dtp * 10); }
+      if ((this.splitRaise ?? 0) > 1e-4) {
+        const wp = b.hips.getWorldPosition(new THREE.Vector3()); wp.y += this.splitRaise;
+        b.hips.position.copy(b.hips.parent.worldToLocal(wp)); b.hips.updateWorldMatrix(true, true);
+      }
+      this.splitNeedNext = 0;
+    }
     for (const side of ['left', 'right']) {
       const L = side === 'left';
       // На колени — по очереди, как человек: сначала левое колено, потом правое.
@@ -2606,6 +2618,12 @@ export class Character {
         }
       }
       (this.footWantY ??= {})[side] = target.y;
+      if (p2 < 0.5 && !this.mixer) { // стоя и в приседе
+        const hj = upper.getWorldPosition(new THREE.Vector3());
+        const dx = Math.hypot(target.x - hj.x, 0), h = hj.y - (this.splitRaise ?? 0) - target.y;
+        this.splitNeedNext = Math.max(this.splitNeedNext ?? 0, 0.62 * dx - h);
+      }
+      if (!L) this.splitNeed = Math.max(0, this.splitNeedNext ?? 0);
       (this.footHeld ??= {})[side] = !!footOff;
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
       // Угол голени вперёд — для баланса корпуса в следующем кадре.
@@ -2858,7 +2876,7 @@ export class Character {
         pitch = THREE.MathUtils.clamp(pitch, -25 * deg, pitchMax * deg);
         // Сильный сгиб + нога далеко в сторону одновременно — так сустав у человека не работает, а сетка модели
         // в этом месте сминается складками. Чем сильнее согнута нога, тем меньше её можно отвести вбок.
-        const rollMax = 45 - 14 * THREE.MathUtils.smoothstep(pitch, 98 * deg, 114 * deg) * (1 - sqK);
+        const rollMax = 45 - 14 * THREE.MathUtils.smoothstep(pitch, 98 * deg, 114 * deg) * (1 - sqK) + 13 * (this.squatK ?? 0); // в приседе ноги расходятся шире (широкий присед)
         // На коленях и четвереньках колено стоит на полу, а таз качается над ним — бедру нужно уходить внутрь дальше,
         // чем стоя (иначе предел срывал колено с места, и ноги перебирали по полу).
         const knK = this.kneelK ?? 0;
