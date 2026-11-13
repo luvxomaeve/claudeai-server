@@ -2988,6 +2988,9 @@ export class Character {
     const chest = this.chestNode();
     chest.updateWorldMatrix(true, false);
     this.handTargets[side] = chest.worldToLocal(worldPoint.clone());
+    // Руку поставили на пол (на полу, низко) — она опора: остаётся на этом месте пола, когда двигаешь таз и корпус,
+    // а не едет вместе с грудью. Выше пола — как раньше, рука держит позу относительно тела.
+    (this.handWorld ??= {})[side] = this.sitS > 0.3 && worldPoint.y < 0.14 * this.scale ? { p: worldPoint.clone().setY(Math.max(worldPoint.y, 0.05 * this.scale)), sit: this.sitS } : null;
   }
 
   footWorld(side) {
@@ -3034,6 +3037,7 @@ export class Character {
     this.footSetSit = {};
     this.hipsSetSit = null;
     this.handAnchor = { left: null, right: null };
+    this.handWorld = { left: null, right: null };
     // Позу сбросили или вернули как было — колени больше не держатся за старые точки на полу.
     if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.foot = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; }
   }
@@ -3094,7 +3098,16 @@ export class Character {
       // прямо сейчас: рука едет вместе с ней и не отлипает при наклоне/посадке/повторе.
       const anc = this.handAnchor?.[side];
       const ap = anc && this.handTargets[side] ? this.anchorPoint(anc) : null;
-      const local = ap ? chest.worldToLocal(ap) : this.handTargets[side] ? this.dragPhys.hand[side]?.x : null;
+      // Рука-опора на полу: держится за своё место; посадка сильно изменилась (встала, легла) — отпускает.
+      let hw = this.handTargets[side] ? this.handWorld?.[side] : null;
+      if (hw && Math.abs(this.sitS - hw.sit) > 0.22) { this.handWorld[side] = null; hw = null; }
+      if (hw) {
+        // Не дотягивается — ладонь по полу подшагивает к плечу ровно настолько, чтобы достать.
+        const up0 = this.bones[`${side}UpperArm`], r0 = up0 ? this.limbRest.get(up0.uuid) : null;
+        if (r0) { const sh = up0.getWorldPosition(new THREE.Vector3()), reach = (r0.l1 + r0.l2) * 0.97, dv = hw.p.clone().sub(sh), over = dv.length() - reach; if (over > 0) { dv.y = 0; if (dv.lengthSq() > 1e-8) hw.p.addScaledVector(dv.normalize(), -over * Math.min(1, (this.lastDt ?? 0.016) * 6)); } }
+        this.handTargets[side] = chest.worldToLocal(hw.p.clone());
+      }
+      const local = ap ? chest.worldToLocal(ap) : hw ? this.handTargets[side] : this.handTargets[side] ? this.dragPhys.hand[side]?.x : null;
       if (!local) {
         this.handsOnKnees(side);
         continue;
