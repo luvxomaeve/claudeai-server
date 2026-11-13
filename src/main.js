@@ -4907,6 +4907,7 @@ function renderAutoStates() {
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
   // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна всегда; «↺» — только когда есть выставленные точки.
   for (const [id, icon, name] of [['home', '🏠', ''], ...(hasPoints() ? [['pts', '↺', 'Сбросить точки']] : []), ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
+    if (id === 'cam') { const brk = document.createElement('span'); brk.className = 'brk'; autoStates.appendChild(brk); } // второй ряд — инструменты
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = (on ? 'active' : '') + (id === 'cam' ? ' sep' : '');

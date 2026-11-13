@@ -928,7 +928,7 @@ export class Character {
         pose.hipsRotX += 0.95 * fold + 1.39 * b4; // на животе тело горизонтально
         pose.spineX += 0.45 * fold;
         // Опускается грудью на руки настолько, чтобы ладони стояли на полу (а не висели над ним).
-        { this.sinkS = fold > 0.2 ? THREE.MathUtils.clamp((this.sinkS ?? 0) + THREE.MathUtils.clamp(this.handGapS ?? 0, -0.04, 0.1) * 14 * (this.lastDt ?? 0.016), 0, 0.6) : 0; pose.spineX += this.sinkS * 0.6; pose.hipsRotX += this.sinkS * 0.4; }
+        { const dts = this.lastDt ?? 0.016; this.sinkS = fold > 0.2 ? THREE.MathUtils.clamp((this.sinkS ?? 0) + THREE.MathUtils.clamp(this.handGapS ?? 0, -0.04, 0.1) * 8 * dts, 0, 0.6) : (this.sinkS ?? 0) * Math.exp(-dts * 4); /* уходит плавно, без скачка корпуса */ pose.spineX += this.sinkS * 0.6 * b3; pose.hipsRotX += this.sinkS * 0.4 * b3; }
         pose.headX += 0.25 * fold - 0.3 * b4; // лёжа голова чуть приподнята на руках
         pose.headY += 1.05 * b4; // щекой на руки, лицом к тебе
         pose.headZ += 0.15 * b4;
@@ -1787,10 +1787,13 @@ export class Character {
       const want = Math.max(low, four) * (1 - own) * (1 - busy) * (1 - 0.9 * (this.restW ?? 0));
       // Плечи выше, чем достаёт рука, — запоминаем, сколько не хватает: корпус в следующем кадре опустится на руки.
       if (dt > 0) { const gap = ((shoulder.y - palmY) - len * 0.8) / S; this.handGap = side === 'left' ? gap : Math.max(this.handGap ?? gap, gap); if (side === 'right') this.handGapS = four > 0.5 ? this.handGap : 0; }
-      if (dt > 0) this.supW[side] += (want - this.supW[side]) * (1 - Math.exp(-dt * 3.5));
-      const w = this.supW[side];
+      // На четвереньки руки ставит и снимает неторопливо (плавный ход ладони к полу), остальное — как было.
+      if (dt > 0) this.supW[side] += (want - this.supW[side]) * (1 - Math.exp(-dt * (four > 0.05 || (this.onHandsWas ?? 0) > 0.05 ? 2.2 : 3.5)));
+      if (side === 'right') this.onHandsWas = four;
+      const wRaw = this.supW[side];
+      const w = wRaw * wRaw * (3 - 2 * wRaw); // плавный разгон и остановка
       const below = handPos.y < palmY * 0.9;
-      if (w < 0.01 && !below) { if (w < 0.01) this.plant[side] = null; continue; }
+      if (w < 0.01 && !below && !((this.belowW?.[side] ?? 0) > 0.01)) { this.plant[side] = null; continue; }
       const sx = side === 'left' ? 1 : -1;
       // Где ладонь стоит удобнее всего: под плечом, чуть впереди и в сторону.
       const ideal = shoulder.clone()
@@ -1817,7 +1820,10 @@ export class Character {
       const pole = lower.getWorldPosition(new THREE.Vector3())
         .addScaledVector(side3, sx * 0.3).addScaledVector(fwd, -0.35).add(new THREE.Vector3(0, 0.25, 0));
       this.twoBoneIK(upper, lower, hand, target, pole);
-      const k = below ? Math.max(w, 1) : w;
+      // Кисть ушла под пол — опора включается быстро, но не одним кадром (раньше рука щёлкала на место).
+      const bw = this.belowW ??= { left: 0, right: 0 };
+      if (dt > 0) bw[side] = THREE.MathUtils.clamp(bw[side] + (below ? 9 : -5) * dt, 0, 1);
+      const k = Math.max(w, bw[side] * bw[side] * (3 - 2 * bw[side]));
       upper.quaternion.copy(q1.clone().slerp(upper.quaternion, k));
       lower.quaternion.copy(q2.clone().slerp(lower.quaternion, k));
       upper.updateWorldMatrix(false, true);

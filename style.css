@@ -1788,3 +1788,11 @@ body:has(#auto-menu:not([hidden])) #bubble { opacity: 0; }
 #auto-states:not(#_):not(#__):not(#___) { gap: 6px !important; padding: 0 10px; box-sizing: border-box; width: 100vw; max-width: 460px; justify-content: center; }
 #auto-states button:not(#_):not(#__) { flex: 0 1 44px; width: 44px; height: 44px; }
 #auto-states button.sep:not(#_) { margin-left: 12px; }
+
+/* Значки по долгому тапу — ровные круги одного размера в два ряда по центру: сверху что она делает,
+   снизу инструменты. Не сжимаются в овалы, сколько бы их ни было. */
+#auto-states:not(#_):not(#__) { --sz: 44px; gap: 8px !important; flex-wrap: wrap; justify-content: center; align-items: center; width: max-content; max-width: calc(100vw - 16px); }
+#auto-states button:not(#_):not(#__) { width: var(--sz); height: var(--sz); min-width: 0; flex: 0 0 var(--sz); padding: 0; margin: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; line-height: 1; }
+#auto-states .brk { flex: 0 0 100%; height: 0; margin: 0; padding: 0; }
+#auto-states button:not(#_) i { font-size: 20px; line-height: 1; display: block; }
+#auto-states button:not(#_) svg { width: 23px; height: 23px; display: block; }
