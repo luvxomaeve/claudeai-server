@@ -2398,7 +2398,7 @@ export class Character {
       // Присед в каблуках: привстаёт на носки, ступни чуть вперёд, колени над носками.
       target.z += p1 * 0.1 * S;
       // Спортивный присед: ступни стоят на полу всей подошвой (раньше привставала на носки).
-      target.x += outSign * p1 * (1 - p2) * 0.02 * S; // в приседе ступни чуть шире
+      target.x += outSign * p1 * (1 - p2) * 0.075 * S; // в приседе ступни на ширине плеч (спортивный присед)
       // На коленях: голени лежат на полу, ступни под ягодицами, носками назад.
       if (p2 > 0) {
         // Колени и ступни на ширине бёдер (как обычно стоят на коленях): сгиб в бедре
@@ -2536,6 +2536,18 @@ export class Character {
         knee.y - 0.5 * p2 * (1 - p3) + 0.2 * p3 + kneeUp * 0.5,
         knee.z + 0.6 + kneeUp,
       );
+      // В приседе колено смотрит вперёд-вверх от таза. Раньше ориентир брался от прошлого положения колена и в глубоком
+      // приседе оказывался почти на линии «бедро — ступня»: колено на пару кадров теряло направление и дёргалось вбок.
+      {
+        const sq = p1 * (1 - p2) * (1 - p3);
+        if (L) this.squatK = THREE.MathUtils.smoothstep(sq, 0.3, 0.9);
+        if (sq > 0) {
+          const hj = upper.getWorldPosition(new THREE.Vector3());
+          pole.y += (hj.y + 0.4 * S - pole.y) * sq;
+          pole.z += (Math.max(pole.z, hj.z + 0.6 * S) - pole.z) * sq;
+          pole.x += outSign * 0.14 * S * sq; // колени в приседе разведены в стороны над носками, а не сведены вместе
+        }
+      }
       // Болтает ножкой — колено не уходит под пол (иначе тело «всплывает»).
       if (b4 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y - 0.15 + 0.5 * (this.kickNow?.[side] ?? 0), knee.z - 0.6), b4); // на животе колени к полу, ноги прямые
       if (c3 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y + 0.6, knee.z + 0.3), c3); // сидя/на спине колени вверх
@@ -2809,10 +2821,13 @@ export class Character {
         const down = -dir.y;
         let pitch = Math.atan2(fwd, down);
         let roll = Math.asin(THREE.MathUtils.clamp(lat, -1, 1));
-        pitch = THREE.MathUtils.clamp(pitch, -25 * deg, 114 * deg);
+        // В глубоком приседе бедро поднимается к груди сильнее обычного предела — иначе ногу уводит внутрь и ступни
+        // съезжаются. Вне приседа предел прежний.
+        const sqK = this.squatK ?? 0, pitchMax = 114 + 18 * sqK;
+        pitch = THREE.MathUtils.clamp(pitch, -25 * deg, pitchMax * deg);
         // Сильный сгиб + нога далеко в сторону одновременно — так сустав у человека не работает, а сетка модели
         // в этом месте сминается складками. Чем сильнее согнута нога, тем меньше её можно отвести вбок.
-        const rollMax = 45 - 14 * THREE.MathUtils.smoothstep(pitch, 98 * deg, 114 * deg);
+        const rollMax = 45 - 14 * THREE.MathUtils.smoothstep(pitch, 98 * deg, 114 * deg) * (1 - sqK);
         roll = THREE.MathUtils.clamp(roll, -20 * deg, rollMax * deg);
         const r = Math.cos(roll);
         const nd = new THREE.Vector3(Math.sin(roll) / (f * out), -r * Math.cos(pitch), (r * Math.sin(pitch)) / f);
