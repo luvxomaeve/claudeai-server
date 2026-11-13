@@ -2894,7 +2894,9 @@ function poseDragMove(e) {
     return;
   }
   if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
-    if (pointMode === 'rec') ptsNoteMove(); // 🔁 движение точек — отдельный слой повтора
+    // В простом виде движение рук и ног само в повтор НЕ записывается (кнопки этого режима там нет, и выключить было
+    // нечем): повтор точки — только по «🔁 Повторять» в вопросе «Так?».
+    if (pointMode === 'rec' && !autoMode) ptsNoteMove(); // 🔁 движение точек — отдельный слой повтора
     else pinLimb(poseDrag.kind, poseDrag.side); // 📌 повтор идёт дальше, точка — где поставил
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
@@ -3031,7 +3033,7 @@ function poseDragMove(e) {
       character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
       character.slideHold = 3;
       character.dragBoostT = 0.5;
-      if (pointMode === 'rec') loopNoteMove('sit');
+      if (pointMode === 'rec' && !autoMode) loopNoteMove('sit');
       sitBy(dv / 0.004);
       // За таз стоя — приседает (глубоко, но на колени сама не падает): можно качать и крутить тазом в приседе.
       if (poseDrag.grab && !floor) character.sit = Math.min(character.sit, 0.5);
@@ -4919,7 +4921,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 232;
+const WAIFU_BUILD = 233;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
