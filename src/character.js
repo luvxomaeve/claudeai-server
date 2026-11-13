@@ -1496,7 +1496,7 @@ export class Character {
         const deg = Math.acos(THREE.MathUtils.clamp(d.dot(down), -1, 1)) * 180 / Math.PI;
         // В середине диапазона потеря чуть меньше прямой линии — берём 0.85, к глубокому сгибу выходим на полную.
         // За 105° сетка теряет объём быстрее — добавка, чтобы и в глубоком приседе выходила форма стоя (не больше).
-        return THREE.MathUtils.clamp(0.0122 * (deg - 29), 0, 1.3) * 0.95 * (0.85 + 0.15 * THREE.MathUtils.smoothstep(deg, 95, 125)) + 0.006 * Math.max(0, deg - 105);
+        return THREE.MathUtils.clamp(0.0122 * (deg - 29), 0, 1.3) * 0.95 * (0.85 + 0.15 * THREE.MathUtils.smoothstep(deg, 95, 125)) + 0.009 * Math.max(0, deg - 105);
       };
       const amt = 0.038 * (this.scale ?? 1);
       HIP_FLEX.value.set(flexVol('left') * amt, flexVol('right') * amt);
