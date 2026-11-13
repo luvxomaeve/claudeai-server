@@ -1422,6 +1422,14 @@ export class Character {
     }
     // Точная доводка взгляда: лицо смотрит прямо в камеру с любого ракурса.
     this.applyHeadAim(dt);
+    // Где колени оказались в готовой позе (после всех пределов суставов) — отсюда берём их место на полу.
+    if (this.bones.leftLowerLeg && this.bones.rightLowerLeg) {
+      const kl = this.kneeLast ??= {};
+      const nl = this.bones.leftLowerLeg.getWorldPosition(new THREE.Vector3());
+      this.kneeStill = kl.left && kl.left.distanceTo(nl) < 0.2 * this.scale * Math.max(dt, 0.004) ? (this.kneeStill ?? 0) + dt : 0; // секунд подряд колено почти не двигалось
+      kl.left = nl;
+      kl.right = this.bones.rightLowerLeg.getWorldPosition(new THREE.Vector3());
+    }
     // Корректирующий объём бёдер: чем сильнее согнута нога в тазу, тем выпуклее сзади.
     {
       const b = this.bones;
@@ -2228,6 +2236,55 @@ export class Character {
     const ease = (x) => x * x * (3 - 2 * x);
     let leanSum = 0;
     let leanN = 0;
+    // Колени на полу — опора, а не «лыжи». Пока она стоит на коленях или на четвереньках и её двигают (таз вбок,
+    // вверх, наклон) или она сама покачивается, колени остаются там, где стоят: таз ходит вокруг них на длину бедра.
+    // Утянули таз далеко — колени переступают следом. Меняется сама посадка (садится/встаёт) — колени свободны.
+    const kp = this.kneePin ??= { left: null, right: null, sit: -1, w: 0 };
+    {
+      const ph0 = this.sitPhases();
+      const kw = p2avg * (1 - p3) * (1 - ph0.b4) * (1 - ph0.c3);
+      const dtp = this.lastDt ?? 0.016;
+      const has = kp.left && kp.right;
+      const on = kw > 0.9 && Math.abs(this.sitS - this.sit) < 0.02 && (!has || Math.abs(kp.sit - this.sitS) < 0.03) && !this.mixer && !this.dancing;
+      // Берём место колен из готовой позы прошлого кадра (сейчас кости ещё не расставлены) и только когда она уже села ровно.
+      if (on && !has && kp.w <= 0.001 && this.kneeLast?.left && this.kneeLast?.right && Math.abs(this.sitV ?? 0) < 0.03 && (this.kneeStill ?? 0) > 0.12) {
+        kp.left = this.kneeLast.left.clone();
+        kp.right = this.kneeLast.right.clone();
+        kp.sit = this.sitS;
+      }
+      if (!this.kneePinTick || this.kneePinTick !== this.time) { // второй проход кадра вес не трогает
+        this.kneePinTick = this.time;
+        kp.w = THREE.MathUtils.clamp(kp.w + (on && kp.left ? dtp / 0.3 : -dtp / 0.25), 0, 1);
+      }
+      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.sit = -1; }
+      if (kp.w > 0 && kp.left && kp.right) {
+        const w = kp.w * kp.w * (3 - 2 * kp.w);
+        const corr = new THREE.Vector3();
+        let down = 0;
+        for (const side of ['left', 'right']) {
+          const up = b[`${side}UpperLeg`], P = kp[side];
+          const l1 = this.limbRest.get(up.uuid)?.l1;
+          if (!l1) continue;
+          const hj = up.getWorldPosition(new THREE.Vector3());
+          const dy = hj.y - P.y;
+          if (dy > l1 * 0.995) down = Math.max(down, dy - l1 * 0.995);
+          const r = Math.sqrt(Math.max(0, l1 * l1 - Math.min(dy, l1 * 0.995) ** 2));
+          const h = new THREE.Vector3(P.x - hj.x, 0, P.z - hj.z);
+          const d = h.length();
+          if (d < 1e-5) continue;
+          h.multiplyScalar(1 / d);
+          let c = d - r;
+          // Слишком далеко — колено переступает вслед за тазом (плавно), остальное добирает таз.
+          const lim = 0.22 * S;
+          if (Math.abs(c) > lim) { const ex = (Math.abs(c) - lim) * Math.sign(c); P.addScaledVector(h, -ex * Math.min(1, dtp * 9)); c -= ex * Math.min(1, dtp * 9); }
+          corr.addScaledVector(h, c * 0.5);
+        }
+        const wp = b.hips.getWorldPosition(new THREE.Vector3());
+        wp.x += corr.x * w; wp.z += corr.z * w; wp.y -= down * w;
+        b.hips.position.copy(b.hips.parent.worldToLocal(wp));
+        b.hips.updateWorldMatrix(true, true);
+      }
+    }
     for (const side of ['left', 'right']) {
       const L = side === 'left';
       // На колени — по очереди, как человек: сначала левое колено, потом правое.
@@ -2379,10 +2436,33 @@ export class Character {
       // Болтает ножкой — колено не уходит под пол (иначе тело «всплывает»).
       if (b4 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y - 0.15 + 0.5 * (this.kickNow?.[side] ?? 0), knee.z - 0.6), b4); // на животе колени к полу, ноги прямые
       if (c3 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y + 0.6, knee.z + 0.3), c3); // сидя/на спине колени вверх
+      if (kp.w > 0 && kp[side] && !footOff) {
+        // Колено стоит на своём месте, голень лежит от него назад к ступне.
+        const w = kp.w * kp.w * (3 - 2 * kp.w), P = kp[side];
+        const lr = this.limbRest.get(upper.uuid);
+        const hj = upper.getWorldPosition(new THREE.Vector3());
+        if (lr?.l1 && lr?.l2) {
+          const dy = Math.min(hj.y - P.y, lr.l1 * 0.995);
+          const r = Math.sqrt(Math.max(0, lr.l1 * lr.l1 - dy * dy));
+          const h = new THREE.Vector3(P.x - hj.x, 0, P.z - hj.z);
+          if (h.lengthSq() > 1e-10) {
+            h.normalize();
+            const K = new THREE.Vector3(hj.x + h.x * r, P.y, hj.z + h.z * r);
+            const f = new THREE.Vector3(target.x - K.x, 0, target.z - K.z);
+            if (f.lengthSq() > 1e-10) {
+              f.normalize();
+              const rr = Math.sqrt(Math.max(1e-6, lr.l2 * lr.l2 - (K.y - target.y) ** 2)) * 0.99;
+              target.lerp(new THREE.Vector3(K.x + f.x * rr, target.y, K.z + f.z * rr), w);
+            }
+            pole.lerp(K, w);
+          }
+        }
+      }
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
       // Угол голени вперёд — для баланса корпуса в следующем кадре.
       {
         const kp = lower.getWorldPosition(new THREE.Vector3());
+
         const ap = foot.getWorldPosition(new THREE.Vector3());
         leanSum += Math.atan2(kp.z - ap.z, Math.max(1e-3, kp.y - ap.y));
         leanN++;

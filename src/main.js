@@ -61,6 +61,32 @@ const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMa
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
+// Едва заметный полупрозрачный пол: мягкий светлый круг с тонкими кольцами — видно, что она стоит, сидит и
+// опирается на него руками и коленями. К краям растворяется.
+const floorDiscTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(256, 256, 0, 256, 256, 256);
+  grd.addColorStop(0, 'rgba(190,170,255,0.16)');
+  grd.addColorStop(0.55, 'rgba(170,150,255,0.09)');
+  grd.addColorStop(1, 'rgba(170,150,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 512, 512);
+  for (let i = 1; i <= 5; i++) {
+    g.strokeStyle = `rgba(225,210,255,${(0.13 * (1 - i / 6)).toFixed(3)})`;
+    g.lineWidth = 1.5;
+    g.beginPath(); g.arc(256, 256, i * 46, 0, Math.PI * 2); g.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(5, 5), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false }));
+floorDisc.rotation.x = -Math.PI / 2;
+floorDisc.position.y = 0.001;
+floorDisc.renderOrder = -2;
+scene.add(floorDisc);
 const blobTex = (() => {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -4774,7 +4800,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 198;
+const WAIFU_BUILD = 199;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
