@@ -1463,7 +1463,7 @@ export class Character {
       const amt = 0.038 * (this.scale ?? 1);
       HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
-      { const upK = THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.15, 0.8); CROTCH_LIFT.value = SQUAT_FLEX.value * (0.3 + 0.7 * upK); }
+      { const upK = THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.15, 0.8); CROTCH_LIFT.value = SQUAT_FLEX.value; void upK; } // по замеру ровности: втягивание равно сгибу ног в любой позе (ослабление давало бугор)
     }
 
     this.calmArms(dt);
@@ -2481,9 +2481,11 @@ export class Character {
       // Болтает ножкой — колено не уходит под пол (иначе тело «всплывает»).
       if (b4 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y - 0.15 + 0.5 * (this.kickNow?.[side] ?? 0), knee.z - 0.6), b4); // на животе колени к полу, ноги прямые
       if (c3 > 0) pole.lerp(new THREE.Vector3(knee.x, knee.y + 0.6, knee.z + 0.3), c3); // сидя/на спине колени вверх
-      if (kp.w > 0 && kp[side] && !footOff) {
+      // Ногу взяли в руки (ступня/колено) — её колено отпускаем плавно, без щелчка.
+      { const sw = kp.sw ??= { left: 1, right: 1 }; if (this.kneeSwTick?.[side] !== this.time) { (this.kneeSwTick ??= {})[side] = this.time; sw[side] = THREE.MathUtils.clamp(sw[side] + (footOff ? -1 : 1) * (this.lastDt ?? 0.016) / 0.22, 0, 1); } }
+      if (kp.w > 0 && kp[side] && kp.sw[side] > 0) {
         // Колено стоит на своём месте, голень лежит от него назад к ступне.
-        const w = kp.w * kp.w * (3 - 2 * kp.w), P = kp[side];
+        const w0 = kp.w * kp.sw[side], w = w0 * w0 * (3 - 2 * w0), P = kp[side];
         const lr = this.limbRest.get(upper.uuid);
         const hj = upper.getWorldPosition(new THREE.Vector3());
         if (lr?.l1 && lr?.l2) {

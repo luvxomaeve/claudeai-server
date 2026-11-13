@@ -223,9 +223,15 @@ function installCrotchFix(vrm, mesh) {
       prev?.call(m, shader, renderer);
       shader.uniforms.uSquat = CROTCH_LIFT;
       shader.vertexShader = 'attribute float aCrotch;\nuniform float uSquat;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed.y += aCrotch * uSquat;');
+      // Контурная обводка (тёмная оболочка вокруг модели) в глубокой складке между ног вылезала наружу чёрным
+      // пятном, похожим на дырку. В этой зоне обводку убираем — складка остаётся просто гладкой.
+      if (shader.vertexShader.includes('vec3 outlineOffset = outlineWidthFactor')) {
+        shader.vertexShader = shader.vertexShader.replace('vec3 outlineOffset = outlineWidthFactor', `vec3 outlineOffset = ( 1.0 - clamp( aCrotch * ${(1 / (lift * 0.2)).toFixed(2)}, 0.0, 1.0 ) ) * outlineWidthFactor`);
+        globalThis.__outlineCut = (globalThis.__outlineCut ?? 0) + 1;
+      }
     };
     const pk = m.customProgramCacheKey?.bind(m);
-    m.customProgramCacheKey = () => `${pk ? pk() : ''}|crotchFix2`;
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|crotchFix3`;
     m.needsUpdate = true;
   }
 }
@@ -251,7 +257,13 @@ function installHipKeep(vrm, mesh, cloth) {
   const dirs = new Float32Array(pos.count * 3), bindInv = mesh.bindMatrix.clone().invert();
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
-    { const J = v.distanceToSquared(L) <= v.distanceToSquared(R) ? L : R; n.copy(v).sub(J); if (n.lengthSq() < 1e-10) n.copy(back); n.normalize(); }
+    { const J = v.distanceToSquared(L) <= v.distanceToSquared(R) ? L : R; n.copy(v).sub(J); if (n.lengthSq() < 1e-10) n.copy(back);
+      // К середине (между левой и правой стороной) сдвиг внутрь обнуляем: иначе стороны толкаются друг в друга
+      // и у средней линии появляются тёмные точки. Плавно, чтобы на самой середине не было ступеньки.
+      const cx = (L.x + R.x) / 2, sx = v.x - cx, half = Math.abs(L.x - R.x) / 2 || 0.08;
+      if (n.x * sx < 0 || Math.abs(sx) < 1e-6) n.x = 0; else n.x *= THREE.MathUtils.smoothstep(Math.abs(sx), 0, half * 0.6);
+      if (n.lengthSq() < 1e-10) n.copy(back);
+      n.normalize(); }
     { const dg = n.clone().transformDirection(bindInv); dirs[i * 3] = dg.x; dirs[i * 3 + 1] = dg.y; dirs[i * 3 + 2] = dg.z; }
     // Тело: только то, что смотрит назад. Ткань: вся задняя половина и шире — она висит дальше от тела
     // и должна отойти не меньше, чем оно, иначе тело проглянет сквозь юбку.
