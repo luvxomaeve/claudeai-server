@@ -224,7 +224,7 @@ function installCrotchFix(vrm, mesh) {
     const iH = idx('hips'), iL = idx('leftUpperLeg'), iR = idx('rightUpperLeg');
     if (iH >= 0 && iL >= 0 && iR >= 0 && si && sw && !g.userData.crotchRw) {
       g.userData.crotchRw = true;
-      const SHARE = 0.55;
+      const SHARE = 0.8; // подобрано по картинкам: при 0.55 в широком приседе внизу оставался висящий язычок
       for (let i = 0; i < pos.count; i++) {
         const k = Math.min(1, arr[i] / lift * 1.6);
         if (k < 0.03) continue;
