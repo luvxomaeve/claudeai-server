@@ -2652,8 +2652,10 @@ for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'borde
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
-  const hit = nearestHandle(e0, 70, character.sitS > 0.3 ? { hips: 0.55 } : null) ?? zoneAt(e0, true);
+  let hit = nearestHandle(e0, 70, character.sitS > 0.3 ? { hips: 0.55 } : null) ?? zoneAt(e0, true);
   if (!hit) return false;
+  // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
+  if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
   if (!grab) grab = { snap: character.exportTouchPose() };
   grab.rec = { start: performance.now(), S: [] }; // запись этого движения — для «Повторять»
   clearTimeout(grabAskTimer); grabAsk.style.display = 'none';
