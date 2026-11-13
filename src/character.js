@@ -1894,7 +1894,9 @@ export class Character {
 
   footOffK(side) {
     const at = this.footSetSit?.[side];
-    if (at == null || at < 0.3) return this.offK;
+    // Ступни, выставленные стоя, остаются на своих местах и в приседе: она садится от них (ноги широко — присед
+    // широкий). На коленях и ниже ноги складываются как обычно.
+    if (at == null || at < 0.3) return 1 - THREE.MathUtils.smoothstep(this.sitS, 0.47, 0.6);
     return 1 - THREE.MathUtils.smoothstep(Math.abs(this.sitS - at), 0.05, 0.25);
   }
 

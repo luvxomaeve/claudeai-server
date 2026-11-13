@@ -2728,6 +2728,7 @@ function poseDragStart(e) {
 const dragPoint = new THREE.Vector3();
 function poseDragMove(e) {
   if (!poseDrag) return;
+  if (poseDrag.kind !== 'bg') userPosed = true;
   if (poseDrag.auto) {
     autoDragAt = performance.now();
     lastOnHerAt = autoDragAt;
@@ -4755,12 +4756,13 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 191;
+const WAIFU_BUILD = 192;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
 var autoState = 'live';
 var camOnly = false;
+var userPosed = false; // двигал ли её сам с последнего сброса (для домика: сначала поза, потом камера)
 // Стойка стоя: расстояние между ступнями (доля роста) и вынос одной ноги вперёд. Фигура не меняется.
 const STANCES = [
   { icon: '🧍', name: 'Стойка: обычная', w: 0, f: 0 },
@@ -4809,7 +4811,13 @@ function renderAutoStates() {
       }
       if (id === 'home') {
         // Домик, как в ручном виде: камера спереди, она встаёт ровно; сон, «замри» и повтор снимаются.
-        camOnly = false; setAutoState('live'); autoReturn(); autoCentered = false; showAutoStates(900);
+        // Первый тап — сбрасывает её (позу, точки, повторы), камера остаётся как стоит. Второй — возвращает камеру.
+        // «Трогал» — значит сам её двигал, усаживал, выставлял точки, включал повтор или состояние (а не она сама качнулась).
+        const dirty = userPosed || reps.home.on || grabLoops.length || autoState !== 'live' || camOnly;
+        userPosed = false;
+        camOnly = false; setAutoState('live');
+        if (dirty) { autoReturn(true); showToast('🏠 Сбросила позу. Ещё тап — вернуть камеру'); showAutoStates(3500); }
+        else { autoReturn(); autoCentered = false; showAutoStates(900); }
         return;
       }
       if (id === 'lie') {
@@ -5120,7 +5128,7 @@ function autoLife(now) {
 }
 // Двойной тап по фону в «Авто»: всё плавно возвращается как было — она встаёт и выпрямляется,
 // камера снова «приклеена» к ней в обычном виде спереди.
-function autoReturn() {
+function autoReturn(keepCam = false) {
   if (reps.home.on) { setRepeat(false, true); }
   autoRec = null; autoRepOffer = null; renderAutoRep();
   stopAuto(true);
@@ -5130,7 +5138,7 @@ function autoReturn() {
   if (character.sit > 0.01) sitBy(-character.sit / 0.004);
   autoBendTarget = 0;
   grabDone(true); grabLoopsClear(); try { character.importTouchPose(null); } catch { /* ignore */ }
-  resetView();
+  if (!keepCam) resetView();
 }
 // Свайп-команда в «Авто». dir: +1 — вниз, −1 — вверх.
 // По груди/плечам/лицу — наклон вперёд ↔ прогиб назад (по ступенькам); по животу и ногам — ниже ↔ выше
