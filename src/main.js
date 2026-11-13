@@ -2963,7 +2963,8 @@ function poseDragMove(e) {
       }
     }
     o.hipsX = clamp(o.hipsX + dx * 0.001 * facing * S, -lim * S, lim * S);
-    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.27, 0.27);
+    // На полу таз заваливается вбок вдвое слабее: иначе бедру приходится выворачиваться внутрь дальше, чем может сустав.
+    o.hipsZ = clamp(o.hipsX / S * (floor ? 0.7 : 1.6), -0.27, 0.27);
     if (poseDrag.grab && !dy) return; // только вбок — посадку не трогаем
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
     // В 📌 при играющем повторе присед ведёт повтор — точкой бёдер только вбок.
@@ -4865,7 +4866,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 205;
+const WAIFU_BUILD = 206;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

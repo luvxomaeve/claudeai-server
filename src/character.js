@@ -2277,20 +2277,25 @@ export class Character {
     {
       const ph0 = this.sitPhases();
       const kw = p2avg * (1 - p3) * (1 - ph0.b4) * (1 - ph0.c3);
+      this.kneelK = kw;
       const dtp = this.lastDt ?? 0.016;
       const has = kp.left && kp.right;
-      const on = kw > 0.9 && Math.abs(this.sitS - this.sit) < 0.02 && (!has || Math.abs(kp.sit - this.sitS) < 0.03) && !this.mixer && !this.dancing;
+      // Куда развёрнут таз по горизонтали: повернули корпус — старые точки колен уже не подходят.
+      const yawNow = (() => { const f = new THREE.Vector3(0, 0, 1).applyQuaternion(b.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv)); return Math.atan2(f.x, f.z); })();
+      const yawOk = !has || Math.abs(Math.atan2(Math.sin(yawNow - (kp.yaw ?? yawNow)), Math.cos(yawNow - (kp.yaw ?? yawNow)))) < 0.2;
+      const on = kw > 0.9 && Math.abs(this.sitS - this.sit) < 0.02 && (!has || Math.abs(kp.sit - this.sitS) < 0.03) && yawOk && !((kp.bad ?? 0) > 0.6) && !this.mixer && !this.dancing;
       // Берём место колен из готовой позы прошлого кадра (сейчас кости ещё не расставлены) и только когда она уже села ровно.
       if (on && !has && kp.w <= 0.001 && this.kneeLast?.left && this.kneeLast?.right && Math.abs(this.sitV ?? 0) < 0.03 && (this.kneeStill ?? 0) > 0.12) {
         kp.left = this.kneeLast.left.clone();
         kp.right = this.kneeLast.right.clone();
         kp.sit = this.sitS;
+        kp.yaw = yawNow; kp.bad = 0;
       }
       if (!this.kneePinTick || this.kneePinTick !== this.time) { // второй проход кадра вес не трогает
         this.kneePinTick = this.time;
         kp.w = THREE.MathUtils.clamp(kp.w + (on && kp.left ? dtp / 0.3 : -dtp / 0.25), 0, 1);
       }
-      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.sit = -1; }
+      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.sit = -1; kp.bad = 0; }
       if (kp.w > 0 && kp.left && kp.right) {
         const w = kp.w * kp.w * (3 - 2 * kp.w);
         const corr = new THREE.Vector3();
@@ -2325,10 +2330,12 @@ export class Character {
           h.multiplyScalar(1 / d);
           let c = d - r;
           // Слишком далеко — колено переступает вслед за тазом (плавно), остальное добирает таз.
-          const lim = 0.22 * S;
+          const lim = 0.14 * S;
           if (Math.abs(c) > lim) { const ex = (Math.abs(c) - lim) * Math.sign(c); P.addScaledVector(h, -ex * Math.min(1, dtp * 9)); c -= ex * Math.min(1, dtp * 9); }
           corr.addScaledVector(h, c * 0.5 * (1 - v));
         }
+        // Телу слишком долго приходится сильно тянуться к точкам колен — значит, они устарели: отпускаем и берём заново.
+        if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; kp.bad = Math.max(0, (kp.bad ?? 0) + (corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
         const wp = b.hips.getWorldPosition(new THREE.Vector3());
         wp.x += corr.x * w; wp.z += corr.z * w; wp.y -= down * w;
         wp.y += vert * w;
@@ -2419,7 +2426,12 @@ export class Character {
         // Лёжа на животе болтает ножками: голени по очереди плавно поднимаются
         // (колени остаются на полу), иногда замирает и отдыхает.
         const rest2 = THREE.MathUtils.smoothstep(Math.sin(this.time * 0.11 + 1), -0.3, 0.3);
-        const kick = Math.max(0, Math.sin(this.time * 1.05 + (L ? 0 : Math.PI))) * rest2 * (1 - (this.sleep ?? 0)) * (this.kickOn ?? 1); // во сне и пока ведёшь полосу — тихо
+        const kick = Math.max(0, Math.sin(this.time * 1.05 + (L ? 0 : Math.PI))) * rest2 * (1 - (this.sleep ?? 0)) * (this.kickOn ?? 1) // во сне и пока ведёшь полосу — тихо
+          // Ножками болтает, только когда действительно лежит на животе и таз на полу: на полпути с четверенек
+          // и при поднятом тазе это выглядело как сломанная нога (одна голень в воздухе, вторая нога прямая).
+          * (this.kickGate ?? 0);
+        // Разрешение болтать ножками набирается и уходит плавно (иначе голень падала одним кадром).
+        if (L) { const gt = THREE.MathUtils.smoothstep(b4, 0.85, 1) * (1 - THREE.MathUtils.smoothstep(Math.max(0, this.bodyOffset.hipsY) / S, 0.015, 0.05)); this.kickGate = (this.kickGate ?? 0) + (gt - (this.kickGate ?? 0)) * Math.min(1, (this.lastDt ?? 0.016) * 2.5); }
         (this.kickNow ??= {})[side] = kick * b4;
         const prone = new THREE.Vector3(
           rest.pos.x * 1.1 + (L ? 0.02 : -0.02) * S,
@@ -2512,6 +2524,7 @@ export class Character {
         }
       }
       (this.footWantY ??= {})[side] = target.y;
+      (this.footHeld ??= {})[side] = !!footOff;
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
       // Угол голени вперёд — для баланса корпуса в следующем кадре.
       {
@@ -2579,6 +2592,9 @@ export class Character {
   footFloorFix() {
     if (!(this.sitS > 0.3) || this.mixer) return;
     const X = new THREE.Vector3(1, 0, 0), v = new THREE.Vector3(), S = this.scale;
+    // На коленях и четвереньках голень лежит на полу: ступню возвращаем на её высоту в обе стороны — и если
+    // провалилась, и если задралась в воздух (пределы сустава срывали колено, и ступня повисала у бедра).
+    const kneel = (this.kneelK ?? 0) > 0.5;
     for (const side of ['left', 'right']) {
       const knee = this.bones[`${side}LowerLeg`], foot = this.bones[`${side}Foot`], want = this.footWantY?.[side];
       if (!knee || !foot || want == null) continue;
@@ -2586,20 +2602,27 @@ export class Character {
       const q = knee.quaternion, sg = q.w < 0 ? -1 : 1;
       const b0 = 2 * Math.atan2(q.x * sg, q.w * sg);
       const y0 = foot.getWorldPosition(v).y;
-      // Трогаем, только если ступня ушла под пол или заметно ниже своей цели.
-      if (y0 > want - 0.012 * S) continue;
-      const lo = Math.min(0, Math.sign(b0) * 2.53), hi = Math.max(0, Math.sign(b0) * 2.53);
-      let b = b0, y = y0, step = 0.12 * (Math.sign(b0) || 1);
-      // Куда крутить, чтобы ступня поднималась: пробуем оба направления.
-      const yP = yOf(THREE.MathUtils.clamp(b0 + step, lo, hi)), yM = yOf(THREE.MathUtils.clamp(b0 - step, lo, hi));
-      const dir = yP >= yM ? 1 : -1;
-      for (let i = 0; i < 14 && y < want - 0.004 * S; i++) {
-        const nb = THREE.MathUtils.clamp(b + dir * step * 0.5, lo, hi);
-        const ny = yOf(nb);
-        if (ny <= y + 1e-5) break; // дальше не поднимается
-        b = nb; y = ny;
+      const both = kneel && !this.footHeld?.[side];
+      const fixS = this.kneeFixS ??= { left: 0, right: 0 };
+      const ease = (target) => { // поправка колена набирается и уходит плавно — без щелчка ногой
+        if (this.kneeFixTick?.[side] !== this.time) { (this.kneeFixTick ??= {})[side] = this.time; fixS[side] += (target - fixS[side]) * Math.min(1, (this.lastDt ?? 0.016) * 14); }
+        if (Math.abs(fixS[side]) > 1e-4) yOf(b0 + fixS[side]);
+      };
+      if (both ? Math.abs(y0 - want) < 0.015 * S : y0 > want - 0.012 * S) { ease(0); continue; }
+      const sgn = Math.sign(b0) || 1, lo = Math.min(0, sgn * 2.53), hi = Math.max(0, sgn * 2.53);
+      // Перебираем сгиб колена вокруг текущего и берём тот, где ступня ближе всего к своей высоте
+      // (при равных — ближайший к текущему, чтобы нога не прыгала).
+      let best = b0, bestE = both ? Math.abs(y0 - want) : Math.max(0, want - y0);
+      for (let k = 1; k <= 14; k++) {
+        for (const d of [k * 0.07, -k * 0.07]) {
+          const b = THREE.MathUtils.clamp(b0 + d, lo, hi);
+          const y = yOf(b);
+          const e = (both ? Math.abs(y - want) : Math.max(0, want - y)) + k * 0.0015 * S;
+          if (e < bestE - 1e-5) { bestE = e; best = b; }
+        }
+        if (bestE < 0.006 * S + k * 0.0015 * S) break;
       }
-      yOf(b);
+      if (both) ease(best - b0); else { fixS[side] = best - b0; yOf(best); }
     }
   }
 
@@ -2896,6 +2919,8 @@ export class Character {
     this.footSetSit = {};
     this.hipsSetSit = null;
     this.handAnchor = { left: null, right: null };
+    // Позу сбросили или вернули как было — колени больше не держатся за старые точки на полу.
+    if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; }
   }
 
   exportTouchPose() {
