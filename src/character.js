@@ -1017,6 +1017,12 @@ export class Character {
           this.bridgeK = THREE.MathUtils.smoothstep(up * ph.c4 * lie, 0.02, 0.08); // мостик — ладони упираются в пол
           pose.headX += ang * 0.35; // голова лежит на полу, а не запрокидывается
         }
+        // То же на животе: таз поднимается, а грудь, руки и ноги остаются на полу (раньше всё тело целиком
+        // поднималось и висело над полом).
+        {
+          const upB = Math.max(0, this.bodyOffset.hipsY) / this.scale;
+          pose.hipsRotX += Math.asin(Math.min(0.9, upB / 0.5)) * ph.b4 * lie;
+        }
       }
     }
     // Руки висят по гравитации: корпус наклонили вперёд/прогнули назад — плечи
@@ -1418,6 +1424,8 @@ export class Character {
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
     this.applyJointLimits();
+    this.footFloorFix();
+    this.handFloorFix();
     this.applyBlendFrom(dt);
     // Пол для всего тела: колени, таз, руки, голова не проходят сквозь пол.
     if (this.floorPush()) {
@@ -1426,6 +1434,8 @@ export class Character {
       this.applySelfTouch();
       this.applyFloorSupport(0);
       this.applyJointLimits();
+      this.footFloorFix();
+      this.handFloorFix();
     }
     // Точная доводка взгляда: лицо смотрит прямо в камеру с любого ракурса.
     this.applyHeadAim(dt);
@@ -2452,7 +2462,7 @@ export class Character {
           target.x += Math.sin(tm * 0.33 + ph * 0.7) * 0.018 * S * lv;
         }
       }
-      if (this.sitS > 0.3) target.y = Math.max(target.y, 0.03 * S); // не сквозь пол
+      if (this.sitS > 0.3) target.y = Math.max(target.y, (0.03 + 0.03 * p3) * S); // не сквозь пол (сидя боком ступня лежит на боку — она толще)
       target.y = Math.max(target.y, rest.pos.y - 0.05 * S * p2);
 
       // Колено всегда смотрит в сторону своей ступни (вперёд), поэтому колени
@@ -2493,6 +2503,7 @@ export class Character {
           }
         }
       }
+      (this.footWantY ??= {})[side] = target.y;
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
       // Угол голени вперёд — для баланса корпуса в следующем кадре.
       {
@@ -2525,6 +2536,65 @@ export class Character {
     if (leanN) this.shinLean += (leanSum / leanN - this.shinLean) * 0.3;
   }
 
+  // Кисть ушла под пол — рука сама сгибается и кладёт ладонь на пол (тело при этом не приподнимается).
+  handFloorFix() {
+    if (this.mixer) return;
+    const S = this.scale, minY = 0.022 * S, v = new THREE.Vector3();
+    for (const side of ['left', 'right']) {
+      const upper = this.bones[`${side}UpperArm`], lower = this.bones[`${side}LowerArm`], hand = this.bones[`${side}Hand`];
+      if (!upper || !lower || !hand) continue;
+      // Лёжа на спине кисти лежат плашмя (на животе и на полу), пальцы продолжают предплечье — а не торчат вверх.
+      {
+        const c4 = this.sitPhases().c4 * (this.handTargets[side] ? 0 : 1);
+        if (c4 > 0.05) {
+          const d = hand.getWorldPosition(new THREE.Vector3()).sub(lower.getWorldPosition(v)); d.y = 0;
+          if (d.lengthSq() > 1e-8) {
+            const sx = side === 'left' ? 1 : -1;
+            const flat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(d.x, d.z))
+              .multiply(this.rootRestQ ?? new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -sx * Math.PI / 2));
+            this.setWorldQuat(hand, hand.getWorldQuaternion(new THREE.Quaternion()).slerp(flat, 0.85 * c4));
+          }
+        }
+      }
+      hand.getWorldPosition(v);
+      if (v.y >= minY) continue;
+      const target = v.clone().setY(minY);
+      const pole = lower.getWorldPosition(new THREE.Vector3()); pole.y += 0.25 * S;
+      const hq = hand.getWorldQuaternion(new THREE.Quaternion());
+      this.twoBoneIK(upper, lower, hand, target, pole);
+      this.setWorldQuat(hand, hq); // сама кисть остаётся повёрнутой как была
+    }
+  }
+
+  // Пределы суставов применяются после расчёта ног и могут повернуть бедро — тогда ступня уезжает под пол
+  // (или повисает над ним). Здесь колено доворачивается ровно настолько, чтобы ступня вернулась на свою высоту.
+  footFloorFix() {
+    if (!(this.sitS > 0.3) || this.mixer) return;
+    const X = new THREE.Vector3(1, 0, 0), v = new THREE.Vector3(), S = this.scale;
+    for (const side of ['left', 'right']) {
+      const knee = this.bones[`${side}LowerLeg`], foot = this.bones[`${side}Foot`], want = this.footWantY?.[side];
+      if (!knee || !foot || want == null) continue;
+      const yOf = (b) => { knee.quaternion.setFromAxisAngle(X, b); knee.updateWorldMatrix(false, true); return foot.getWorldPosition(v).y; };
+      const q = knee.quaternion, sg = q.w < 0 ? -1 : 1;
+      const b0 = 2 * Math.atan2(q.x * sg, q.w * sg);
+      const y0 = foot.getWorldPosition(v).y;
+      // Трогаем, только если ступня ушла под пол или заметно ниже своей цели.
+      if (y0 > want - 0.012 * S) continue;
+      const lo = Math.min(0, Math.sign(b0) * 2.53), hi = Math.max(0, Math.sign(b0) * 2.53);
+      let b = b0, y = y0, step = 0.12 * (Math.sign(b0) || 1);
+      // Куда крутить, чтобы ступня поднималась: пробуем оба направления.
+      const yP = yOf(THREE.MathUtils.clamp(b0 + step, lo, hi)), yM = yOf(THREE.MathUtils.clamp(b0 - step, lo, hi));
+      const dir = yP >= yM ? 1 : -1;
+      for (let i = 0; i < 14 && y < want - 0.004 * S; i++) {
+        const nb = THREE.MathUtils.clamp(b + dir * step * 0.5, lo, hi);
+        const ny = yOf(nb);
+        if (ny <= y + 1e-5) break; // дальше не поднимается
+        b = nb; y = ny;
+      }
+      yOf(b);
+    }
+  }
+
   // ---------- Пол ----------
   // Находим самую «утонувшую» часть тела и приподнимаем таз на эту глубину.
   // withFeet — учитывать и ступни (в записях движений, где IK ступней нет).
@@ -2535,9 +2605,11 @@ export class Character {
     const S = this.scale;
     const parts = [
       ['leftLowerLeg', 0.05], ['rightLowerLeg', 0.05], ['hips', 0.1],
-      ['leftHand', 0.02], ['rightHand', 0.02], ['head', 0.1], ['chest', 0.1],
+      ['head', 0.1], ['chest', 0.1],
       ['leftLowerArm', 0.03], ['rightLowerArm', 0.03],
     ];
+    // Кисти больше не поднимают всё тело: раньше одна ушедшая под пол ладонь приподнимала её целиком, и она
+    // «висела» над полом. Теперь ладонь возвращается на пол сама, рукой (см. handFloorFix).
     if (withFeet) parts.push(['leftFoot', 0.05], ['rightFoot', 0.05]);
     const v = new THREE.Vector3();
     let pen = 0;

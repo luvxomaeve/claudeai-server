@@ -2935,8 +2935,10 @@ function poseDragMove(e) {
     const S = character.scale;
     // Только вбок (бёдра в сторону) — вертикаль не трогаем, чтобы она не приседала случайно.
     // На полу таз двигается свободнее: вбок шире, и вверх-вниз (приподнять/опустить бёдра).
-    const floor = character.sitS > 0.3;
-    if (character.hipsSetSit == null || Math.abs(character.hipsSetSit - character.sitS) > 0.05) {
+    // Взял за таз долгим тапом: режим (стоя/присед или пол) берём один раз в начале жеста — приседая с тазом по кругу,
+    // она не «переключается» на полпути в движение по полу.
+    const floor = poseDrag.grab ? (poseDrag.floor0 ??= character.sitS > 0.55) : character.sitS > 0.3;
+    if (!(poseDrag.grab && !floor) && (character.hipsSetSit == null || Math.abs(character.hipsSetSit - character.sitS) > 0.05)) {
       // Новое положение — прошлые сдвиги таза (от другого положения) не тащим.
       o.hipsX = 0; o.hipsZ = 0; o.hipsY = 0; o.hipsFwd = 0;
     }
@@ -2949,12 +2951,15 @@ function poseDragMove(e) {
       poseDrag.ax ??= 0; poseDrag.ay ??= 0; poseDrag.ax += Math.abs(dx); poseDrag.ay += Math.abs(dy);
       if (!poseDrag.axis && poseDrag.ax + poseDrag.ay > 14) poseDrag.axis = poseDrag.ax >= poseDrag.ay ? 'x' : 'y';
       if (!poseDrag.axis) return;
-      if (poseDrag.axis === 'y') dx = 0; else dy = 0;
+      // Жест начинается по одной оси (чтобы случайно не усадить, двигая вбок), но стоит заметно повести и в другую
+      // сторону — оси отпираются: тазом можно водить свободно, по кругу, приседая и качаясь одновременно.
+      if (!poseDrag.free && (poseDrag.axis === 'y' ? poseDrag.ax : poseDrag.ay) > 34) { poseDrag.free = true; try { navigator.vibrate?.(6); } catch { /* ignore */ } }
+      if (!poseDrag.free) { if (poseDrag.axis === 'y') dx = 0; else dy = 0; }
       if (floor) {
         // Вверх-вниз за таз на полу: бёдра поднимаются/опускаются и таз наклоняется вперёд-назад — с хорошим размахом.
-        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ o.hipsY = clamp((o.hipsY ?? 0) - dy * 0.0008 * S, -0.03 * S, (0.17 + 0.04 * back) * S); { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0032 * (1 - back) * (1 - tall), -0.8, 0.9); } }
+        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ o.hipsY = clamp((o.hipsY ?? 0) - dy * 0.0013 * S, -0.03 * S, (0.17 + 0.04 * back) * S * (1 - character.sitPhases().p4)); /* на боку таз не поднимаем: иначе всё тело повисает над полом */ { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0045 * (1 - back) * (1 - tall), -0.8, 0.9); } }
         // На коленях и четвереньках тот же жест перекатывает таз вперёд за колени (на руки) и назад на пятки.
-        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0014 * S * kn, -0.06 * S, 0.34 * S) * (kn > 0.5 ? 1 : 0); }
+        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0022 * S * kn, -0.06 * S, 0.34 * S) * (kn > 0.5 ? 1 : 0); }
         dy = 0;
       }
     }
@@ -2975,6 +2980,8 @@ function poseDragMove(e) {
       character.dragBoostT = 0.5;
       if (pointMode === 'rec') loopNoteMove('sit');
       sitBy(dv / 0.004);
+      // За таз стоя — приседает (глубоко, но на колени сама не падает): можно качать и крутить тазом в приседе.
+      if (poseDrag.grab && !floor) character.sit = Math.min(character.sit, 0.5);
     }
   }
 }
@@ -4883,11 +4890,23 @@ const autoStates = document.createElement('div');
 autoStates.id = 'auto-states';
 document.body.appendChild(autoStates);
 for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, (e) => e.stopPropagation());
+// Есть ли выставленные руками точки (или их повторы) — тогда в значках появляется «↺ сбросить точки».
+function hasPoints() {
+  const c = character;
+  if (!c) return false;
+  if (grabLoops.length) return true;
+  if (c.handTargets?.left || c.handTargets?.right || c.armPreset?.left || c.armPreset?.right) return true;
+  const S = c.scale ?? 1, o = c.bodyOffset, f = c.footOffset;
+  if ((f?.left?.lengthSq?.() ?? 0) > 1e-5 || (f?.right?.lengthSq?.() ?? 0) > 1e-5) return true;
+  if (Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.01 * S) return true;
+  if (Math.abs(o.spineY) + Math.abs(o.spineZ) + Math.abs(o.hipsZ) > 0.05) return true;
+  return Math.abs(c.headOffset?.x ?? 0) + Math.abs(c.headOffset?.y ?? 0) > 0.05;
+}
 function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
-  // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна, только когда спит.
-  for (const [id, icon, name] of [['home', '🏠', ''], ['sleep', '😴', 'Спит'], ...(autoState === 'sleep' ? [['lie', '🛏', lieName]] : []), ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
+  // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна всегда; «↺» — только когда есть выставленные точки.
+  for (const [id, icon, name] of [['home', '🏠', ''], ...(hasPoints() ? [['pts', '↺', 'Сбросить точки']] : []), ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = (on ? 'active' : '') + (id === 'cam' ? ' sep' : '');
@@ -4910,6 +4929,16 @@ function renderAutoStates() {
         applyStance();
         showToast(STANCES[stanceIdx].name);
         showAutoStates(3500);
+        return;
+      }
+      if (id === 'pts') {
+        // Сброс выставленных точек (руки, ноги, таз, корпус, голова) и их повторов. Посадка, наклон и камера остаются.
+        const o = character.bodyOffset, keep = { hipsRotX: o.hipsRotX, spineX: o.spineX };
+        grabDone(true); grabLoopsClear();
+        try { character.importTouchPose(null); } catch { /* ignore */ }
+        Object.assign(character.bodyOffset, keep);
+        showToast('↺ Точки сброшены');
+        renderAutoStates(); showAutoStates(1500);
         return;
       }
       if (id === 'home') {
