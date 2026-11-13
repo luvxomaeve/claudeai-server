@@ -240,30 +240,24 @@ function installCrotchFix(vrm, mesh) {
 // становятся плоскими, хотя стоя у модели там нормальный объём. Чем сильнее согнута нога, тем больше
 // возвращаем потерянное — ровно до формы, какая у неё стоя (HIP_FLEX задаётся в character.js).
 // Саму модель не меняем: стоя добавка равна нулю. Ткань низа идёт вместе с телом, чтобы не прорезалась.
-function installHipKeep(vrm, mesh, cloth) {
+// Сдвиг идёт по нормали вершины (так левая и правая стороны у середины не расходятся и не открывают щель).
+// Но на швах сетки в одной точке стоят две вершины с разными нормалями — сдвиг по «своей» нормали раскрывал
+// шов трещиной. Поэтому нормали вершин, стоящих в одной точке (в том числе на стыке двух сеток тела),
+// усредняются: такие вершины сдвигаются одинаково, и шов остаётся закрытым.
+const HIP_WELD = new Map();
+const HIP_ENTRIES = [];
+const hipKey = (cloth, v) => `${cloth ? 'c' : 'b'}${Math.round(v.x * 5000)},${Math.round(v.y * 5000)},${Math.round(v.z * 5000)}`;
+function hipKeepFill(e) {
+  const { mesh, cloth, L, k0, back, centers } = e;
   const g = mesh.geometry, pos = g.getAttribute('position'), nor = g.getAttribute('normal');
-  if (!mesh.isSkinnedMesh || !pos || !nor || g.getAttribute('hipBulge')) return;
-  const bind = (name) => bindBone(vrm, mesh, name);
-  const L = bind('leftUpperLeg'), R = bind('rightUpperLeg'), K = bind('leftLowerLeg'), foot = bind('leftFoot'), toe = bind('leftToes');
-  if (!L || !R || !K || !foot) return;
-  const k0 = Math.max(0.25, L.y - K.y) / 0.4;
-  const back = new THREE.Vector3(0, 0, Math.sign(foot.z - (toe?.z ?? foot.z + 0.1)) || -1);
-  const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.02 * k0, 0)));
+  if (!pos || !nor) return;
   const sigma = 0.095 * k0, gain = cloth ? 1.15 : 1;
-  const arr = new Float32Array(pos.count * 2), v = new THREE.Vector3(), n = new THREE.Vector3();
-  // Направление сдвига и его сила считаются только от ПОЛОЖЕНИЯ вершины (от сустава наружу), а не от её нормали:
-  // на швах сетки в одной точке стоят две вершины с разными нормалями, и сдвиг по нормали раскрывал шов —
-  // при сильном сгибе появлялась трещина и просвет.
-  const dirs = new Float32Array(pos.count * 3), bindInv = mesh.bindMatrix.clone().invert();
+  const arr = new Float32Array(pos.count * 2), dirs = new Float32Array(pos.count * 3);
+  const v = new THREE.Vector3(), n = new THREE.Vector3(), bindInv = mesh.bindMatrix.clone().invert();
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
-    { const J = v.distanceToSquared(L) <= v.distanceToSquared(R) ? L : R; n.copy(v).sub(J); if (n.lengthSq() < 1e-10) n.copy(back);
-      // К середине (между левой и правой стороной) сдвиг внутрь обнуляем: иначе стороны толкаются друг в друга
-      // и у средней линии появляются тёмные точки. Плавно, чтобы на самой середине не было ступеньки.
-      const cx = (L.x + R.x) / 2, sx = v.x - cx, half = Math.abs(L.x - R.x) / 2 || 0.08;
-      if (n.x * sx < 0 || Math.abs(sx) < 1e-6) n.x = 0; else n.x *= THREE.MathUtils.smoothstep(Math.abs(sx), 0, half * 0.6);
-      if (n.lengthSq() < 1e-10) n.copy(back);
-      n.normalize(); }
+    const wn = HIP_WELD.get(hipKey(cloth, v));
+    if (wn && wn.lengthSq() > 1e-10) n.copy(wn).normalize(); else n.fromBufferAttribute(nor, i).transformDirection(mesh.bindMatrix);
     { const dg = n.clone().transformDirection(bindInv); dirs[i * 3] = dg.x; dirs[i * 3 + 1] = dg.y; dirs[i * 3 + 2] = dg.z; }
     // Тело: только то, что смотрит назад. Ткань: вся задняя половина и шире — она висит дальше от тела
     // и должна отойти не меньше, чем оно, иначе тело проглянет сквозь юбку.
@@ -275,6 +269,32 @@ function installHipKeep(vrm, mesh, cloth) {
   }
   g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
   g.setAttribute('hipDir', new THREE.BufferAttribute(dirs, 3));
+}
+function installHipKeep(vrm, mesh, cloth) {
+  const g = mesh.geometry, pos = g.getAttribute('position'), nor = g.getAttribute('normal');
+  if (!mesh.isSkinnedMesh || !pos || !nor || g.userData.hipKeep) return;
+  const bind = (name) => bindBone(vrm, mesh, name);
+  const L = bind('leftUpperLeg'), R = bind('rightUpperLeg'), K = bind('leftLowerLeg'), foot = bind('leftFoot'), toe = bind('leftToes');
+  if (!L || !R || !K || !foot) return;
+  g.userData.hipKeep = true;
+  const k0 = Math.max(0.25, L.y - K.y) / 0.4;
+  const back = new THREE.Vector3(0, 0, Math.sign(foot.z - (toe?.z ?? foot.z + 0.1)) || -1);
+  const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.02 * k0, 0)));
+  // Нормали этой сетки — в общий набор (по точкам), только из окрестности таза.
+  {
+    const v = new THREE.Vector3(), n = new THREE.Vector3(), reach = 0.3 * k0;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
+      if (Math.abs(v.y - L.y) > reach) continue;
+      n.fromBufferAttribute(nor, i).transformDirection(mesh.bindMatrix);
+      const key = hipKey(cloth, v), cur = HIP_WELD.get(key);
+      if (cur) cur.add(n); else HIP_WELD.set(key, n.clone());
+    }
+  }
+  for (let i = HIP_ENTRIES.length - 1; i >= 0; i--) if (!HIP_ENTRIES[i].mesh.geometry?.getAttribute('position')) HIP_ENTRIES.splice(i, 1);
+  HIP_ENTRIES.push({ mesh, cloth, L, k0, back, centers });
+  // Новая сетка могла добавить нормали в общие точки — пересчитываем все уже обработанные.
+  for (const e of HIP_ENTRIES) hipKeepFill(e);
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     patchBulge(m);
   }
