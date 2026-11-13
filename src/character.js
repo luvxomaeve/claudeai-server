@@ -833,7 +833,8 @@ export class Character {
       this.hipClock = (this.hipClock ?? t) + (this.lastDt ?? 0.016) * (1 + 0.7 * p2) * (1 - 0.5 * (this.sleep ?? 0));
       const tt = this.hipClock;
       // во сне — почти неподвижна; лёжа на боку ёрзает вдвое спокойнее (иначе её «перегибает»)
-      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2) * (1 - 0.5 * this.sitPhases(s).p4);
+      // На животе сама ёрзает заметно спокойнее (иначе её «возит» по полу); пока её ведут или выставили точки — ещё тише.
+      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2) * (1 - 0.5 * this.sitPhases(s).p4) * (1 - 0.7 * this.sitPhases(s).b4) * (this.slideHold > 0 ? 0.5 : 1);
       if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
@@ -880,8 +881,8 @@ export class Character {
         pose.hipsZ += lean * 0.04 * ph3.p3 * (1 - ph3.p4);
         pose.headZ -= lean * 0.06 * ph3.p3 * (1 - ph3.p4);
         const awake = 1 - (this.sleep ?? 0);
-        pose.headZ += Math.sin(t * 0.52) * 0.1 * ph3.b4 * awake;
-        pose.spineY += Math.sin(t * 0.52) * 0.05 * ph3.b4 * awake;
+        pose.headZ += Math.sin(t * 0.52) * 0.07 * ph3.b4 * awake;
+        pose.spineY += Math.sin(t * 0.52) * 0.025 * ph3.b4 * awake;
         pose.spineX -= Math.max(0, Math.sin(t * 0.17)) * 0.08 * ph3.c4;
         pose.hipsRotY += Math.sin(t * 0.22) * 0.06 * ph3.c4;
       }
@@ -1888,8 +1889,10 @@ export class Character {
   // Сдвиг таза пальцем действует в том положении, где его поставили
   // (стоя — стоя, на полу — на полу), а при смене положения плавно уходит.
   hipsOffK() {
-    if (this.hipsSetSit == null || this.hipsSetSit < 0.3) return this.offK;
-    return 1 - THREE.MathUtils.smoothstep(Math.abs(this.sitS - this.hipsSetSit), 0.05, 0.25);
+    // Таз, сдвинутый стоя, остаётся сдвинутым и в приседе (как и выставленные ступни); на коленях и ниже уходит.
+    if (this.hipsSetSit == null || this.hipsSetSit < 0.3) return 1 - THREE.MathUtils.smoothstep(this.sitS, 0.47, 0.6);
+    // Поставленный на полу — держится шире: сидя ↔ лёжа рядом он не сбрасывается от небольшого движения.
+    return 1 - THREE.MathUtils.smoothstep(Math.abs(this.sitS - this.hipsSetSit), 0.14, 0.42);
   }
 
   footOffK(side) {
@@ -1897,7 +1900,7 @@ export class Character {
     // Ступни, выставленные стоя, остаются на своих местах и в приседе: она садится от них (ноги широко — присед
     // широкий). На коленях и ниже ноги складываются как обычно.
     if (at == null || at < 0.3) return 1 - THREE.MathUtils.smoothstep(this.sitS, 0.47, 0.6);
-    return 1 - THREE.MathUtils.smoothstep(Math.abs(this.sitS - at), 0.05, 0.25);
+    return 1 - THREE.MathUtils.smoothstep(Math.abs(this.sitS - at), 0.14, 0.42); // на полу — держится шире
   }
 
   // Насколько рука сейчас занята жестом/реакцией (0…1, плавно по огибающей жеста).

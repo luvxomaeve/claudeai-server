@@ -2856,7 +2856,7 @@ function poseDragMove(e) {
     }
     character.hipsSetSit = character.sitS;
     // Размах шире (сборка 187): бёдра уходят вбок дальше, таз наклоняется сильнее — движение читается красивее.
-    const lim = floor ? 0.24 : 0.17;
+    const lim = floor ? 0.3 : 0.17;
     o.hipsX = clamp(o.hipsX + dx * 0.001 * facing * S, -lim * S, lim * S);
     o.hipsZ = clamp(o.hipsX / S * 1.6, -0.27, 0.27);
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
@@ -4756,7 +4756,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 192;
+const WAIFU_BUILD = 193;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
