@@ -1754,3 +1754,23 @@ body:has(#auto-menu:not([hidden])) #bubble { opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   #auto-menu:not([hidden]), .panel:not(.hidden), #bubble:not(.hidden), #photo-view:not([hidden]) { animation: none; }
 }
+
+/* ---------- Сборка 184: ровные меню ---------- */
+/* Гардероб: вкладки при прокрутке больше не висят прозрачно поверх вещей — у них своя подложка, список уходит под неё. */
+#wardrobe .closet-tabs:not(#_) { background: rgba(38, 30, 84, 0.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); margin: 0 -10px; padding: 6px 10px 6px; border-radius: 14px; box-shadow: 0 6px 14px -8px rgba(0, 0, 0, 0.5); }
+/* Симметрия: одинокая последняя вещь (нечётное число) и большие кнопки — во всю ширину. */
+.closet-grid .closet-item:last-child:nth-child(odd) { grid-column: 1 / -1; justify-content: center; }
+#piece-list .panel-big { margin-top: 8px; }
+/* Меню ☰: пункты одной высоты, значки в одну колонку; закрывается плавно. */
+#auto-menu button { min-height: 46px; width: 100%; }
+#auto-menu.closing { animation: uiPopOut 0.15s ease forwards; pointer-events: none; }
+@keyframes uiPopOut { to { opacity: 0; scale: 0.94; translate: 0 -6px; } }
+/* Значки по долгому тапу: ровно по центру, одинаковые промежутки, появляются по очереди. */
+#auto-states.show button { animation: uiChip 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+#auto-states.show button:nth-child(2) { animation-delay: 0.02s; } #auto-states.show button:nth-child(3) { animation-delay: 0.04s; }
+#auto-states.show button:nth-child(4) { animation-delay: 0.06s; } #auto-states.show button:nth-child(5) { animation-delay: 0.08s; }
+#auto-states.show button:nth-child(6) { animation-delay: 0.10s; } #auto-states.show button:nth-child(7) { animation-delay: 0.12s; }
+#auto-states.show button:nth-child(8) { animation-delay: 0.14s; }
+@keyframes uiChip { from { opacity: 0; translate: 0 10px; scale: 0.8; } to { opacity: 1; translate: 0 0; scale: 1; } }
+#grab-ask { animation: uiRise 0.2s ease both; }
+@media (prefers-reduced-motion: reduce) { #auto-states.show button, #auto-menu.closing, #grab-ask { animation: none; } }

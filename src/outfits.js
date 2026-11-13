@@ -730,8 +730,6 @@ export class PieceWardrobe {
         bust: (x, y) => { const c = B('chest') ?? B('spine'); return y > (c ? c.y - 0.01 : hipJ.y + leg * 0.75) && y < neck.y - 0.03 && ax(x) < ux + 0.02; }, // грудная клетка: тут тени делаем совсем мягкими
         waistgap: (x, y) => y > hipJ.y + leg * 0.19 && y < hipJ.y + leg * 0.5, // над шортиками: тут торчала бы серая резинка модели
         nylonpanty: (x, y) => y < waist && y > hipJ.y - leg * 0.26, // верх колготок: от талии до ног
-        // Лодочка: носок, пятка и борта закрыты, подъём стопы открыт.
-        pumps: (x, y, z) => { const f = (z - foot.z) * (Math.sign((toe?.z ?? foot.z + 0.1) - foot.z) || 1); return y < foot.y - 0.005 && (f > 0.075 || f < -0.012 || y < foot.y - 0.045); },
         all: () => true, // вся развёртка тела (чтобы знать, где между её кусками пусто)
         legsall: (x, y) => y < hipJ.y - leg * 0.26, // ноги ниже белья (для «без чулок»)
       }[kind];
@@ -1322,9 +1320,6 @@ export class PieceWardrobe {
         const mixc = (k) => Math.round(((0xeec3b4 >> k) & 255) * 0.16 + ((nh >> k) & 255) * 0.84);
         layers.push({ kind: kb, hex: (mixc(16) << 16) | (mixc(8) << 8) | mixc(0), alpha: 0.88 });
       } } // поверх лосин/шорт колготки ровные по всей длине: отдельной «верхней» полосы нет (иначе у края шорт рваная кайма)
-    // Туфли-лодочки нарисованы по стопе (каблук — отдельная деталь, см. character.js): поверх всего остального.
-    // Пятка и борта туфли — чистый цвет туфли поверх чулка (иначе сквозь тонкий слой проступал чулок и пятка серела).
-    if (ks) layers.push({ kind: ks, hex: wear.shoesHex ?? 0x0c0a0e }, { kind: ks, hex: wear.shoesHex ?? 0x0c0a0e });
     map = this.paintLayers(map, layers);
     // Блик — только на нарисованной ткани: маска та же, что у рисунка (см. installSheen).
     try {

@@ -3034,8 +3034,6 @@ const PIECE_SOURCES = [
   // «Без чулок»: голые ноги (под лосины, шорты и юбки).
   { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
   // Чёрные туфли на высокой шпильке: туфля нарисована по стопе, каблук — отдельная деталь; она стоит на них выше.
-  // Туфли на шпильке (p_heels) убраны из гардероба: нарисованная по стопе туфля выглядела грубо. Код оставлен.
-  // { id: 'p_heels', name: 'Шпильки', paint: { shoes: 'pumps' }, cats: ['shoes'], names: { shoes: 'Туфли на шпильке' }, colors: { shoes: 0x0c0a0e } },
   // Длинные капроновые чулки: нарисованы поверх голой ноги, кожа просвечивает.
   { id: 'p_nylon', name: 'Капрон', paint: { legs: 'nylon' }, cats: ['legs'], names: { legs: 'Капроновые чулки' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
   { id: 'p_nylon2', name: 'Капрон короче', paint: { legs: 'nylonmid' }, cats: ['legs'], names: { legs: 'Капроновые чулки покороче' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
@@ -3122,7 +3120,6 @@ function applyWear() {
   else if (lt?.name === 'Глубокий чёрный') w.legsTint = 0x0b090d; // настоящий чёрный на любых чулках, и на белых тоже
   else if (lt?.hex != null) w.legsTint = lt.hex;
   if (isPaint(w.shoes)) w.shoesHex = TINTS[wearTint[`shoes:${w.shoes}`] ?? 0]?.hex ?? defHex(w.shoes, 'shoes');
-  character?.setHeels?.(w.shoes === 'p_heels', w.shoesHex ?? 0x0c0a0e); // каблук и нос — в цвет туфель
   if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
   if (isPaint(w.bottoms)) w.bottomHex = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]?.hex ?? defHex(w.bottoms, 'bottoms');
   if (isPaint(w.leggings)) w.leggingsHex = TINTS[wearTint[`leggings:${w.leggings}`] ?? 0]?.hex ?? defHex(w.leggings, 'leggings');
@@ -4690,7 +4687,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 183;
+const WAIFU_BUILD = 184;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4846,6 +4843,12 @@ setStockSheen(stockSheen);
 let sheenOn = true;
 try { sheenOn = localStorage.getItem('waifu-sheen') !== '0'; } catch { /* ignore */ }
 setSheenOn(sheenOn);
+// Меню закрывается плавно (сворачивается в свою кнопку), а не исчезает рывком.
+function closeAutoMenu() {
+  if (autoMenu.hidden || autoMenu.classList.contains('closing')) return;
+  autoMenu.classList.add('closing');
+  setTimeout(() => { autoMenu.classList.remove('closing'); autoMenu.hidden = true; }, 150);
+}
 function renderAutoMenu() {
   const items = [
     ['👗', 'Гардероб', () => $('btn-wardrobe').click()],
@@ -4864,7 +4867,7 @@ function renderAutoMenu() {
   for (const [icon, name, fn, stay] of items) {
     const b = document.createElement('button');
     b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
-    b.addEventListener('click', (e) => { e.stopPropagation(); fn(); if (stay) renderAutoMenu(); else autoMenu.hidden = true; });
+    b.addEventListener('click', (e) => { e.stopPropagation(); fn(); if (stay) renderAutoMenu(); else closeAutoMenu(); });
     autoMenu.appendChild(b);
   }
   // Номер сборки — чтобы было видно, какая версия стоит.
@@ -4873,8 +4876,8 @@ function renderAutoMenu() {
   ver.style.cssText = 'text-align:center;opacity:0.55;font-size:11px;padding-top:2px';
   autoMenu.appendChild(ver);
 }
-autoExit.addEventListener('click', (e) => { e.stopPropagation(); autoHint.hidden = true; if (autoMenu.hidden) renderAutoMenu(); autoMenu.hidden = !autoMenu.hidden; });
-window.addEventListener('pointerdown', (e) => { if (!autoMenu.hidden && e.target !== autoExit && !autoMenu.contains(e.target)) autoMenu.hidden = true; }, { capture: true, passive: true });
+autoExit.addEventListener('click', (e) => { e.stopPropagation(); autoHint.hidden = true; if (autoMenu.hidden) { renderAutoMenu(); autoMenu.classList.remove('closing'); autoMenu.hidden = false; } else closeAutoMenu(); });
+window.addEventListener('pointerdown', (e) => { if (!autoMenu.hidden && e.target !== autoExit && !autoMenu.contains(e.target)) closeAutoMenu(); }, { capture: true, passive: true });
 // ---------- «Авто»: подвигал её туда-сюда — всплывает «Повторить?» ----------
 // Запоминаем, как ты её двигал (наклон/прогиб, сесть/встать). Отпустил — 6 секунд висит кнопка:
 // нажал — она сама повторяет это движение по кругу, пока не нажмёшь «Стоп» или не возьмёшься двигать снова.
