@@ -415,6 +415,7 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
   const positions = [], skinI = [], skinW = [], uvs = [], hemW = [];
   const sgn = Math.sign(hipJ.x - cx) || 1;
   let prevR = null;
+  const RAD = [];
   for (let r = 0; r <= RINGS; r++) {
     const y = top + (hem - top) * (r / RINGS);
     const band = pts.filter((p) => Math.abs(p[1] - y) < 0.011).map((p) => [p[0], p[2]]);
@@ -451,7 +452,20 @@ function buildTightSkirt(vrm, skins, clothMat, kTop = 0.42, kHem = 0.5) {
     }
     // Юбка книзу не сужается резко: каждое кольцо не уже 96% предыдущего (прямой силуэт, а не «штаны»).
     if (prevR) for (let k = 0; k < SEG; k++) radii[k] = Math.max(radii[k], prevR[k] * 0.8); // подол идёт по бёдрам, а не стоит колоколом // книзу может слегка сужаться по бедру, но не «штанами»
-    prevR = radii;
+    prevR = radii; RAD.push(radii);
+  }
+  // Убираем бугры: радиусы сглаживаются по соседям (вдоль и поперёк юбки) — ткань ложится ровной натянутой
+  // поверхностью, а мелкие неровности тела под ней не проступают. Крупная форма (талия, бёдра) остаётся.
+  for (let pass = 0; pass < 4; pass++) {
+    const N = RAD.map((row) => row.slice());
+    for (let r = 0; r <= RINGS; r++) for (let k = 0; k < SEG; k++) {
+      const up = RAD[Math.max(0, r - 1)][k], dn = RAD[Math.min(RINGS, r + 1)][k], l = RAD[r][(k + SEG - 1) % SEG], rt = RAD[r][(k + 1) % SEG];
+      N[r][k] = Math.max(RAD[r][k] * 0.5 + (up + dn + l + rt) * 0.125, RAD[r][k] - 0.006);
+    }
+    for (let r = 0; r <= RINGS; r++) RAD[r] = N[r];
+  }
+  for (let r = 0; r <= RINGS; r++) {
+    const y = top + (hem - top) * (r / RINGS), radii = RAD[r];
     const below = THREE.MathUtils.clamp((hipJ.y + 0.03 - y) / (hipJ.y + 0.03 - hem), 0, 1);
     const wLeg = 0.92 * Math.pow(below, 0.8);
     for (let k = 0; k <= SEG; k++) {
@@ -1231,7 +1245,7 @@ export class PieceWardrobe {
       if (!sk.visible) continue;
       const m = sk.material, c = wear.bottomHex ?? 0x24222c;
       m.color?.setHex(c);
-      m.shadeColorFactor?.setHex(c).multiplyScalar(0.62);
+      m.shadeColorFactor?.setHex(c).multiplyScalar(0.5); // тени глубже — цвет насыщеннее
     }
     // Низ под верхом от другого наряда — заправляем.
     const topC = wear.tops ?? 'base', botC = wear.bottoms ?? 'base';
@@ -1282,7 +1296,7 @@ export class PieceWardrobe {
       hex = clothHex(hex);
       // Под облегающей юбкой шортики — в цвет юбки: в глубоком наклоне и при широко расставленных ногах из-под
       // подола выглядывала розовая полоска. Теперь там тот же цвет, что у юбки.
-      if (this.paints.get(wear.bottoms)?.gen) hex = wear.bottomHex ?? 0x24222c;
+      if (this.paints.get(wear.bottoms)?.gen) { const bh = wear.bottomHex ?? 0x24222c, f = (k) => Math.round(((bh >> k) & 255) * 0.62); hex = (f(16) << 16) | (f(8) << 8) | f(0); } // чуть темнее юбки: под подолом тень
       const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255, lum = (r * 0.3 + g * 0.59 + b * 0.11) / 255;
       const light = (c) => Math.round(c + (255 - c) * (lum > 0.3 ? 0.72 : 0.3)); // кант светлее ткани
       // Шортики однотонные, без светлых резинок.
@@ -1954,17 +1968,26 @@ function installSheenFull(mesh) {
       const at = 'vec3 col = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;';
       if (!sh.fragmentShader.includes(at)) return;
       sh.uniforms.uSheen = SHEEN;
-      sh.fragmentShader = 'uniform vec2 uSheen;\n' + sh.fragmentShader.replace(at, `${at}
+      if (sh.vertexShader.includes('#include <begin_vertex>')) sh.vertexShader = 'varying vec2 vWeave;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vWeave = uv;');
+      sh.fragmentShader = 'uniform vec2 uSheen;\nvarying vec2 vWeave;\n' + sh.fragmentShader.replace(at, `${at}
+  {
+    // Фактура ткани: мелкое плетение и строчка по поясу и подолу — видно, что это вещь, а не гладкая заливка.
+    float wvA = sin( vWeave.x * 1500.0 ) * sin( vWeave.y * 620.0 );
+    col *= 1.0 - 0.045 * wvA;
+    float wvS = smoothstep( 0.955, 0.965, vWeave.y ) * ( 1.0 - smoothstep( 0.975, 0.985, vWeave.y ) ) + smoothstep( 0.02, 0.03, vWeave.y ) * ( 1.0 - smoothstep( 0.04, 0.05, vWeave.y ) );
+    col *= 1.0 - 0.22 * wvS * step( 0.0, sin( vWeave.x * 420.0 ) );
+  }
   if ( uSheen.x > 0.0 ) {
+    // Глубокий цвет: ткань почти не высветляется, блик узкий и яркий только на гребне формы.
     float shH = max( dot( normal, normalize( normalize( vec3( 0.25, 0.75, 0.6 ) ) + normalize( vViewPosition ) ) ), 0.0 );
     float shS = pow( shH, 3.0 );
     float shLum = smoothstep( 0.30, 0.75, dot( col, vec3( 0.30, 0.59, 0.11 ) ) );
-    col *= 1.0 - mix( 0.30, 0.46, shLum ) * ( 1.0 - shS );
-    col += vec3( 0.20, 0.19, 0.25 ) * ( 0.58 * shS + 0.30 * pow( shH, 14.0 ) );
+    col *= 1.0 - mix( 0.16, 0.34, shLum ) * ( 1.0 - shS );
+    col += vec3( 0.20, 0.19, 0.25 ) * ( 0.16 * shS + 0.42 * pow( shH, 20.0 ) );
   }`);
     };
     const pk = m.customProgramCacheKey?.bind(m);
-    m.customProgramCacheKey = () => `${pk ? pk() : ''}|sheenFull`;
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|sheenFull2`;
     m.needsUpdate = true;
   }
 }
