@@ -264,8 +264,13 @@ function hipKeepFill(e) {
     const facing = cloth ? THREE.MathUtils.smoothstep((v.z - L.z) * back.z, -0.04 * k0, 0.03 * k0) : Math.min(1, Math.max(0, n.dot(back) * 0.85 + 0.3));
     if (facing <= 0) continue;
     const waist = 1 - THREE.MathUtils.smoothstep(v.y, L.y - 0.02 * k0, L.y + 0.07 * k0); // выше сустава сходит на нет
+    // Ниже — к складке между ягодицей и бедром — тоже сходит на нет: иначе при глубоком сгибе поверхность под складкой
+    // выталкивалась и пересекалась с бедром (рваное пятно).
+    const fold = THREE.MathUtils.smoothstep(v.y, L.y - 0.115 * k0, L.y - 0.05 * k0);
+    // И у средней линии: там левая и правая стороны смотрят друг на друга, и выталкивание заставляло их пересекаться.
+    const mid = THREE.MathUtils.smoothstep(Math.abs(v.x - (L.x + e.R.x) / 2), 0.008 * k0, 0.05 * k0);
     const sg = cloth ? sigma * 1.3 : sigma;
-    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist : 0; }
+    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : fold * mid) : 0; }
   }
   g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
   g.setAttribute('hipDir', new THREE.BufferAttribute(dirs, 3));
@@ -292,7 +297,7 @@ function installHipKeep(vrm, mesh, cloth) {
     }
   }
   for (let i = HIP_ENTRIES.length - 1; i >= 0; i--) if (!HIP_ENTRIES[i].mesh.geometry?.getAttribute('position')) HIP_ENTRIES.splice(i, 1);
-  HIP_ENTRIES.push({ mesh, cloth, L, k0, back, centers });
+  HIP_ENTRIES.push({ mesh, cloth, L, R, k0, back, centers });
   // Новая сетка могла добавить нормали в общие точки — пересчитываем все уже обработанные.
   for (const e of HIP_ENTRIES) hipKeepFill(e);
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
@@ -598,11 +603,13 @@ function installEdgeShade(mesh, k = 1) {
     // темнеют — изгибы тела читаются гладкой светотенью, без пятен и границ.
     float edL = dot( normal, normalize( vec3( 0.38, 0.52, 0.76 ) ) );
     col *= mix( vec3( 0.80, 0.77, 0.90 ), vec3( 1.0 ), smoothstep( -0.25, 0.75, edL ) );
-    col += uEdgeRim * pow( 1.0 - edNV, 5.0 );
+    // Контровой свет рассчитан на кожу и светлую ткань. На тёмной нарисованной ткани он давал бледный серп по краю
+    // (особенно в глубоком приседе), будто из-под ткани что-то торчит, — там его гасим по яркости самой поверхности.
+    col += uEdgeRim * pow( 1.0 - edNV, 5.0 ) * smoothstep( 0.10, 0.45, dot( diffuseColor.rgb, vec3( 0.30, 0.59, 0.11 ) ) );
   }`);
     };
     const pk = m.customProgramCacheKey?.bind(m);
-    m.customProgramCacheKey = () => `${pk ? pk() : ''}|edgeRimForm${k}`;
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|edgeRimForm2${k}`;
     m.needsUpdate = true;
   }
 }
