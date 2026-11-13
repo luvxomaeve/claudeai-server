@@ -834,7 +834,8 @@ export class Character {
       const tt = this.hipClock;
       // во сне — почти неподвижна; лёжа на боку ёрзает вдвое спокойнее (иначе её «перегибает»)
       // На животе сама ёрзает заметно спокойнее (иначе её «возит» по полу); пока её ведут или выставили точки — ещё тише.
-      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2) * (1 - 0.5 * this.sitPhases(s).p4) * (1 - 0.7 * this.sitPhases(s).b4) * (this.slideHold > 0 ? 0.5 : 1);
+      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2) * (1 - 0.5 * this.sitPhases(s).p4) * (1 - 0.7 * this.sitPhases(s).b4) * (this.slideHold > 0 ? 0.5 : 1)
+        * (1 - 0.55 * p2 * (1 - this.sitPhases(s).p3)); // на коленях сама «плавает» вдвое меньше
       if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
         const lieAll = Math.max(ph2.p4, ph2.b4, ph2.c4);
