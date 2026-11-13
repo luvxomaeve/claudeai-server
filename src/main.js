@@ -2422,7 +2422,8 @@ try {
   const v = localStorage.getItem('waifu-lie');
   if (v === 'side' || v === 'belly' || v === 'back' || v === 'off') lieMode = v;
   // Один раз переводим на новый стандарт тех, у кого был сохранён прежний (на бок); дальше выбор значком «кровать» сохраняется.
-  if (!localStorage.getItem('waifu-lie-std2')) { localStorage.setItem('waifu-lie-std2', '1'); if (lieMode === 'side') { lieMode = 'belly'; localStorage.setItem('waifu-lie', 'belly'); } }
+  // (В первой версии переключались только те, у кого было «на бок»; у кого стояло «на спину», стандарт не применился.)
+  if (!localStorage.getItem('waifu-lie-std3')) { localStorage.setItem('waifu-lie-std3', '1'); if (lieMode !== 'off') { lieMode = 'belly'; localStorage.setItem('waifu-lie', 'belly'); } }
   else if (localStorage.getItem('waifu-allow-lie') === '0') lieMode = 'off';
 } catch { /* ignore */ }
 if (!unlocked('lieStyles') && lieMode !== 'belly' && lieMode !== 'off') lieMode = 'belly'; // пока другие позы не открыты — на живот
@@ -4914,7 +4915,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 217;
+const WAIFU_BUILD = 218;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
