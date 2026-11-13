@@ -2985,7 +2985,8 @@ function poseDragMove(e) {
         dy = 0;
       }
     }
-    o.hipsX = clamp(o.hipsX + dx * 0.001 * facing * S, -lim * S, lim * S);
+    // Жест за таз — отзывчивее: таз идёт вбок почти вдвое быстрее за пальцем (полный размах — за половину экрана).
+    o.hipsX = clamp(o.hipsX + dx * (poseDrag.grab ? 0.0019 : 0.001) * facing * S, -lim * S, lim * S);
     // На полу таз заваливается вбок вдвое слабее: иначе бедру приходится выворачиваться внутрь дальше, чем может сустав.
     o.hipsZ = clamp(o.hipsX / S * (floor ? 0.7 : 1.6), -0.27, 0.27);
     // Вращение, а не сдвиг: корпус скручивается и наклоняется навстречу тазу (плечи остаются примерно на месте),
@@ -2999,7 +3000,7 @@ function poseDragMove(e) {
       // Наклон таза — от того положения, в котором её взяли (в глубоком наклоне позу не сбрасываем), и не трогаем,
       // пока наклон ведёт повтор.
       poseDrag.rot0 ??= o.hipsRotX;
-      if (dy && !reps.home.on) o.hipsRotX = clamp(o.hipsRotX + dy * 0.0022, Math.max(BEND_MIN, poseDrag.rot0 - 0.35), Math.min(BEND_MAX, poseDrag.rot0 + 0.45));
+      if (dy && !reps.home.on) o.hipsRotX = clamp(o.hipsRotX + dy * 0.0032, Math.max(BEND_MIN, poseDrag.rot0 - 0.35), Math.min(BEND_MAX, poseDrag.rot0 + 0.45));
     }
     if (poseDrag.grab && !dy) return; // только вбок — посадку не трогаем
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
@@ -4902,7 +4903,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 211;
+const WAIFU_BUILD = 212;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

@@ -3136,8 +3136,9 @@ export class Character {
 
   sitDropFor(s) {
     const restY = this.restHips.y;
-    // Не до предела: при полном сгибе сетка модели сминается («плющит» ноги).
-    const squatY = restY * 0.58;
+    // Глубокий присед: таз опускается почти к пяткам (ниже модель не идёт — упирается в пределы суставов).
+    // Отсюда на колени таз почти не меняет высоту: колени просто уходят вперёд на пол.
+    const squatY = restY * 0.40;
     const floorY = 0.36 * this.scale; // на коленях, таз над пятками
     const sideY = 0.15 * this.scale; // сидит боком прямо на полу
     const { p1, p2, p3, p4 } = this.sitPhases(s);
