@@ -961,6 +961,9 @@ export class Character {
       if ((key === 'spineX' || key === 'hipsRotX') && this.bodyOffset[key] > 0) w *= fwdCap;
       pose[key] += this.bodyOffset[key] * w;
     }
+    // На коленях прогиб назад глубже: к наклону таза добавляется прогиб спины (грудь раскрывается, плечи уходят назад),
+    // голова при этом не запрокидывается следом. Гибкость спины, а не только поворот таза.
+    { const kk = this.kneelK ?? 0, bb = Math.min(0, this.bodyOffset.hipsRotX); if (kk > 0 && bb < 0) { pose.spineX += bb * 0.42 * kk; pose.headX -= bb * 0.2 * kk; } }
     // Мягкий предел наклона таза (в приседе/на коленях наклон складывается с посадкой):
     // излишек уходит в спину — полоса отзывается, но она не переворачивается.
     {
@@ -3231,6 +3234,22 @@ export class Character {
     const target = kneePos.clone()
       .lerp(hipsPos, 0.3 * p2)
       .add(new THREE.Vector3(0, (0.05 + 0.02 * squatK) * this.scale, (0.03 + 0.05 * squatK) * this.scale));
+    // Таз поднят (стойка на коленях) или корпус откинут — до колена рука уже не достаёт и раньше просто висела.
+    // Ладонь поднимается по бедру к тазу ровно настолько, чтобы лежать на ноге, а не тянуться в воздух.
+    if (p2 > 0.5) {
+      const sh = upper.getWorldPosition(new THREE.Vector3()), reach = (this.armLength(side) + 0.07 * this.scale) * 0.9;
+      const hq = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
+      const front = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
+      const thighTop = this.bones[`${side}UpperLeg`]?.getWorldPosition(new THREE.Vector3()) ?? hipsPos;
+      for (let t = 0; t <= 0.85 && sh.distanceTo(target) > reach; t += 0.12) {
+        target.copy(kneePos).lerp(thighTop, 0.3 + t).addScaledVector(front, 0.085 * this.scale).add(new THREE.Vector3(0, 0.02 * this.scale, 0));
+      }
+      // Откинулась так далеко, что и до бедра не достать, — опирается ладонями о пол позади себя (под плечами).
+      {
+        const over = THREE.MathUtils.smoothstep((sh.distanceTo(target) - reach) / reach, 0.0, 0.25);
+        if (over > 0) target.lerp(new THREE.Vector3(sh.x, 0.03 * this.scale, sh.z).addScaledVector(front, -0.06 * this.scale), over);
+      }
+    }
     // Ладонь — на внутренней стороне колена (ближе к центру), локти не разлетаются.
     {
       const inward = hipsPos.clone().sub(kneePos); inward.y = 0;
@@ -3281,7 +3300,8 @@ export class Character {
       const out = side === 'left' ? 1 : -1;
       // Ладони на полу впереди, локти чуть согнуты (не палками).
       const fwd = new THREE.Vector3(hipsPos.x + out * 0.15 * S, 0.04 * S, hipsPos.z + 0.44 * S);
-      target.lerp(fwd, b3 * (1 - b4));
+      // До середины наклона ладони ещё лежат на коленях, потом быстро идут на пол — не висят «между».
+      target.lerp(fwd, THREE.MathUtils.smoothstep(b3, 0.45, 0.95) * (1 - b4));
       const headP = this.bones.head.getWorldPosition(new THREE.Vector3());
       const pillow = new THREE.Vector3(headP.x + out * 0.13 * S, 0.05 * S, headP.z - 0.02 * S);
       target.lerp(pillow, b4);
