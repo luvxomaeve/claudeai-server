@@ -3034,7 +3034,8 @@ const PIECE_SOURCES = [
   // «Без чулок»: голые ноги (под лосины, шорты и юбки).
   { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
   // Чёрные туфли на высокой шпильке: туфля нарисована по стопе, каблук — отдельная деталь; она стоит на них выше.
-  { id: 'p_heels', name: 'Шпильки', paint: { shoes: 'pumps' }, cats: ['shoes'], names: { shoes: 'Туфли на шпильке' }, colors: { shoes: 0x0c0a0e } },
+  // Туфли на шпильке (p_heels) убраны из гардероба: нарисованная по стопе туфля выглядела грубо. Код оставлен.
+  // { id: 'p_heels', name: 'Шпильки', paint: { shoes: 'pumps' }, cats: ['shoes'], names: { shoes: 'Туфли на шпильке' }, colors: { shoes: 0x0c0a0e } },
   // Длинные капроновые чулки: нарисованы поверх голой ноги, кожа просвечивает.
   { id: 'p_nylon', name: 'Капрон', paint: { legs: 'nylon' }, cats: ['legs'], names: { legs: 'Капроновые чулки' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
   { id: 'p_nylon2', name: 'Капрон короче', paint: { legs: 'nylonmid' }, cats: ['legs'], names: { legs: 'Капроновые чулки покороче' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
@@ -4689,7 +4690,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 182;
+const WAIFU_BUILD = 183;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
