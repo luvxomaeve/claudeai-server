@@ -2509,8 +2509,12 @@ export class Character {
         target.add(footOff);
         // Ноги, выставленные на полу, не лежат «деревянно»: ступня чуть покачивается и переступает, колено дышит.
         // То же для ноги, поднятой в воздух стоя: она не висит неподвижно.
-        if ((this.sitS > 0.3 || footOff.y > 0.04 * S) && this.footOffK(side) > 0.5 && !(this.slideHold > 0)) {
-          const lv = (1 - (this.sleep ?? 0)) * (this.frozen ? 0 : 1), tm = this.time, ph = L ? 0 : 2.1;
+        // Живое покачивание выставленной ноги включается и выключается плавно (раньше — одним кадром, и нога дёргалась
+        // каждый раз, когда начинаешь или заканчиваешь что-то двигать).
+        const aw = this.aliveW ??= { left: 0, right: 0 };
+        { const wantA = (this.sitS > 0.3 || footOff.y > 0.04 * S) && this.footOffK(side) > 0.5 && !(this.slideHold > 0) ? 1 : 0; if (this.aliveTick?.[side] !== this.time) { (this.aliveTick ??= {})[side] = this.time; aw[side] += (wantA - aw[side]) * Math.min(1, (this.lastDt ?? 0.016) * 2.5); } }
+        if (aw[side] > 0.002) {
+          const lv = (1 - (this.sleep ?? 0)) * (this.frozen ? 0 : 1) * aw[side], tm = this.time, ph = L ? 0 : 2.1;
           target.y += (Math.max(0, Math.sin(tm * 0.7 + ph)) * 0.03 + Math.sin(tm * 1.7 + ph) * 0.006) * S * lv;
           target.z += (Math.sin(tm * 0.45 + ph * 1.3) * 0.03 + Math.sin(tm * 1.1 + ph) * 0.008) * S * lv;
           target.x += Math.sin(tm * 0.33 + ph * 0.7) * 0.018 * S * lv;

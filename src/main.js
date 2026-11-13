@@ -2886,6 +2886,16 @@ function poseDragMove(e) {
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
+      // Точка идёт ЗА пальцем, а не прыгает ПОД палец: палец почти никогда не попадает точно в сустав, и раньше
+      // в первый же момент ступня/колено/кисть рывком перескакивали к нему. Теперь запоминаем, где был палец
+      // и где была точка в начале жеста, и дальше ведём точку на столько же, на сколько сдвинулся палец.
+      if (!poseDrag.p0) {
+        poseDrag.p0 = dragPoint.clone();
+        poseDrag.start0 = poseDrag.kind === 'hand' ? character.bones[`${poseDrag.side}Hand`]?.getWorldPosition(new THREE.Vector3())
+          : poseDrag.kind === 'foot' ? character.footWorld(poseDrag.side)
+          : character.bones[`${poseDrag.side}LowerLeg`]?.getWorldPosition(new THREE.Vector3());
+      }
+      if (poseDrag.start0) dragPoint.sub(poseDrag.p0).add(poseDrag.start0);
       if (poseDrag.kind === 'knee' && character.sitS > 0.3) {
         // На полу колено ведёт всю ногу: стопа сдвигается вместе с коленом.
         character.setFootTarget(poseDrag.side, poseDrag.footStart.clone().add(dragPoint.clone().sub(poseDrag.kneeStart)));
@@ -4878,7 +4888,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 208;
+const WAIFU_BUILD = 209;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
