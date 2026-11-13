@@ -2614,7 +2614,7 @@ document.body.appendChild(grabStop);
 for (const ev of ['pointerdown', 'touchstart']) grabStop.addEventListener(ev, (e) => e.stopPropagation());
 function grabLoopsClear() { grabLoops.length = 0; grabStop.style.display = 'none'; }
 grabStop.addEventListener('click', (e) => { e.stopPropagation(); grabLoopsClear(); showToast('Точки остановлены'); });
-const GRAB_BODY = ['spineX', 'spineY', 'spineZ', 'hipsX', 'hipsY', 'hipsZ', 'hipsRotX'];
+const GRAB_BODY = ['spineX', 'spineY', 'spineZ', 'hipsX', 'hipsY', 'hipsZ', 'hipsRotX', 'hipsFwd'];
 function grabSample() {
   const c = character;
   return { t: 0, body: GRAB_BODY.map((k) => c.bodyOffset[k] ?? 0), head: [c.headOffset?.x ?? 0, c.headOffset?.y ?? 0], sit: c.sit,
@@ -2678,7 +2678,7 @@ for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'borde
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
-  let hit = nearestHandle(e0, 70, character.sitS > 0.3 ? { hips: 0.55 } : null) ?? zoneAt(e0, true);
+  let hit = nearestHandle(e0, 70, character.sitS > 0.3 ? { hips: 0.45 } : null) ?? zoneAt(e0, true);
   if (!hit) return false;
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
   if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
@@ -2881,7 +2881,7 @@ function poseDragMove(e) {
     const floor = character.sitS > 0.3;
     if (character.hipsSetSit == null || Math.abs(character.hipsSetSit - character.sitS) > 0.05) {
       // Новое положение — прошлые сдвиги таза (от другого положения) не тащим.
-      o.hipsX = 0; o.hipsZ = 0; o.hipsY = 0;
+      o.hipsX = 0; o.hipsZ = 0; o.hipsY = 0; o.hipsFwd = 0;
     }
     character.hipsSetSit = character.sitS;
     // Размах шире (сборка 187): бёдра уходят вбок дальше, таз наклоняется сильнее — движение читается красивее.
@@ -2895,7 +2895,9 @@ function poseDragMove(e) {
       if (poseDrag.axis === 'y') dx = 0; else dy = 0;
       if (floor) {
         // Вверх-вниз за таз на полу: бёдра поднимаются/опускаются и таз наклоняется вперёд-назад — с хорошим размахом.
-        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ o.hipsY = clamp((o.hipsY ?? 0) - dy * 0.0008 * S, -0.03 * S, (0.17 + 0.04 * back) * S); o.hipsRotX = clamp(o.hipsRotX - dy * 0.0032 * (1 - back), -0.8, 0.9); }
+        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ o.hipsY = clamp((o.hipsY ?? 0) - dy * 0.0008 * S, -0.03 * S, (0.17 + 0.04 * back) * S); { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0032 * (1 - back) * (1 - tall), -0.8, 0.9); } }
+        // На коленях и четвереньках тот же жест перекатывает таз вперёд за колени (на руки) и назад на пятки.
+        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0014 * S * kn, -0.06 * S, 0.34 * S) * (kn > 0.5 ? 1 : 0); }
         dy = 0;
       }
     }
@@ -4800,7 +4802,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 199;
+const WAIFU_BUILD = 200;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

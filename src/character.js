@@ -241,7 +241,7 @@ export class Character {
     this.initIK();
     this.handTargets = { left: null, right: null }; // позы «пальцем»: цель кисти в системе груди
     this.headOffset = { x: 0, y: 0 };
-    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
+    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0, hipsFwd: 0 };
     this.footOffset = { left: null, right: null }; // ступни, сдвинутые пальцем
     this.armPreset = { left: null, right: null }; // рука «примагничена»: 'hips' — на талии, 'behind' — на пояснице
     // Физика управления: цели рук/ног догоняются с инерцией (пружина с лёгким перехлёстом).
@@ -951,6 +951,7 @@ export class Character {
     }
     const fwdCap = this.sitS > 0.3 && this.sitS < 1.0 ? this.bendScale : 1;
     for (const key in this.bodyOffset) {
+      if (key === 'hipsFwd') continue; // сдвиг таза вперёд-назад на полу — отдельно, см. plantFeet
       let w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.hipsOffK() : 1;
       if (key === 'spineX' && this.bodyOffset.spineX > 0) w *= fwdLie;
       if ((key === 'spineX' || key === 'hipsRotX') && this.bodyOffset[key] > 0) w *= fwdCap;
@@ -1009,6 +1010,7 @@ export class Character {
           const up = Math.max(0, this.bodyOffset.hipsY) / this.scale + arch * 0.2;
           const ang = Math.asin(Math.min(0.9, up / 0.5)) * ph.c4 * lie;
           pose.hipsRotX -= ang;
+          this.bridgeK = THREE.MathUtils.smoothstep(up * ph.c4 * lie, 0.02, 0.08); // мостик — ладони упираются в пол
           pose.headX += ang * 0.35; // голова лежит на полу, а не запрокидывается
         }
       }
@@ -1398,6 +1400,7 @@ export class Character {
     // Верх тела из записи живого человека (если включено живое ожидание).
     this.applyUpperLayer(dt);
     // Ступни стоят на полу: колени сгибаются сами под движение бёдер.
+    this.kneeFwdDone = false;
     this.plantFeet(pose);
     // Не даём кистям уйти внутрь тела: при необходимости отводим руки наружу.
     this.solveArms(pose, dt);
@@ -1759,7 +1762,7 @@ export class Character {
       // Свои позы рук на полу уже есть: лёжа, сидя на полу, опора сбоку.
       // Свои позы рук — только когда уже лежит (на боку, на животе, на спине). По дороге туда — на четвереньках
       // и полулёжа на спине — ладони ставит на пол опора: она стоит на руках, а не держит их в воздухе.
-      const own = Math.max(ph.p4, ph.b4, THREE.MathUtils.smoothstep(ph.c4, 0.75, 1), ph.c3 * (1 - THREE.MathUtils.smoothstep(ph.c4, 0.05, 0.3)), side === 'right' ? ph.p3 : 0);
+      const own = Math.max(ph.p4, ph.b4, THREE.MathUtils.smoothstep(ph.c4, 0.75, 1) * (1 - (this.bridgeK ?? 0)), ph.c3 * (1 - THREE.MathUtils.smoothstep(ph.c4, 0.05, 0.3)), side === 'right' ? ph.p3 : 0);
       const busy = this.handTargets[side] || this.armPreset[side] ? 1 : this.gestureYield(side);
       const low = THREE.MathUtils.smoothstep(len * 1.12 - (shoulder.y - palmY), 0, len * 0.3);
       // Руки лежат на коленях (наклон стоя) — опора о пол не перехватывает.
@@ -2260,27 +2263,44 @@ export class Character {
       if (kp.w > 0 && kp.left && kp.right) {
         const w = kp.w * kp.w * (3 - 2 * kp.w);
         const corr = new THREE.Vector3();
-        let down = 0;
+        let down = 0, vert = 0, vertN = 0;
+        // Таз вперёд-назад по полу (ведут пальцем): с пяток вперёд на руки и обратно.
+        {
+          const f = (this.bodyOffset.hipsFwd ?? 0) * w * this.hipsOffK();
+          if (f && !this.kneeFwdDone) {
+            const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(b.hips.parent.getWorldQuaternion(new THREE.Quaternion())).setY(0).normalize().multiplyScalar(this.flip);
+            const wp0 = b.hips.getWorldPosition(new THREE.Vector3()).addScaledVector(fw, f);
+            b.hips.position.copy(b.hips.parent.worldToLocal(wp0));
+            b.hips.updateWorldMatrix(true, true);
+          }
+          this.kneeFwdDone = true;
+        }
         for (const side of ['left', 'right']) {
           const up = b[`${side}UpperLeg`], P = kp[side];
           const l1 = this.limbRest.get(up.uuid)?.l1;
           if (!l1) continue;
           const hj = up.getWorldPosition(new THREE.Vector3());
           const dy = hj.y - P.y;
-          if (dy > l1 * 0.995) down = Math.max(down, dy - l1 * 0.995);
-          const r = Math.sqrt(Math.max(0, l1 * l1 - Math.min(dy, l1 * 0.995) ** 2));
           const h = new THREE.Vector3(P.x - hj.x, 0, P.z - hj.z);
           const d = h.length();
+          // Бедро стоит круто (таз над коленями или перекатился вперёд за них) — длину бедра держим высотой таза:
+          // он идёт по дуге вокруг колена. Бедро пологое (сидит на пятках) — держим сдвигом таза по полу.
+          const v = 1 - THREE.MathUtils.smoothstep(d, l1 * 0.55, l1 * 0.9); // плавно между двумя способами — без рывка
+          if (v > 0) vert += ((P.y + Math.sqrt(Math.max(0, l1 * l1 - d * d))) - hj.y) * v * 0.5;
+          if (v >= 1) continue;
+          if (dy > l1 * 0.995) down = Math.max(down, (dy - l1 * 0.995) * (1 - v));
+          const r = Math.sqrt(Math.max(0, l1 * l1 - Math.min(dy, l1 * 0.995) ** 2));
           if (d < 1e-5) continue;
           h.multiplyScalar(1 / d);
           let c = d - r;
           // Слишком далеко — колено переступает вслед за тазом (плавно), остальное добирает таз.
           const lim = 0.22 * S;
           if (Math.abs(c) > lim) { const ex = (Math.abs(c) - lim) * Math.sign(c); P.addScaledVector(h, -ex * Math.min(1, dtp * 9)); c -= ex * Math.min(1, dtp * 9); }
-          corr.addScaledVector(h, c * 0.5);
+          corr.addScaledVector(h, c * 0.5 * (1 - v));
         }
         const wp = b.hips.getWorldPosition(new THREE.Vector3());
         wp.x += corr.x * w; wp.z += corr.z * w; wp.y -= down * w;
+        wp.y += vert * w;
         b.hips.position.copy(b.hips.parent.worldToLocal(wp));
         b.hips.updateWorldMatrix(true, true);
       }
@@ -2775,7 +2795,7 @@ export class Character {
   clearTouchPose() {
     this.handTargets = { left: null, right: null };
     this.headOffset = { x: 0, y: 0 };
-    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0 };
+    this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0, hipsFwd: 0 };
     this.footOffset = { left: null, right: null };
     this.armPreset = { left: null, right: null };
     this.footSetSit = {};
