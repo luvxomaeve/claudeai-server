@@ -57,7 +57,7 @@ scene.add(ambient);
 
 // Пол: невидимый, только тень от неё + мягкая «контактная» тень под телом,
 // чтобы она стояла, сидела и лежала на полу, а не парила.
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMaterial({ opacity: 0.42 }));
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMaterial({ opacity: 0.42, side: THREE.DoubleSide }));
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
@@ -95,7 +95,7 @@ const floorDiscTex = (() => {
   t.anisotropy = 8;
   return t;
 })();
-const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false }));
+const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
 floorDisc.rotation.x = -Math.PI / 2;
 floorDisc.position.y = 0.001;
 floorDisc.renderOrder = -2;
@@ -116,7 +116,7 @@ const touchTex = (() => {
 })();
 const TOUCH_BONES = [['leftFoot', 0.2, 0.1], ['rightFoot', 0.2, 0.1], ['leftLowerLeg', 0.2, 0.09], ['rightLowerLeg', 0.2, 0.09], ['leftHand', 0.17, 0.07], ['rightHand', 0.17, 0.07], ['leftLowerArm', 0.16, 0.07], ['rightLowerArm', 0.16, 0.07], ['head', 0.26, 0.14], ['chest', 0.34, 0.14]];
 const touchBlobs = TOUCH_BONES.map(() => {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: touchTex, transparent: true, depthWrite: false, opacity: 0 }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: touchTex, transparent: true, depthWrite: false, opacity: 0, side: THREE.DoubleSide }));
   m.rotation.x = -Math.PI / 2;
   m.position.y = 0.004;
   m.renderOrder = -1;
@@ -154,7 +154,7 @@ const blobTex = (() => {
   g.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
 })();
-const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false }));
+const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
 blob.rotation.x = -Math.PI / 2;
 blob.position.y = 0.003;
 blob.renderOrder = -1;
@@ -170,7 +170,19 @@ function updateBlob() {
   blob.scale.set(0.55 + low * 0.9, 0.42 + low * 0.5, 1);
   blob.material.opacity = 0.7 + low * 0.3;
   updateTouchBlobs();
+  // Камера ушла ниже пола — смотрим на неё сквозь стекло снизу. Пол не исчезает: он рисуется с обеих сторон и
+  // поверх тела (он ближе к камере), матовее, а пятна касания видны сквозь него — она стоит на стекле, а не висит.
+  const below = camera.position.y < 0.0;
+  if (below !== floorBelow) {
+    floorBelow = below;
+    floorDisc.renderOrder = below ? 12 : -2;
+    floorDisc.material.opacity = below ? 1.6 : 1;
+    floor.renderOrder = below ? 10 : 0;
+    blob.renderOrder = below ? 11 : -1;
+    for (const m of touchBlobs) m.renderOrder = below ? 11 : -1;
+  }
 }
+let floorBelow = false;
 
 function resize() {
   const w = window.innerWidth;
@@ -2956,9 +2968,9 @@ function poseDragMove(e) {
       if (!poseDrag.free) { if (poseDrag.axis === 'y') dx = 0; else dy = 0; }
       if (floor) {
         // Вверх-вниз за таз на полу: бёдра поднимаются/опускаются и таз наклоняется вперёд-назад — с хорошим размахом.
-        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ o.hipsY = clamp((o.hipsY ?? 0) - dy * 0.0013 * S, -0.03 * S, (0.17 + 0.04 * back) * S * (1 - character.sitPhases().p4)); /* на боку таз не поднимаем: иначе всё тело повисает над полом */ { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0045 * (1 - back) * (1 - tall), -0.8, 0.9); } }
+        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ { const ph0 = character.sitPhases(), kn0 = ph0.p2 * (1 - ph0.p3) * (1 - ph0.b4) * (1 - ph0.c3); /* лёжа на спине и животе таз поднимается высоко (мостик, «домик»); на коленях можно сесть ниже */ o.hipsY = clamp((o.hipsY ?? 0) - dy * 0.0015 * S, -(0.03 + 0.07 * kn0) * S, (0.17 + 0.13 * Math.max(back, ph0.b4)) * S * (1 - ph0.p4)); } /* на боку таз не поднимаем: иначе всё тело повисает над полом */ { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0045 * (1 - back) * (1 - tall), -0.8, 0.9); } }
         // На коленях и четвереньках тот же жест перекатывает таз вперёд за колени (на руки) и назад на пятки.
-        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0022 * S * kn, -0.06 * S, 0.34 * S) * (kn > 0.5 ? 1 : 0); }
+        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0022 * S * kn, -0.2 * S, 0.34 * S) * (kn > 0.5 ? 1 : 0); }
         dy = 0;
       }
     }
@@ -4866,7 +4878,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 206;
+const WAIFU_BUILD = 207;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

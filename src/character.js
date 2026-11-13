@@ -1397,6 +1397,28 @@ export class Character {
     }
     if (b.hips) {
       const wk = this.updateWalk(dt, pose);
+      // Вес: тело с массой не останавливается мгновенно. Когда таз резко тормозит при опускании или его толкают
+      // вниз-вверх, он чуть проседает и мягко возвращается (пружина с сильным затуханием — один плавный ход,
+      // без дрожи). Сильнее всего на полу и в приседе; стоя почти незаметно.
+      {
+        const w = this.weightSp ??= { y: 0, v: 0, a: 0, vyPrev: 0, yPrev: null };
+        const dtw = Math.min(dt || 0.016, 0.05);
+        const yNow = pose.hipsY - this.sitDropNow; // куда таз идёт по позе (без пружины)
+        if (w.yPrev != null && dtw > 0) {
+          const vy = (yNow - w.yPrev) / dtw;
+          const acc = THREE.MathUtils.clamp((vy - w.vyPrev) / dtw, -6 * this.scale, 6 * this.scale);
+          w.a += (acc - w.a) * Math.min(1, dtw * 10); // сглаженное ускорение — без шума
+          w.vyPrev = vy;
+          const k = 70, c = 13; // затухание ~0.8: проседает и возвращается одним движением
+          w.v += (-k * w.y - c * w.v - w.a * 1.7) * dtw;
+          w.y = THREE.MathUtils.clamp(w.y + w.v * dtw, -0.035 * this.scale, 0.02 * this.scale);
+        }
+        w.yPrev = yNow;
+        const amt = this.mixer || this.dancing ? 0 : 0.35 + 0.65 * THREE.MathUtils.smoothstep(this.sitS, 0.1, 0.5);
+        pose.hipsY += w.y * amt;
+        // Вместе с тазом чуть «садится» и спина — вес уходит вниз всем корпусом.
+        pose.spineX += (-w.y / this.scale) * 1.2 * amt;
+      }
       b.hips.position.y += pose.hipsY - this.sitDropNow + (this.heelRaise ?? 0);
       b.hips.position.x += (pose.hipsX + wk.x) * this.flip;
       b.hips.position.z += wk.z * this.flip;
@@ -2281,8 +2303,8 @@ export class Character {
       const dtp = this.lastDt ?? 0.016;
       const has = kp.left && kp.right;
       // Куда развёрнут таз по горизонтали: повернули корпус — старые точки колен уже не подходят.
-      const yawNow = (() => { const f = new THREE.Vector3(0, 0, 1).applyQuaternion(b.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv)); return Math.atan2(f.x, f.z); })();
-      const yawOk = !has || Math.abs(Math.atan2(Math.sin(yawNow - (kp.yaw ?? yawNow)), Math.cos(yawNow - (kp.yaw ?? yawNow)))) < 0.2;
+      const yawNow = (() => { const sd = new THREE.Vector3(1, 0, 0).applyQuaternion(b.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv)); return Math.atan2(-sd.z, sd.x); })(); // по боковой оси: наклон таза вперёд её не переворачивает
+      const yawOk = !has || Math.abs(Math.atan2(Math.sin(yawNow - (kp.yaw ?? yawNow)), Math.cos(yawNow - (kp.yaw ?? yawNow)))) < 0.7;
       const on = kw > 0.9 && Math.abs(this.sitS - this.sit) < 0.02 && (!has || Math.abs(kp.sit - this.sitS) < 0.03) && yawOk && !((kp.bad ?? 0) > 0.6) && !this.mixer && !this.dancing;
       // Берём место колен из готовой позы прошлого кадра (сейчас кости ещё не расставлены) и только когда она уже села ровно.
       if (on && !has && kp.w <= 0.001 && this.kneeLast?.left && this.kneeLast?.right && Math.abs(this.sitV ?? 0) < 0.03 && (this.kneeStill ?? 0) > 0.12) {
@@ -2335,7 +2357,7 @@ export class Character {
           corr.addScaledVector(h, c * 0.5 * (1 - v));
         }
         // Телу слишком долго приходится сильно тянуться к точкам колен — значит, они устарели: отпускаем и берём заново.
-        if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; kp.bad = Math.max(0, (kp.bad ?? 0) + (corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
+        if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; const o = this.bodyOffset, moved = Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.03 * S || Math.abs(o.hipsRotX) > 0.1; /* таз сдвинут рукой — тянуться к коленям нормально, это не «устаревшие точки» */ kp.bad = Math.max(0, (kp.bad ?? 0) + (!moved && corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
         const wp = b.hips.getWorldPosition(new THREE.Vector3());
         wp.x += corr.x * w; wp.z += corr.z * w; wp.y -= down * w;
         wp.y += vert * w;
@@ -2457,11 +2479,17 @@ export class Character {
         const st = this.stanceNow ??= { w: 0, f: 0 };
         if (L) { const a = 1 - Math.exp(-(this.lastDt ?? 0.016) * 3); st.w += ((this.stanceW ?? 0) - st.w) * a; st.f += ((this.stanceF ?? 0) - st.f) * a; }
         // Действует стоя и в приседе (приседает на расставленных ногах); на коленях и ниже — как обычно.
-        const sk = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.47, 0.6);
+        // Ниже приседа стойка тоже сохраняется, но мягче: на коленях, четвереньках, сидя и лёжа на спине/животе ноги
+        // остаются шире, если их так выставили заранее (на боку — нет, там ноги сложены вместе).
+        const phS = this.sitPhases();
+        const sk = Math.max(1 - THREE.MathUtils.smoothstep(this.sitS, 0.47, 0.6), 0.6 * THREE.MathUtils.smoothstep(this.sitS, 0.5, 0.75) * (1 - phS.p3));
         this.stanceK = st.w * sk;
         target.x += outSign * st.w * S * sk;
         target.z += (L ? 1 : -1) * st.f * S * sk;
       }
+      // Лёжа на животе или спине ноги едут вбок вместе с тазом (иначе ступни стояли на месте, таз уезжал,
+      // и ноги разъезжались в шпагат).
+      { const phL2 = this.sitPhases(), lieK = Math.max(phL2.b4, phL2.c4); if (lieK > 0) target.x += (this.bodyOffset.hipsX ?? 0) * this.hipsOffK() * this.flip * 0.85 * lieK; }
       // Сама прошлась (см. updateWalk): ступня там, куда шагнула.
       if (this.walk) target.addScaledVector(this.walk.foot[side], this.walk.k);
       if (this.turnStep > 0.01) target.y += Math.max(0, Math.sin((this.turnPhase ?? 0) + (L ? 0 : Math.PI))) * 0.035 * S * this.turnStep * (1 - p1);
