@@ -2575,7 +2575,62 @@ let grab = null; // { snap } — что было до того, как взял
 const grabAsk = document.createElement('div');
 grabAsk.id = 'grab-ask';
 grabAsk.style.display = 'none';
-grabAsk.innerHTML = '<span>Так?</span><button data-a="yes">✓ Да</button><button data-a="no">✕ Нет</button>';
+grabAsk.innerHTML = '<span>Так?</span><button data-a="yes">✓ Да</button><button data-a="rep">🔁 Повторять</button><button data-a="no">✕ Нет</button>';
+// Движения точек на повторе: каждое — свой слой (таз, корпус, голова, кисти, ступни). Слои складываются друг с
+// другом и с обычным повтором наклона/приседа. «✕ Стоп точки» или домик снимают их.
+const grabLoops = [];
+const grabStop = document.createElement('button');
+grabStop.id = 'grab-stop';
+grabStop.textContent = '🔁 ✕ стоп точки';
+grabStop.style.cssText = 'position:fixed;left:50%;top:86%;transform:translate(-50%,-50%);z-index:31;display:none;border:0;border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;font-weight:800;color:#fff;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);box-shadow:0 6px 24px rgba(0,0,0,.35);cursor:pointer';
+document.body.appendChild(grabStop);
+for (const ev of ['pointerdown', 'touchstart']) grabStop.addEventListener(ev, (e) => e.stopPropagation());
+function grabLoopsClear() { grabLoops.length = 0; grabStop.style.display = 'none'; }
+grabStop.addEventListener('click', (e) => { e.stopPropagation(); grabLoopsClear(); showToast('Точки остановлены'); });
+const GRAB_BODY = ['spineX', 'spineY', 'spineZ', 'hipsX', 'hipsY', 'hipsZ', 'hipsRotX'];
+function grabSample() {
+  const c = character;
+  return { t: 0, body: GRAB_BODY.map((k) => c.bodyOffset[k] ?? 0), head: [c.headOffset?.x ?? 0, c.headOffset?.y ?? 0], sit: c.sit,
+    hL: c.handAnchor?.left ? null : vArr(c.handTargets.left), hR: c.handAnchor?.right ? null : vArr(c.handTargets.right), fL: vArr(c.footOffset.left), fR: vArr(c.footOffset.right) };
+}
+// Каждый кадр, пока тянешь точку, пишем позу; на повторе — проигрываем туда-обратно только то, что двигалось.
+function updateGrabLoops(dt) {
+  if (!character) return;
+  if (grab?.rec && poseDrag?.grab) { const smp = grabSample(); smp.t = (performance.now() - grab.rec.start) / 1000; grab.rec.S.push(smp); }
+  if (!grabLoops.length) return;
+  if (!autoMode || poseMode || autoState === 'sleep') { grabLoopsClear(); return; }
+  if (autoState === 'hold') return;
+  const c = character;
+  for (const g of grabLoops) {
+    if (poseDrag?.grab) continue; // пока тянешь новую точку — старые слои ждут
+    g.t = (g.t + dt) % (g.dur * 2);
+    const tri = g.t < g.dur ? g.t / g.dur : 2 - g.t / g.dur, u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * g.dur, S = g.S;
+    let i = 0; while (i < S.length - 2 && S[i + 1].t < u) i++;
+    const a = S[i], b = S[Math.min(i + 1, S.length - 1)], k = b.t > a.t ? THREE.MathUtils.clamp((u - a.t) / (b.t - a.t), 0, 1) : 0;
+    const m = g.moved;
+    GRAB_BODY.forEach((key, j) => { if (m.body[j] && !(key === 'hipsRotX' && reps.home.on) && !(key === 'spineX' && reps.home.on)) c.bodyOffset[key] = a.body[j] + (b.body[j] - a.body[j]) * k; });
+    if (m.head) c.headOffset = { x: a.head[0] + (b.head[0] - a.head[0]) * k, y: a.head[1] + (b.head[1] - a.head[1]) * k };
+    if (m.sit && !reps.home.on) { c.sit = a.sit + (b.sit - a.sit) * k; c.sitRate = 1.6; }
+    applyPoints({ hL: m.hL ? lerpArr(a.hL, b.hL, k) : null, hR: m.hR ? lerpArr(a.hR, b.hR, k) : null, fL: m.fL ? lerpArr(a.fL, b.fL, k) : null, fR: m.fR ? lerpArr(a.fR, b.fR, k) : null });
+  }
+  character.slideHold = 3;
+}
+function grabMakeLoop(rec) {
+  const S = rec.S;
+  if (!S || S.length < 6) return false;
+  const dur = S[S.length - 1].t;
+  if (dur < 0.35) return false;
+  const rng = (f) => { let lo = Infinity, hi = -Infinity; for (const x of S) { const v = f(x); if (v == null) return 0; lo = Math.min(lo, v); hi = Math.max(hi, v); } return hi - lo; };
+  const pt = (key) => { const f = S.find((x) => x[key])?.[key]; return !!f && S.filter((x) => x[key]).length > S.length * 0.5 && S.some((x) => x[key] && Math.hypot(x[key][0] - f[0], x[key][1] - f[1], x[key][2] - f[2]) > 0.015); };
+  const moved = { body: GRAB_BODY.map((_, j) => rng((x) => x.body[j]) > 0.012), head: rng((x) => x.head[0]) + rng((x) => x.head[1]) > 0.03, sit: rng((x) => x.sit) > 0.05, hL: pt('hL'), hR: pt('hR'), fL: pt('fL'), fR: pt('fR') };
+  if (!moved.body.some(Boolean) && !moved.head && !moved.sit && !moved.hL && !moved.hR && !moved.fL && !moved.fR) return false;
+  // Новый слой заменяет старые на тех же каналах (тот же таз, та же рука) — остальные слои идут дальше.
+  for (const g of grabLoops) { g.moved.body = g.moved.body.map((v, j) => v && !moved.body[j]); for (const key of ['head', 'sit', 'hL', 'hR', 'fL', 'fR']) if (moved[key]) g.moved[key] = false; }
+  for (let i = grabLoops.length - 1; i >= 0; i--) { const g = grabLoops[i].moved; if (!g.body.some(Boolean) && !g.head && !g.sit && !g.hL && !g.hR && !g.fL && !g.fR) grabLoops.splice(i, 1); }
+  grabLoops.push({ S, dur, t: dur, moved });
+  grabStop.style.display = 'block';
+  return true;
+}
 grabAsk.style.cssText = 'position:fixed;left:50%;top:80%;transform:translate(-50%,-50%);z-index:32;display:none;gap:8px;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
 document.body.appendChild(grabAsk);
 for (const ev of ['pointerdown', 'touchstart']) grabAsk.addEventListener(ev, (e) => e.stopPropagation());
@@ -2584,17 +2639,21 @@ function grabDone(keep) {
   clearTimeout(grabAskTimer);
   grabAsk.style.display = 'none';
   if (!grab) return;
-  if (!keep) { try { character.importTouchPose(grab.snap); } catch { /* ignore */ } showToast('Вернула как было'); }
+  if (keep === 'rep') {
+    if (grab.rec && grabMakeLoop(grab.rec)) { showToast(grabLoops.length > 1 ? '🔁 Повторяю и это' : '🔁 Повторяю'); try { character.react({ expression: 'happy' }); } catch { /* ignore */ } }
+    else showToast('Слишком коротко — потяни подольше');
+  } else if (!keep) { try { character.importTouchPose(grab.snap); } catch { /* ignore */ } showToast('Вернула как было'); }
   else { showToast('Запомнила ♥'); try { saveLeft(); } catch { /* ignore */ } }
   grab = null;
 }
-grabAsk.addEventListener('click', (e) => { const a = e.target?.dataset?.a; if (a) grabDone(a === 'yes'); });
+grabAsk.addEventListener('click', (e) => { const a = e.target?.dataset?.a; if (a) grabDone(a === 'rep' ? 'rep' : a === 'yes'); });
 for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:800;color:#fff;background:rgba(255,255,255,.18);cursor:pointer';
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   const hit = nearestHandle(e0, 70) ?? zoneAt(e0, true);
   if (!hit) return false;
   if (!grab) grab = { snap: character.exportTouchPose() };
+  grab.rec = { start: performance.now(), S: [] }; // запись этого движения — для «Повторять»
   clearTimeout(grabAskTimer); grabAsk.style.display = 'none';
   stroking = null; petting = null; bgSwipe = null;
   stopAuto(true);
@@ -4694,7 +4753,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 185;
+const WAIFU_BUILD = 186;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5058,7 +5117,7 @@ function autoReturn() {
   character.sitRate = 1;
   if (character.sit > 0.01) sitBy(-character.sit / 0.004);
   autoBendTarget = 0;
-  grabDone(true); try { character.importTouchPose(null); } catch { /* ignore */ }
+  grabDone(true); grabLoopsClear(); try { character.importTouchPose(null); } catch { /* ignore */ }
   resetView();
 }
 // Свайп-команда в «Авто». dir: +1 — вниз, −1 — вверх.
@@ -5345,7 +5404,7 @@ function updateFlirt(dt) {
   const touching = !!poseDrag || pointerActive && now - lastOnHerAt < 300 || now - lastOnHerAt < 1200;
   if (flirtUndo && (now > flirtUndo.at || touching)) { const u = flirtUndo; flirtUndo = null; try { u.fn(); } catch { /* ignore */ } }
   if (touching) { flirtGazeUntil = 0; flirtTimer = Math.max(flirtTimer, 7); return; }
-  const ok = autoState === 'live' && !poseMode && !reps.home.on && !auto && (character.sleep ?? 0) < 0.1 && !character.dancing && !character.mixer && !character.loop
+  const ok = autoState === 'live' && !poseMode && !reps.home.on && !grabLoops.length && !auto && (character.sleep ?? 0) < 0.1 && !character.dancing && !character.mixer && !character.loop
     && character.sitS < 0.9 && $('wardrobe').classList.contains('hidden') && !character.turnGoal && !character.motions.length;
   if (!ok) return;
   flirtTimer -= dt;
@@ -5368,7 +5427,7 @@ function updateFlirt(dt) {
 let walkTimer = 10;
 function autoWalk(dt) {
   if (!character?.walkTo) return;
-  const calm = autoMode && autoState === 'live' && !poseMode && !poseDrag && !pointerActive && !reps.home.on && !auto
+  const calm = autoMode && autoState === 'live' && !poseMode && !poseDrag && !pointerActive && !reps.home.on && !grabLoops.length && !auto
     && character.sit < 0.02 && (character.sleep ?? 0) < 0.1 && Math.abs(character.bodyOffset.hipsRotX) < 0.25
     && !character.dancing && !character.mixer && !character.loop && $('wardrobe').classList.contains('hidden');
   // Повернулась сама — а её тронули, усадили, включили повтор: сразу лицом к тебе (камеру крутить можно).
@@ -5510,6 +5569,7 @@ function tick() {
 
     if (character.stanceW == null) applyStance();
     character.handPad = isPaint(wear.bottoms) ? 0.3 : 0;
+    updateGrabLoops(dt);
     autoWalk(dt);
     updateFlirt(dt);
     character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
