@@ -1000,6 +1000,17 @@ export class Character {
         pose.headZ -= roll * 0.3;
         pose.headY += roll * 0.15;
         pose.headX -= bend * 0.2 * lie * (bend >= 0 ? fwdLie : 1);
+        // Мостик лёжа на спине: таз поднимается (рукой за таз или прогибом в простом виде), а плечи и голова
+        // остаются на полу — тело не «взлетает» целиком. Прогиб лёжа на спине = таз вверх, а не ломаная спина.
+        {
+          const arch = Math.max(0, -bend) * ph.c4 * lie;
+          pose.hipsY += arch * 0.2 * this.scale;
+          pose.spineX += arch * 1.2 * 0.6; // часть прогиба спины возвращаем: его работу делает подъём таза
+          const up = Math.max(0, this.bodyOffset.hipsY) / this.scale + arch * 0.2;
+          const ang = Math.asin(Math.min(0.9, up / 0.5)) * ph.c4 * lie;
+          pose.hipsRotX -= ang;
+          pose.headX += ang * 0.35; // голова лежит на полу, а не запрокидывается
+        }
       }
     }
     // Руки висят по гравитации: корпус наклонили вперёд/прогнули назад — плечи
