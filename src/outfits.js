@@ -196,6 +196,9 @@ function bindBone(vrm, mesh, name) {
 // В глубоком приседе сетка тела между ног собирается в торчащий бугорок (кости бёдер разошлись,
 // а «дно» таза осталось на месте). Чем сильнее согнуты ноги, тем больше утягиваем это место вверх, в таз.
 export const SQUAT_FLEX = { value: 0 };
+// Насколько втягивать сетку между ног (см. installCrotchFix). В приседе с прямым корпусом — полностью; на четвереньках
+// и в наклоне, где корпус горизонтален, то же втягивание выглядело бы глубокой вмятиной со складками — там слабее.
+export const CROTCH_LIFT = { value: 0 };
 function installCrotchFix(vrm, mesh) {
   const g = mesh.geometry, pos = g.getAttribute('position');
   if (!mesh.isSkinnedMesh || !pos || g.getAttribute('aCrotch')) return;
@@ -218,11 +221,11 @@ function installCrotchFix(vrm, mesh) {
     const prev = m.onBeforeCompile;
     m.onBeforeCompile = (shader, renderer) => {
       prev?.call(m, shader, renderer);
-      shader.uniforms.uSquat = SQUAT_FLEX;
+      shader.uniforms.uSquat = CROTCH_LIFT;
       shader.vertexShader = 'attribute float aCrotch;\nuniform float uSquat;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n      transformed.y += aCrotch * uSquat;');
     };
     const pk = m.customProgramCacheKey?.bind(m);
-    m.customProgramCacheKey = () => `${pk ? pk() : ''}|crotchFix`;
+    m.customProgramCacheKey = () => `${pk ? pk() : ''}|crotchFix2`;
     m.needsUpdate = true;
   }
 }

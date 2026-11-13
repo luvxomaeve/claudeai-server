@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { tuneSkirt, shapeHips, HIP_FLEX, SQUAT_FLEX } from './outfits.js';
+import { tuneSkirt, shapeHips, HIP_FLEX, SQUAT_FLEX, CROTCH_LIFT } from './outfits.js';
 const HEAD_LEAN_SIGN = -1; // знак наклона головы «к пальцу» (проверено тестом)
 
 const EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
@@ -300,6 +300,8 @@ export class Character {
     }
     // Её сейчас тормошат (ведут наклон/присед) — жесты руками не начинает: руки не мечутся.
     if (this.handsQuiet && (TOUCH_MOTIONS[name] || ARM_MOTIONS.has(name))) return;
+    // На четвереньках вес на руках — ладони с пола ради жеста не отрывает.
+    if ((this.onHands ?? 0) > 0.5 && (TOUCH_MOTIONS[name] || ARM_MOTIONS.has(name))) return;
     const durations = {
       tiltHead: 1.6, flinch: 1.0, raiseHand: 2.2, sway: 1.6, hop: 0.9, turnAway: 2.6,
       lookAround: 3.2, stretch: 2.8, shift: 3.0, touchHair: 3.0, bounce: 1.4, lieTurn: 2.6,
@@ -925,6 +927,8 @@ export class Character {
         const fold = b3 * (1 - b4);
         pose.hipsRotX += 0.95 * fold + 1.39 * b4; // на животе тело горизонтально
         pose.spineX += 0.45 * fold;
+        // Опускается грудью на руки настолько, чтобы ладони стояли на полу (а не висели над ним).
+        { this.sinkS = fold > 0.2 ? THREE.MathUtils.clamp((this.sinkS ?? 0) + THREE.MathUtils.clamp(this.handGapS ?? 0, -0.04, 0.1) * 14 * (this.lastDt ?? 0.016), 0, 0.6) : 0; pose.spineX += this.sinkS * 0.6; pose.hipsRotX += this.sinkS * 0.4; }
         pose.headX += 0.25 * fold - 0.3 * b4; // лёжа голова чуть приподнята на руках
         pose.headY += 1.05 * b4; // щекой на руки, лицом к тебе
         pose.headZ += 0.15 * b4;
@@ -1146,7 +1150,7 @@ export class Character {
       m.t += dt;
       // Начала тормошить посреди жеста — он плавно гаснет (и не возвращается).
       if (TOUCH_MOTIONS[m.name] || ARM_MOTIONS.has(m.name)) {
-        if (this.handsQuiet) m.quit = true;
+        if (this.handsQuiet || (this.onHands ?? 0) > 0.5) m.quit = true;
         if (m.quit) { m.fade = (m.fade ?? 1) * Math.exp(-dt * 5); if (m.fade < 0.02) m.t = m.dur + 1; }
       }
       const e = envelope(m.t, m.dur) * (m.fade ?? 1);
@@ -1449,6 +1453,7 @@ export class Character {
       const amt = 0.038 * (this.scale ?? 1);
       HIP_FLEX.value.set(flex('left') * amt, flex('right') * amt);
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
+      { const upK = THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.15, 0.8); CROTCH_LIFT.value = SQUAT_FLEX.value * (0.3 + 0.7 * upK); }
     }
 
     this.calmArms(dt);
@@ -1763,10 +1768,15 @@ export class Character {
       // Свои позы рук — только когда уже лежит (на боку, на животе, на спине). По дороге туда — на четвереньках
       // и полулёжа на спине — ладони ставит на пол опора: она стоит на руках, а не держит их в воздухе.
       const own = Math.max(ph.p4, ph.b4, THREE.MathUtils.smoothstep(ph.c4, 0.75, 1) * (1 - (this.bridgeK ?? 0)), ph.c3 * (1 - THREE.MathUtils.smoothstep(ph.c4, 0.05, 0.3)), side === 'right' ? ph.p3 : 0);
-      const busy = this.handTargets[side] || this.armPreset[side] ? 1 : this.gestureYield(side);
+      // На четвереньках (наклон вперёд с колен, ещё не легла) вес на руках: жесты опору не перебивают.
+      const four = ph.b3 * (1 - ph.b4);
+      if (side === 'left') this.onHands = four;
+      const busy = this.handTargets[side] || this.armPreset[side] ? 1 : this.gestureYield(side) * (1 - four);
       const low = THREE.MathUtils.smoothstep(len * 1.12 - (shoulder.y - palmY), 0, len * 0.3);
       // Руки лежат на коленях (наклон стоя) — опора о пол не перехватывает.
-      const want = low * (1 - own) * (1 - busy) * (1 - 0.9 * (this.restW ?? 0));
+      const want = Math.max(low, four) * (1 - own) * (1 - busy) * (1 - 0.9 * (this.restW ?? 0));
+      // Плечи выше, чем достаёт рука, — запоминаем, сколько не хватает: корпус в следующем кадре опустится на руки.
+      if (dt > 0) { const gap = ((shoulder.y - palmY) - len * 0.8) / S; this.handGap = side === 'left' ? gap : Math.max(this.handGap ?? gap, gap); if (side === 'right') this.handGapS = four > 0.5 ? this.handGap : 0; }
       if (dt > 0) this.supW[side] += (want - this.supW[side]) * (1 - Math.exp(-dt * 3.5));
       const w = this.supW[side];
       const below = handPos.y < palmY * 0.9;
@@ -1777,13 +1787,18 @@ export class Character {
         .addScaledVector(fwd, 0.1 * S)
         .addScaledVector(side3, sx * 0.04 * S);
       ideal.y = palmY;
-      // Не дальше, чем дотянется рука.
-      const reach = ideal.clone().sub(shoulder);
-      if (reach.length() > len * 0.95) ideal.copy(shoulder).addScaledVector(reach.normalize(), len * 0.95);
+      // Не дальше, чем дотянется рука, — но ладонь остаётся НА полу: сокращаем вынос по полу, а не поднимаем кисть
+      // (раньше при высоких плечах точка уходила за вылет руки, и ладонь зависала в воздухе над полом).
+      {
+        const hgt = shoulder.y - palmY, maxH = Math.sqrt(Math.max(0, (len * 0.83) ** 2 - hgt * hgt)); // len — с кистью; до запястья короче
+        const off = new THREE.Vector3(ideal.x - shoulder.x, 0, ideal.z - shoulder.z), ol = off.length();
+        if (ol > maxH) { ideal.x = shoulder.x + off.x / Math.max(ol, 1e-6) * maxH; ideal.z = shoulder.z + off.z / Math.max(ol, 1e-6) * maxH; }
+      }
       if (!this.plant[side]) this.plant[side] = handPos.y < palmY * 2 ? handPos.clone().setY(palmY) : ideal.clone();
       const pl = this.plant[side];
       // Ладонь стоит; ушла далеко — плавно переставляет.
-      if (dt > 0 && pl.distanceTo(ideal) > 0.1 * S) pl.lerp(ideal, 1 - Math.exp(-dt * 3));
+      // Ладонь стоит на месте, пока рука до неё достаёт; ушла далеко или не дотягивается — переставляет.
+      if (dt > 0 && (pl.distanceTo(ideal) > 0.14 * S || pl.distanceTo(shoulder) > len * 0.85)) pl.lerp(ideal, 1 - Math.exp(-dt * (pl.distanceTo(shoulder) > len * 0.85 ? 7 : 3)));
       const target = handPos.clone().lerp(pl, w);
       if (target.y < palmY) target.y = palmY;
       const q1 = upper.quaternion.clone();
