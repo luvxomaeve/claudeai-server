@@ -258,6 +258,14 @@ function hipKeepFill(e) {
     v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
     const wn = HIP_WELD.get(hipKey(cloth, v));
     if (wn && wn.lengthSq() > 1e-10) n.copy(wn).normalize(); else n.fromBufferAttribute(nor, i).transformDirection(mesh.bindMatrix);
+    // Ниже сустава (низ ягодицы и верх бедра сзади) сдвиг идёт не по нормали, а «от сустава наружу» в плоскости сбоку:
+    // по нормалям две стороны складки толкались друг в друга (рваное пятно), а так обе уходят наружу вместе, и при
+    // глубоком сгибе профиль сбоку остаётся дугой, как стоя, а не срезается углом.
+    if (!cloth) {
+      const J = v.distanceToSquared(L) <= v.distanceToSquared(e.R) ? L : e.R;
+      const r = new THREE.Vector3(0, v.y - J.y, v.z - J.z);
+      if (r.lengthSq() > 1e-10) { r.normalize(); n.lerp(r, THREE.MathUtils.smoothstep(J.y - v.y, -0.01 * k0, 0.06 * k0)).normalize(); }
+    }
     { const dg = n.clone().transformDirection(bindInv); dirs[i * 3] = dg.x; dirs[i * 3 + 1] = dg.y; dirs[i * 3 + 2] = dg.z; }
     // Тело: только то, что смотрит назад. Ткань: вся задняя половина и шире — она висит дальше от тела
     // и должна отойти не меньше, чем оно, иначе тело проглянет сквозь юбку.
@@ -270,7 +278,7 @@ function hipKeepFill(e) {
     // И у средней линии: там левая и правая стороны смотрят друг на друга, и выталкивание заставляло их пересекаться.
     const mid = THREE.MathUtils.smoothstep(Math.abs(v.x - (L.x + e.R.x) / 2), 0.008 * k0, 0.05 * k0);
     const sg = cloth ? sigma * 1.3 : sigma;
-    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : fold * mid) : 0; }
+    for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : (0.55 + 0.45 * fold) * mid) : 0; }
   }
   g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
   g.setAttribute('hipDir', new THREE.BufferAttribute(dirs, 3));
