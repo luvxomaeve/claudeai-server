@@ -2581,8 +2581,9 @@ grabAsk.innerHTML = '<span>Так?</span><button data-a="yes">✓ Да</button><
 const grabLoops = [];
 const grabStop = document.createElement('button');
 grabStop.id = 'grab-stop';
-grabStop.textContent = '🔁 ✕ стоп точки';
-grabStop.style.cssText = 'position:fixed;left:50%;top:86%;transform:translate(-50%,-50%);z-index:31;display:none;border:0;border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;font-weight:800;color:#fff;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);box-shadow:0 6px 24px rgba(0,0,0,.35);cursor:pointer';
+grabStop.textContent = '✕ точки';
+// Выглядит и стоит так же, как «✕ отмена» у обычного повтора: маленькая стеклянная плашка рядом с её головой.
+grabStop.style.cssText = 'position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:30;display:none;white-space:nowrap;border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;color:#fff;opacity:.8;background:var(--glass-bg, rgba(40,30,80,.6));box-shadow:var(--glass-edge, 0 0 0 1px rgba(255,255,255,.25));border:0;backdrop-filter:blur(10px);cursor:pointer';
 document.body.appendChild(grabStop);
 for (const ev of ['pointerdown', 'touchstart']) grabStop.addEventListener(ev, (e) => e.stopPropagation());
 function grabLoopsClear() { grabLoops.length = 0; grabStop.style.display = 'none'; }
@@ -2834,11 +2835,11 @@ function poseDragMove(e) {
       o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
       o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
     }
-    o.spineZ = clamp(o.spineZ - dx * 0.005 * facing, -0.72, 0.72); // вбок корпусом — шире
+    o.spineZ = clamp(o.spineZ - dx * 0.006 * facing, -0.95, 0.95); // вбок корпусом — шире
   } else if (poseDrag.kind === 'twist') {
     // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
     const o = character.bodyOffset;
-    o.spineY = clamp(o.spineY + dx * 0.006 * facing, -1.05, 1.05); // поворот корпуса — шире
+    o.spineY = clamp(o.spineY + dx * 0.007 * facing, -1.3, 1.3); // поворот корпуса — шире
     if (!repPlaying()) o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
   } else {
     // Таз: тянешь вниз — опускается (присед → на колени → сидит → лежит), вверх — встаёт;
@@ -2854,9 +2855,9 @@ function poseDragMove(e) {
     }
     character.hipsSetSit = character.sitS;
     // Размах шире (сборка 187): бёдра уходят вбок дальше, таз наклоняется сильнее — движение читается красивее.
-    const lim = floor ? 0.2 : 0.125;
-    o.hipsX = clamp(o.hipsX + dx * 0.0008 * facing * S, -lim * S, lim * S);
-    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.2, 0.2);
+    const lim = floor ? 0.24 : 0.17;
+    o.hipsX = clamp(o.hipsX + dx * 0.001 * facing * S, -lim * S, lim * S);
+    o.hipsZ = clamp(o.hipsX / S * 1.6, -0.27, 0.27);
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
     // В 📌 при играющем повторе присед ведёт повтор — точкой бёдер только вбок.
     {
@@ -4754,7 +4755,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 187;
+const WAIFU_BUILD = 188;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5040,6 +5041,16 @@ let autoLoopT = performance.now();
     const y = THREE.MathUtils.clamp((-v.y * 0.5 + 0.5) * window.innerHeight, 90, window.innerHeight - 60);
     autoRepBtn.style.left = `${x.toFixed(1)}px`;
     autoRepBtn.style.top = `${y.toFixed(1)}px`;
+  }
+  // «✕ точки» — там же, у головы; если видна и «✕ отмена», встаёт под ней.
+  if (grabStop.style.display !== 'none' && character.bones?.head) {
+    const v = character.bones.head.getWorldPosition(new THREE.Vector3());
+    v.y += 0.2 * (character.scale ?? 1);
+    v.project(camera);
+    const x = THREE.MathUtils.clamp((v.x * 0.5 + 0.5) * window.innerWidth + 78, 70, window.innerWidth - 70);
+    const y = THREE.MathUtils.clamp((-v.y * 0.5 + 0.5) * window.innerHeight + (autoRepBtn.hidden ? 0 : 38), 90, window.innerHeight - 60);
+    grabStop.style.left = `${x.toFixed(1)}px`;
+    grabStop.style.top = `${y.toFixed(1)}px`;
   }
 })();
 function renderAutoRep() {
