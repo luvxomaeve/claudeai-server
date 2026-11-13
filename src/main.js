@@ -2747,6 +2747,10 @@ function grabDone(keep) {
 }
 grabAsk.addEventListener('click', (e) => { const a = e.target?.dataset?.a; if (a) grabDone(a === 'rep' ? 'rep' : a === 'yes'); });
 for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:800;color:#fff;background:rgba(255,255,255,.18);cursor:pointer';
+const grabGlow = document.createElement('div');
+grabGlow.id = 'grab-glow';
+document.body.appendChild(grabGlow);
+const grabGlowV = new THREE.Vector3();
 var lastGrabAt = -1e9, lastGrabKey = null; // когда и за какую точку последний раз вели её (долгий тап)
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
@@ -4915,7 +4919,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 228;
+const WAIFU_BUILD = 229;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5236,6 +5240,24 @@ let autoLoopT = performance.now();
     autoRepBtn.style.top = `${y.toFixed(1)}px`;
   }
   // «✕ точки» — там же, у головы; если видна и «✕ отмена», встаёт под ней.
+  // Свечение на той части тела, которую ведёшь за точку: мягкое пятно света без контура, идёт вместе с ней.
+  {
+    const key = poseDrag?.grab ? lastGrabKey : null;
+    let shown = false;
+    if (key) {
+      const w = handleWorld(key);
+      if (w) {
+        grabGlowV.copy(w).project(camera);
+        if (grabGlowV.z < 1) {
+          const d = camera.position.distanceTo(w), sz = THREE.MathUtils.clamp(330 / Math.max(0.4, d), 120, 280);
+          grabGlow.style.width = grabGlow.style.height = `${sz.toFixed(0)}px`;
+          grabGlow.style.transform = `translate(${((grabGlowV.x * 0.5 + 0.5) * window.innerWidth - sz / 2).toFixed(1)}px, ${((-grabGlowV.y * 0.5 + 0.5) * window.innerHeight - sz / 2).toFixed(1)}px)`;
+          shown = true;
+        }
+      }
+    }
+    grabGlow.style.opacity = shown ? '1' : '0';
+  }
   if (grabStop.style.display !== 'none' && character.bones?.head) {
     const v = character.bones.head.getWorldPosition(new THREE.Vector3());
     v.y += 0.2 * (character.scale ?? 1);
