@@ -1468,6 +1468,8 @@ export class Character {
       this.kneeStill = kl.left && kl.left.distanceTo(nl) < 0.2 * this.scale * Math.max(dt, 0.004) ? (this.kneeStill ?? 0) + dt : 0; // секунд подряд колено почти не двигалось
       kl.left = nl;
       kl.right = this.bones.rightLowerLeg.getWorldPosition(new THREE.Vector3());
+      const fl = this.footLast ??= {};
+      if (this.bones.leftFoot && this.bones.rightFoot) { fl.left = this.bones.leftFoot.getWorldPosition(new THREE.Vector3()); fl.right = this.bones.rightFoot.getWorldPosition(new THREE.Vector3()); }
     }
     // Корректирующий объём бёдер: чем сильнее согнута нога в тазу, тем выпуклее сзади.
     {
@@ -2318,6 +2320,8 @@ export class Character {
       if (on && !has && kp.w <= 0.001 && this.kneeLast?.left && this.kneeLast?.right && Math.abs(this.sitV ?? 0) < 0.03 && (this.kneeStill ?? 0) > 0.12) {
         kp.left = this.kneeLast.left.clone();
         kp.right = this.kneeLast.right.clone();
+        // Ступни тоже запоминаем: голень лежит от колена к своей ступне и не разворачивается при движении таза.
+        kp.foot = { left: this.footLast?.left?.clone() ?? null, right: this.footLast?.right?.clone() ?? null };
         kp.sit = this.sitS;
         kp.yaw = yawNow; kp.bad = 0;
       }
@@ -2325,7 +2329,7 @@ export class Character {
         this.kneePinTick = this.time;
         kp.w = THREE.MathUtils.clamp(kp.w + (on && kp.left ? dtp / 0.3 : -dtp / 0.25), 0, 1);
       }
-      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.sit = -1; kp.bad = 0; }
+      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.foot = null; kp.sit = -1; kp.bad = 0; }
       if (kp.w > 0 && kp.left && kp.right) {
         const w = kp.w * kp.w * (3 - 2 * kp.w) * wLie;
         const corr = new THREE.Vector3();
@@ -2341,28 +2345,36 @@ export class Character {
           }
           this.kneeFwdDone = true;
         }
-        for (const side of ['left', 'right']) {
-          const up = b[`${side}UpperLeg`], P = kp[side];
-          const l1 = this.limbRest.get(up.uuid)?.l1;
-          if (!l1) continue;
-          const hj = up.getWorldPosition(new THREE.Vector3());
-          const dy = hj.y - P.y;
-          const h = new THREE.Vector3(P.x - hj.x, 0, P.z - hj.z);
-          const d = h.length();
-          // Бедро стоит круто (таз над коленями или перекатился вперёд за них) — длину бедра держим высотой таза:
-          // он идёт по дуге вокруг колена. Бедро пологое (сидит на пятках) — держим сдвигом таза по полу.
-          const v = 1 - THREE.MathUtils.smoothstep(d, l1 * 0.55, l1 * 0.9); // плавно между двумя способами — без рывка
-          if (v > 0) vert += ((P.y + Math.sqrt(Math.max(0, l1 * l1 - d * d))) - hj.y) * v * 0.5;
-          if (v >= 1) continue;
-          if (dy > l1 * 0.995) down = Math.max(down, (dy - l1 * 0.995) * (1 - v));
-          const r = Math.sqrt(Math.max(0, l1 * l1 - Math.min(dy, l1 * 0.995) ** 2));
-          if (d < 1e-5) continue;
-          h.multiplyScalar(1 / d);
-          let c = d - r;
-          // Слишком далеко — колено переступает вслед за тазом (плавно), остальное добирает таз.
-          const lim = 0.14 * S;
-          if (Math.abs(c) > lim) { const ex = (Math.abs(c) - lim) * Math.sign(c); P.addScaledVector(h, -ex * Math.min(1, dtp * 9)); c -= ex * Math.min(1, dtp * 9); }
-          corr.addScaledVector(h, c * 0.5 * (1 - v));
+        // Таз ищет положение, из которого ОБА бедра достают до своих колен (у каждого — сфера радиусом в длину бедра
+        // вокруг колена). Решаем в трёх измерениях несколькими проходами: при сдвиге вбок таз сам чуть опускается,
+        // при подъёме — идёт вперёд над коленями. Раньше поправка была только по полу или только по высоте, и для
+        // левого и правого колена они гасили друг друга — колени ездили за тазом.
+        {
+          const legs = [];
+          for (const side of ['left', 'right']) {
+            const up = b[`${side}UpperLeg`], P = kp[side], l1 = this.limbRest.get(up.uuid)?.l1;
+            if (l1) legs.push({ side, P, l1, hj: up.getWorldPosition(new THREE.Vector3()) });
+          }
+          const D = new THREE.Vector3(), t = new THREE.Vector3();
+          for (let it = 0; it < 5; it++) {
+            const sum = new THREE.Vector3();
+            for (const g of legs) {
+              t.copy(g.P).sub(g.hj).sub(D);
+              const dist = t.length();
+              if (dist > 1e-5) sum.addScaledVector(t, (dist - g.l1) / dist / legs.length);
+            }
+            D.add(sum);
+          }
+          // Что не сошлось (колени слишком далеко друг от друга для такого положения таза) — колено неторопливо
+          // переступает на недостающее расстояние вместе со своей ступнёй.
+          for (const g of legs) {
+            t.copy(g.P).sub(g.hj).sub(D);
+            const dist = t.length(), e = dist - g.l1;
+            if (Math.abs(e) > 0.035 * S && dist > 1e-5) { const st = -(Math.abs(e) - 0.035 * S) * Math.sign(e) * Math.min(1, dtp * 5); t.setY(0); if (t.lengthSq() > 1e-10) { t.normalize(); g.P.addScaledVector(t, st); kp.foot?.[g.side]?.addScaledVector(t, st); } }
+          }
+          // Колени стоят на полу: таз не уходит под них и не «всплывает» выше длины бедра.
+          corr.set(D.x, 0, D.z);
+          vert = D.y;
         }
         // Телу слишком долго приходится сильно тянуться к точкам колен — значит, они устарели: отпускаем и берём заново.
         if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; const o = this.bodyOffset, moved = Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.03 * S || Math.abs(o.hipsRotX) > 0.1; /* таз сдвинут рукой — тянуться к коленям нормально, это не «устаревшие точки» */ kp.bad = Math.max(0, (kp.bad ?? 0) + (!moved && corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
@@ -2565,7 +2577,8 @@ export class Character {
           if (h.lengthSq() > 1e-10) {
             h.normalize();
             const K = new THREE.Vector3(hj.x + h.x * r, P.y, hj.z + h.z * r);
-            const f = new THREE.Vector3(target.x - K.x, 0, target.z - K.z);
+            const fp = kp.foot?.[side];
+            const f = fp ? new THREE.Vector3(fp.x - K.x, 0, fp.z - K.z) : new THREE.Vector3(target.x - K.x, 0, target.z - K.z);
             if (f.lengthSq() > 1e-10) {
               f.normalize();
               const rr = Math.sqrt(Math.max(1e-6, lr.l2 * lr.l2 - (K.y - target.y) ** 2)) * 0.99;
@@ -2813,7 +2826,8 @@ export class Character {
       const hip = this.bones[`${side}UpperLeg`];
       if (hip) {
         const { swing, twistAngle } = Character.swingTwist(hip.quaternion, Y);
-        const tw = THREE.MathUtils.clamp(twistAngle, -40 * deg, 40 * deg);
+        const twLim = 40 + 30 * (this.kneelK ?? 0); // на коленях голень лежит на полу и держится за ступню — бедру нужно скручиваться свободнее
+        const tw = THREE.MathUtils.clamp(twistAngle, -twLim * deg, twLim * deg);
         const dir = new THREE.Vector3(0, -1, 0).applyQuaternion(swing);
         // В «человеческих» осях: fwd — вперёд, lat — наружу, down — вниз.
         const fwd = dir.z * f;
@@ -2823,12 +2837,15 @@ export class Character {
         let roll = Math.asin(THREE.MathUtils.clamp(lat, -1, 1));
         // В глубоком приседе бедро поднимается к груди сильнее обычного предела — иначе ногу уводит внутрь и ступни
         // съезжаются. Вне приседа предел прежний.
-        const sqK = this.squatK ?? 0, pitchMax = 114 + 18 * sqK;
+        const sqK = Math.max(this.squatK ?? 0, this.kneelK ?? 0), pitchMax = 114 + 18 * sqK; // и на коленях (садится на пятки) — тоже
         pitch = THREE.MathUtils.clamp(pitch, -25 * deg, pitchMax * deg);
         // Сильный сгиб + нога далеко в сторону одновременно — так сустав у человека не работает, а сетка модели
         // в этом месте сминается складками. Чем сильнее согнута нога, тем меньше её можно отвести вбок.
         const rollMax = 45 - 14 * THREE.MathUtils.smoothstep(pitch, 98 * deg, 114 * deg) * (1 - sqK);
-        roll = THREE.MathUtils.clamp(roll, -20 * deg, rollMax * deg);
+        // На коленях и четвереньках колено стоит на полу, а таз качается над ним — бедру нужно уходить внутрь дальше,
+        // чем стоя (иначе предел срывал колено с места, и ноги перебирали по полу).
+        const knK = this.kneelK ?? 0;
+        roll = THREE.MathUtils.clamp(roll, -(20 + 18 * knK) * deg, (rollMax + 10 * knK) * deg);
         const r = Math.cos(roll);
         const nd = new THREE.Vector3(Math.sin(roll) / (f * out), -r * Math.cos(pitch), (r * Math.sin(pitch)) / f);
         const newSwing = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), nd.normalize());
@@ -2975,7 +2992,7 @@ export class Character {
     this.hipsSetSit = null;
     this.handAnchor = { left: null, right: null };
     // Позу сбросили или вернули как было — колени больше не держатся за старые точки на полу.
-    if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; }
+    if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.foot = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; }
   }
 
   exportTouchPose() {

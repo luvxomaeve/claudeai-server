@@ -2974,7 +2974,10 @@ function poseDragMove(e) {
     character.hipsSetSit = character.sitS;
     // Размах шире (сборка 187): бёдра уходят вбок дальше, таз наклоняется сильнее — движение читается красивее.
     // За таз долгим тапом стоя/в приседе: чем глубже присед, тем шире таз ходит вбок (в приседе ему есть куда).
-    const lim = floor ? 0.3 : poseDrag.grab ? 0.2 + 0.12 * THREE.MathUtils.smoothstep(character.sitS, 0.05, 0.4) + 0.08 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.4, 1.2) : 0.17; // в наклоне таз тоже ходит шире
+    // На коленях и четвереньках таз вбок — в пределах, которые ноги держат без переступания (иначе колени и голени
+    // перебирают на каждом качании); лёжа и сидя на полу — шире.
+    const knL = (() => { const ph = character.sitPhases(); return ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); })();
+    const lim = floor ? 0.3 - 0.11 * knL : poseDrag.grab ? 0.2 + 0.12 * THREE.MathUtils.smoothstep(character.sitS, 0.05, 0.4) + 0.08 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.4, 1.2) : 0.17; // в наклоне таз тоже ходит шире
     // Взял за таз долгим тапом: жест идёт по одной оси — вбок ИЛИ вверх-вниз (иначе, двигая таз вбок, случайно
     // поднимал или усаживал её). На полу вверх-вниз — приподнять/опустить бёдра, а не встать.
     if (poseDrag.grab) {
@@ -4911,7 +4914,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 214;
+const WAIFU_BUILD = 215;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
