@@ -242,9 +242,14 @@ function installHipKeep(vrm, mesh, cloth) {
   const centers = [L, R].map((c) => c.clone().addScaledVector(back, 0.07 * k0).add(new THREE.Vector3(0, -0.02 * k0, 0)));
   const sigma = 0.095 * k0, gain = cloth ? 1.15 : 1;
   const arr = new Float32Array(pos.count * 2), v = new THREE.Vector3(), n = new THREE.Vector3();
+  // Направление сдвига и его сила считаются только от ПОЛОЖЕНИЯ вершины (от сустава наружу), а не от её нормали:
+  // на швах сетки в одной точке стоят две вершины с разными нормалями, и сдвиг по нормали раскрывал шов —
+  // при сильном сгибе появлялась трещина и просвет.
+  const dirs = new Float32Array(pos.count * 3), bindInv = mesh.bindMatrix.clone().invert();
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i).applyMatrix4(mesh.bindMatrix);
-    n.fromBufferAttribute(nor, i);
+    { const J = v.distanceToSquared(L) <= v.distanceToSquared(R) ? L : R; n.copy(v).sub(J); if (n.lengthSq() < 1e-10) n.copy(back); n.normalize(); }
+    { const dg = n.clone().transformDirection(bindInv); dirs[i * 3] = dg.x; dirs[i * 3 + 1] = dg.y; dirs[i * 3 + 2] = dg.z; }
     // Тело: только то, что смотрит назад. Ткань: вся задняя половина и шире — она висит дальше от тела
     // и должна отойти не меньше, чем оно, иначе тело проглянет сквозь юбку.
     const facing = cloth ? THREE.MathUtils.smoothstep((v.z - L.z) * back.z, -0.04 * k0, 0.03 * k0) : Math.min(1, Math.max(0, n.dot(back) * 0.85 + 0.3));
@@ -254,6 +259,7 @@ function installHipKeep(vrm, mesh, cloth) {
     for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist : 0; }
   }
   g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
+  g.setAttribute('hipDir', new THREE.BufferAttribute(dirs, 3));
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
     patchBulge(m);
   }
@@ -2036,14 +2042,14 @@ function patchBulge(mat) {
   mat.onBeforeCompile = (sh, r) => {
     prev?.call(mat, sh, r);
     sh.uniforms.hipFlex = HIP_FLEX;
-    sh.vertexShader = 'attribute vec2 hipBulge;\nuniform vec2 hipFlex;\n' + sh.vertexShader;
+    sh.vertexShader = 'attribute vec2 hipBulge;\nattribute vec3 hipDir;\nuniform vec2 hipFlex;\n' + sh.vertexShader;
     if (sh.vertexShader.includes('#include <begin_vertex>')) {
       sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>',
-        '#include <begin_vertex>\n  transformed += normalize(objectNormal) * dot(hipBulge, hipFlex);');
+        '#include <begin_vertex>\n  transformed += hipDir * dot(hipBulge, hipFlex);');
     }
   };
   const prevKey = mat.customProgramCacheKey?.bind(mat);
-  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge`;
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2`;
   mat.needsUpdate = true;
 }
 export function shapeHips(vrm, amount = 0.036) {

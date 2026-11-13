@@ -61,32 +61,88 @@ const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMa
 floor.rotation.x = -Math.PI / 2;
 floor.receiveShadow = true;
 scene.add(floor);
-// Едва заметный полупрозрачный пол: мягкий светлый круг с тонкими кольцами — видно, что она стоит, сидит и
-// опирается на него руками и коленями. К краям растворяется.
+// Стеклянный пол: прозрачная круглая плита с ярким тонким краем и белыми бликами — видно саму поверхность,
+// на которую она опирается. Цвета почти нет, только свет на стекле.
 const floorDiscTex = (() => {
   const c = document.createElement('canvas');
-  c.width = c.height = 512;
+  c.width = c.height = 1024;
   const g = c.getContext('2d');
-  const grd = g.createRadialGradient(256, 256, 0, 256, 256, 256);
-  grd.addColorStop(0, 'rgba(190,170,255,0.16)');
-  grd.addColorStop(0.55, 'rgba(170,150,255,0.09)');
-  grd.addColorStop(1, 'rgba(170,150,255,0)');
+  const R = 500;
+  // Само стекло: едва заметная светлая дымка, плотнее к краю (как торец стекла).
+  const grd = g.createRadialGradient(512, 512, 0, 512, 512, R);
+  grd.addColorStop(0, 'rgba(255,255,255,0.035)');
+  grd.addColorStop(0.7, 'rgba(255,255,255,0.05)');
+  grd.addColorStop(0.94, 'rgba(255,255,255,0.10)');
+  grd.addColorStop(1, 'rgba(255,255,255,0.16)');
   g.fillStyle = grd;
-  g.fillRect(0, 0, 512, 512);
-  for (let i = 1; i <= 5; i++) {
-    g.strokeStyle = `rgba(225,210,255,${(0.13 * (1 - i / 6)).toFixed(3)})`;
-    g.lineWidth = 1.5;
-    g.beginPath(); g.arc(256, 256, i * 46, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(512, 512, R, 0, Math.PI * 2); g.fill();
+  // Блики: широкие мягкие полосы света поперёк плиты.
+  g.save();
+  g.beginPath(); g.arc(512, 512, R, 0, Math.PI * 2); g.clip();
+  g.translate(512, 512); g.rotate(-0.5);
+  for (const [x, w, a] of [[-250, 120, 0.05], [-60, 40, 0.04], [190, 170, 0.045]]) {
+    const lg = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+    lg.addColorStop(0, 'rgba(255,255,255,0)'); lg.addColorStop(0.5, `rgba(255,255,255,${a})`); lg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = lg; g.fillRect(x - w / 2, -600, w, 1200);
   }
+  g.restore();
+  // Край: яркая тонкая кромка и вторая, тусклая, чуть внутри (толщина стекла).
+  g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 3;
+  g.beginPath(); g.arc(512, 512, R - 2, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = 'rgba(255,255,255,0.16)'; g.lineWidth = 2;
+  g.beginPath(); g.arc(512, 512, R - 16, 0, Math.PI * 2); g.stroke();
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
   return t;
 })();
-const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(5, 5), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false }));
+const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 3.6), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false }));
 floorDisc.rotation.x = -Math.PI / 2;
 floorDisc.position.y = 0.001;
 floorDisc.renderOrder = -2;
 scene.add(floorDisc);
+// Тени касания: под каждой точкой опоры (ступни, колени, ладони) своё мягкое пятно. Чем ближе точка к полу,
+// тем пятно темнее и собраннее — видно, что она стоит на полу и давит на него весом.
+const touchTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(20,6,30,0.85)');
+  grd.addColorStop(0.45, 'rgba(20,6,30,0.4)');
+  grd.addColorStop(1, 'rgba(20,6,30,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const TOUCH_BONES = [['leftFoot', 0.2, 0.1], ['rightFoot', 0.2, 0.1], ['leftLowerLeg', 0.2, 0.09], ['rightLowerLeg', 0.2, 0.09], ['leftHand', 0.17, 0.07], ['rightHand', 0.17, 0.07], ['leftLowerArm', 0.16, 0.07], ['rightLowerArm', 0.16, 0.07], ['head', 0.26, 0.14], ['chest', 0.34, 0.14]];
+const touchBlobs = TOUCH_BONES.map(() => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: touchTex, transparent: true, depthWrite: false, opacity: 0 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.004;
+  m.renderOrder = -1;
+  scene.add(m);
+  return m;
+});
+const touchV = new THREE.Vector3();
+function updateTouchBlobs() {
+  if (!character?.bones) return;
+  const S = character.scale ?? 1;
+  TOUCH_BONES.forEach(([name, size, rad], i) => {
+    const bone = character.bones[name], m = touchBlobs[i];
+    if (!bone) { m.visible = false; return; }
+    bone.getWorldPosition(touchV);
+    // Высота низа этой части тела над полом (кость — в середине, отнимаем её «толщину»).
+    const h = Math.max(0, touchV.y / S - rad);
+    const k = 1 - THREE.MathUtils.smoothstep(h, 0.0, 0.2);
+    m.visible = k > 0.01;
+    if (!m.visible) return;
+    m.position.x = touchV.x; m.position.z = touchV.z;
+    const sz = size * S * (1 + 1.3 * (1 - k)); // выше — пятно шире и бледнее
+    m.scale.set(sz, sz, 1);
+    m.material.opacity = 0.75 * k * k;
+  });
+}
 const blobTex = (() => {
   const c = document.createElement('canvas');
   c.width = c.height = 128;
@@ -114,6 +170,7 @@ function updateBlob() {
   blob.position.z = blobHips.z;
   blob.scale.set(0.55 + low * 0.9, 0.42 + low * 0.5, 1);
   blob.material.opacity = 0.7 + low * 0.3;
+  updateTouchBlobs();
 }
 
 function resize() {
@@ -4802,7 +4859,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 200;
+const WAIFU_BUILD = 201;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
