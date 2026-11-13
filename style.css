@@ -1783,3 +1783,8 @@ body:has(#auto-menu:not([hidden])) #bubble { opacity: 0; }
 .panel .panel-body > .panel-big:first-child { margin-top: 0; }
 .panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
 @media (prefers-reduced-motion: reduce) { .panel.closing { animation: none; } }
+
+/* ---------- Сборка 189: значки по долгому тапу — ровно по центру, одинаковые промежутки, не упираются в края ---------- */
+#auto-states:not(#_):not(#__):not(#___) { gap: 6px !important; padding: 0 10px; box-sizing: border-box; width: 100vw; max-width: 460px; justify-content: center; }
+#auto-states button:not(#_):not(#__) { flex: 0 1 44px; width: 44px; height: 44px; }
+#auto-states button.sep:not(#_) { margin-left: 12px; }
