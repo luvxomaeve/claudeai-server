@@ -2855,9 +2855,14 @@ function poseDragMove(e) {
     lastOnHerAt = autoDragAt;
     // Сколько раз сменил направление (туда-сюда) — по этому понимаем, что её «подвигали».
     const d = e.clientY - poseDrag.y;
-    if (Math.sign(d) && Math.sign(d) !== poseDrag.dir) { if (poseDrag.dir && poseDrag.run > 24) poseDrag.turns++; poseDrag.dir = Math.sign(d); poseDrag.run = 0; }
+    if (Math.sign(d) && Math.sign(d) !== poseDrag.dir) {
+      if (poseDrag.dir && poseDrag.run > 24) poseDrag.turns++;
+      // Развороты считаем и между отдельными росчерками (вниз — отпустил — вверх): это то же «туда-сюда».
+      if (autoRec) { if (autoRec.gdir && autoRec.gdir !== Math.sign(d) && (!poseDrag.dir || poseDrag.run > 24)) autoRec.gturns = (autoRec.gturns ?? 0) + 1; autoRec.gdir = Math.sign(d); }
+      poseDrag.dir = Math.sign(d); poseDrag.run = 0;
+    }
     poseDrag.run += Math.abs(d);
-    if (autoRec) autoRec.turns = Math.max(autoRec.turns ?? 0, poseDrag.turns);
+    if (autoRec) autoRec.turns = Math.max(autoRec.turns ?? 0, poseDrag.turns, autoRec.gturns ?? 0);
   }
   if (poseDrag.shift && reps.home.on) {
     // Повтор идёт и продолжает идти — палец только сдвигает его.
@@ -4958,7 +4963,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 254;
+const WAIFU_BUILD = 255;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
