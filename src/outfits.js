@@ -277,6 +277,7 @@ function installCrotchFix(vrm, mesh) {
 const HIP_WELD = new Map();
 const HIP_ENTRIES = [];
 const hipKey = (cloth, v) => `${cloth ? 'c' : 'b'}${Math.round(v.x * 5000)},${Math.round(v.y * 5000)},${Math.round(v.z * 5000)}`;
+const HIP_UNDER = globalThis.__ua ?? [1.25, -0.005, 0.03]; // сила, где полоса начинает сходить на нет и где кончается (в долях роста таза)
 function hipKeepFill(e) {
   const { mesh, cloth, L, k0, back, centers } = e;
   const g = mesh.geometry, pos = g.getAttribute('position'), nor = g.getAttribute('normal');
@@ -317,6 +318,14 @@ function hipKeepFill(e) {
     const midE = mid + (THREE.MathUtils.smoothstep(Math.abs(v.x - (L.x + e.R.x) / 2), 0.0, 0.018 * k0) - mid) * lowT;
     const sg = cloth ? sigma * 1.3 : sigma;
     for (let c = 0; c < 2; c++) { const d = v.distanceTo(centers[c]) / sg; arr[i * 2 + c] = d < 2.5 ? Math.exp(-d * d) * facing * gain * waist * (cloth ? 1 : (0.6 + 0.4 * fold)) : 0; } void midE;
+    // Низ дуги. Вершины у самого сустава и чуть ниже (низ ягодицы) при сгибе утягиваются бедром под таз сильнее всех:
+    // без поправки они оказываются в 4–5 см от сустава, тогда как вся остальная дуга держит 9–10 см, как стоя. Обычной
+    // поправки им хватало наполовину — отсюда плоский низ и «коробка» в приседе и на четвереньках. Поэтому в этой
+    // полосе возврат сильнее (по замеру — в 1.5–3 раза), чтобы дуга шла ровно до бедра. Стоя сгиба нет — не трогается.
+    if (!cloth) {
+      const dj = (L.y - v.y) / k0, m = 1 + HIP_UNDER[0] * THREE.MathUtils.smoothstep(dj, HIP_UNDER[1], HIP_UNDER[2]) * (1 - THREE.MathUtils.smoothstep(dj, 0.07, 0.13));
+      arr[i * 2] *= m; arr[i * 2 + 1] *= m;
+    }
   }
   g.setAttribute('hipBulge', new THREE.BufferAttribute(arr, 2));
   g.setAttribute('hipDir', new THREE.BufferAttribute(dirs, 3));
