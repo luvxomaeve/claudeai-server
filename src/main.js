@@ -2631,10 +2631,10 @@ const HANDLE_HIT = {
   hips: { zone: 'body', bone: 'hips' }, footL: { zone: 'legs', bone: 'leftFoot' }, footR: { zone: 'legs', bone: 'rightFoot' },
   kneeL: { zone: 'knee', side: 'left' }, kneeR: { zone: 'knee', side: 'right' },
 };
-function nearestHandle(e, radius = 40, bias = null) {
+function nearestHandle(e, radius = 40, bias = null, force = false) {
   let best = null;
   // Только что крутили камеру — точки не хватаем (чтобы не зацепить случайно); радиус поменьше.
-  if (performance.now() - lastCamMove < 450) return null;
+  if (!force && performance.now() - lastCamMove < 450) return null; // force — взяли долгим зажимом: камера не помеха
   let bestD = radius;
   for (const k of HANDLE_KEYS) {
     const p = handleWorld(k);
@@ -2760,13 +2760,13 @@ let diagT = 0;
 function diag(t) { diagEl.textContent = t; diagEl.style.display = 'block'; clearTimeout(diagT); diagT = setTimeout(() => { diagEl.style.display = 'none'; }, 4000); }
 function grabPick(e, r) {
   const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
-  return nearestHandle(e, r, Object.keys(bias).length ? bias : null);
+  return nearestHandle(e, r, Object.keys(bias).length ? bias : null, true);
 }
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
   // Только что вёл точку — та же точка берётся охотнее (продолжаешь то же движение, а не хватаешь соседнюю руку).
-  let hit = grabPick(e0, 70) ?? zoneAt(e0, true);
+  let hit = grabPick(e0, 70) ?? zoneAt(e0, true) ?? grabPick(e0, 150); // она сдвинулась из-под пальца (идёт повтор) — берём ближайшую точку
   if (!hit) { grabWhy = 'мимо точек' + (performance.now() - lastCamMove < 450 ? ' (камера)' : ''); return false; }
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
   if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
@@ -2907,6 +2907,7 @@ function poseDragMove(e) {
     // нечем): повтор точки — только по «🔁 Повторять» в вопросе «Так?».
     if (pointMode === 'rec' && !autoMode) ptsNoteMove(); // 🔁 движение точек — отдельный слой повтора
     else pinLimb(poseDrag.kind, poseDrag.side); // 📌 повтор идёт дальше, точка — где поставил
+    character.slideHold = 3; // ведёшь руку/ногу — она не перебивает своими движениями (не болтает ножками)
     toNdc(e);
     raycaster.setFromCamera(pointer, camera);
     if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
@@ -2920,6 +2921,23 @@ function poseDragMove(e) {
           : character.bones[`${poseDrag.side}LowerLeg`]?.getWorldPosition(new THREE.Vector3());
       }
       if (poseDrag.start0) dragPoint.sub(poseDrag.p0).add(poseDrag.start0);
+      // Лёжа (на животе, на спине) ногу ведут вбок — прямая нога идёт по полу вокруг бедра (раздвигается), а не
+      // сгибается коленом вверх. Потянул заметно вверх от пола — тогда свободно (согнуть, поднять голень).
+      if ((poseDrag.kind === 'knee' || poseDrag.kind === 'foot') && character.sitS > 1.1) {
+        const ph = character.sitPhases(), sd = poseDrag.side, S = character.scale;
+        const base = character.footBase?.[sd], hip = character.bones[`${sd}UpperLeg`]?.getWorldPosition(new THREE.Vector3());
+        const pt = poseDrag.kind === 'knee' ? poseDrag.kneeStart.clone().add(dragPoint.clone().sub(poseDrag.kneeStart)) : dragPoint;
+        const y0 = poseDrag.start0?.y ?? pt.y;
+        if (Math.max(ph.b4, ph.c4) > 0.6 && base && hip && pt.y < y0 + 0.12 * S) {
+          // Длина ноги — по костям (а не по тому, где ступня сейчас: она могла быть поднята, когда болтает ножками).
+          const kn = character.bones[`${sd}LowerLeg`].getWorldPosition(new THREE.Vector3()), ft = character.bones[`${sd}Foot`].getWorldPosition(new THREE.Vector3());
+          const L = (hip.distanceTo(kn) + kn.distanceTo(ft)) * 0.97, dx = pt.x - hip.x, dz = pt.z - hip.z, dl = Math.hypot(dx, dz);
+          if (L > 0.05 * S && dl > 0.05 * S) {
+            character.setFootTarget(sd, new THREE.Vector3(hip.x + dx / dl * L, 0.07 * S, hip.z + dz / dl * L));
+            return;
+          }
+        }
+      }
       if (poseDrag.kind === 'knee' && character.sitS > 0.3) {
         // На коленях и четвереньках колено стоит на полу: ведём саму точку опоры — ноги раздвигаются по полу.
         const kp = character.kneePin, sd = poseDrag.side;
@@ -4938,7 +4956,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 250;
+const WAIFU_BUILD = 251;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
