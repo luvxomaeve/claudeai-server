@@ -609,7 +609,7 @@ async function loadModel(source) {
     vrm.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
     scene.add(vrm.scene);
     character = new Character(vrm);
-    if (typeof lieMode !== 'undefined' && lieMode !== 'off') character.lieStyle = lieMode;
+    if (typeof lieMode !== 'undefined') character.lieStyle = lieMode === 'off' ? 'belly' : lieMode;
     window.__waifu = character; // для отладки из консоли
     window.__cam = camera;
     if (prev) {
@@ -2423,7 +2423,7 @@ try {
   if (v === 'side' || v === 'belly' || v === 'back' || v === 'off') lieMode = v;
   // Один раз переводим на новый стандарт тех, у кого был сохранён прежний (на бок); дальше выбор значком «кровать» сохраняется.
   // (В первой версии переключались только те, у кого было «на бок»; у кого стояло «на спину», стандарт не применился.)
-  if (!localStorage.getItem('waifu-lie-std3')) { localStorage.setItem('waifu-lie-std3', '1'); if (lieMode !== 'off') { lieMode = 'belly'; localStorage.setItem('waifu-lie', 'belly'); } }
+  if (!localStorage.getItem('waifu-lie-std4')) { localStorage.setItem('waifu-lie-std4', '1'); localStorage.setItem('waifu-lie-std3', '1'); lieMode = 'belly'; localStorage.setItem('waifu-lie', 'belly'); localStorage.removeItem('waifu-allow-lie'); }
   else if (localStorage.getItem('waifu-allow-lie') === '0') lieMode = 'off';
 } catch { /* ignore */ }
 if (!unlocked('lieStyles') && lieMode !== 'belly' && lieMode !== 'off') lieMode = 'belly'; // пока другие позы не открыты — на живот
@@ -2442,7 +2442,7 @@ function renderLieToggle() {
   $('lie-toggle').title = { side: 'Ложится на бок', belly: 'Ложится на живот, спать', back: 'Ложится на спину', off: 'Не ложится' }[lieMode];
   $('lie-toggle2').querySelector('svg').innerHTML = LIE_ICONS[lieMode];
   $('lie-toggle2').classList.toggle('off', !allowLie);
-  if (character && allowLie) character.setLieStyle(lieMode);
+  if (character) character.setLieStyle(allowLie ? lieMode : 'belly'); // «не ложится» — всё равно встаёт на четвереньки, а не садится боком
   sitSlider.classList.toggle('no-lie', !allowLie);
   // Точки-отметки: стоит, присед, на коленях, боком, лёжа — по текущему пределу.
   renderSitMarks();
@@ -4927,7 +4927,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 241;
+const WAIFU_BUILD = 242;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5072,7 +5072,7 @@ function showAutoStates(ms = 4500) {
     lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
-    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) { cancel(); diag('сдвиг до зажима'); }
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 14) { cancel(); diag('сдвиг до зажима'); }
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
