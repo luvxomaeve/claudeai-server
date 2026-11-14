@@ -1459,6 +1459,7 @@ export class Character {
     // Анатомические пределы: после всех поз, IK и реакций каждый сустав
     // возвращается в диапазон, возможный у живого человека.
     this.applyJointLimits();
+    this.footPlantFix();
     this.footFloorFix();
     this.handFloorFix();
     this.applyBlendFrom(dt);
@@ -1469,6 +1470,7 @@ export class Character {
       this.applySelfTouch();
       this.applyFloorSupport(0);
       this.applyJointLimits();
+      this.footPlantFix();
       this.footFloorFix();
       this.handFloorFix();
     }
@@ -2690,6 +2692,7 @@ export class Character {
       }
       if (!L) this.splitNeed = Math.max(0, this.splitNeedNext ?? 0);
       (this.footHeld ??= {})[side] = !!footOff;
+      (this.footIK ??= {})[side] = { t: target.clone(), stand: p2 < 0.5 };
       const QL = this.twoBoneIK(upper, lower, foot, target, pole);
       // Угол голени вперёд — для баланса корпуса в следующем кадре.
       {
@@ -2778,6 +2781,27 @@ export class Character {
 
   // Пределы суставов применяются после расчёта ног и могут повернуть бедро — тогда ступня уезжает под пол
   // (или повисает над ним). Здесь колено доворачивается ровно настолько, чтобы ступня вернулась на свою высоту.
+  // Стоя и в приседе ступня стоит на своём месте. Пределы суставов (после расчёта ног) при далёком сдвиге таза
+  // срывали дальнюю ногу: ступня уезжала под таз на 20–35 см, ноги почти скрещивались. Возвращаем ступню на её
+  // точку; колено остаётся там, куда его поставили пределы, поэтому нога не выворачивается.
+  footPlantFix() {
+    if (this.mixer || this.dancing) return;
+    const S = this.scale, v = new THREE.Vector3();
+    for (const side of ['left', 'right']) {
+      const rec = this.footIK?.[side];
+      if (!rec || !rec.stand) continue;
+      const upper = this.bones[`${side}UpperLeg`], lower = this.bones[`${side}LowerLeg`], foot = this.bones[`${side}Foot`];
+      if (!upper || !lower || !foot) continue;
+      foot.getWorldPosition(v);
+      if (v.distanceTo(rec.t) < 0.015 * S) continue;
+      const pole = lower.getWorldPosition(new THREE.Vector3());
+      const fq = foot.getWorldQuaternion(new THREE.Quaternion());
+      this.twoBoneIK(upper, lower, foot, rec.t, pole);
+      this.setWorldQuat(foot, fq);
+      foot.updateWorldMatrix(false, true);
+    }
+  }
+
   footFloorFix() {
     if (!(this.sitS > 0.12) || this.mixer) return;
     const X = new THREE.Vector3(1, 0, 0), v = new THREE.Vector3(), S = this.scale;
