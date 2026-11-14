@@ -974,9 +974,7 @@ export class Character {
       // (кожа сзади модели на сильном сгибе сминается в плоскость): таз наклоняется
       // меньше, остальное берёт спина — наклон такой же глубокий, но дугой.
       const sitK = this.sitPhases().p1;
-      // Присед стал глубоким (бедро уже у предела сгиба), поэтому в приседе таз почти не наклоняем: наклон целиком
-      // делает спина. Иначе бедро упиралось в предел, и одну ступню задирало на полметра («швыряло»).
-      const lim = 1.25 - 1.1 * sitK;
+      const lim = 1.25 - 0.5 * sitK;
       const gate = this.bendW * (1 - this.sitPhases().b3); // не трогаем «лечь на живот»
       if (pose.hipsRotX > lim && gate > 0) {
         const ex = pose.hipsRotX - lim;
@@ -2352,7 +2350,7 @@ export class Character {
         this.kneePinTick = this.time;
         kp.w = THREE.MathUtils.clamp(kp.w + (on && kp.left ? dtp / 0.3 : -dtp / 0.25), 0, 1);
       }
-      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.foot = null; kp.sit = -1; kp.bad = 0; kp.user = false; }
+      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.foot = null; kp.sit = -1; kp.bad = 0; }
       if (kp.w > 0 && kp.left && kp.right) {
         const w = kp.w * kp.w * (3 - 2 * kp.w) * wLie;
         const corr = new THREE.Vector3();
@@ -2400,7 +2398,7 @@ export class Character {
           vert = D.y;
         }
         // Телу слишком долго приходится сильно тянуться к точкам колен — значит, они устарели: отпускаем и берём заново.
-        if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; const o = this.bodyOffset, moved = Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.03 * S || Math.abs(o.hipsRotX) > 0.1; /* таз сдвинут рукой — тянуться к коленям нормально, это не «устаревшие точки» */ kp.bad = Math.max(0, (kp.bad ?? 0) + (!moved && !kp.user && corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
+        if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; const o = this.bodyOffset, moved = Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.03 * S || Math.abs(o.hipsRotX) > 0.1; /* таз сдвинут рукой — тянуться к коленям нормально, это не «устаревшие точки» */ kp.bad = Math.max(0, (kp.bad ?? 0) + (!moved && corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
         const wp = b.hips.getWorldPosition(new THREE.Vector3());
         wp.x += corr.x * w; wp.z += corr.z * w; wp.y -= down * w;
         wp.y += vert * w;
@@ -2552,9 +2550,6 @@ export class Character {
       const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
       (this.footBase ??= {})[side] = target.clone(); // где стопа стоит без сдвига
       const footOff = footRaw ? footRaw.clone().multiplyScalar(this.footOffK(side)) : null;
-      // Ногу подняли стоя, а потом она приседает (или таз ведут вниз) — поднятая ступня опускается и встаёт на пол:
-      // приседает на обеих ногах, а не с ногой в воздухе.
-      if (footOff && (this.footSetSit?.[side] ?? 0) < 0.3) footOff.y *= 1 - THREE.MathUtils.smoothstep(this.sitS, 0.06, 0.28);
       if (footOff) {
         target.add(footOff);
         // Ноги, выставленные на полу, не лежат «деревянно»: ступня чуть покачивается и переступает, колено дышит.
@@ -2699,12 +2694,11 @@ export class Character {
   // Пределы суставов применяются после расчёта ног и могут повернуть бедро — тогда ступня уезжает под пол
   // (или повисает над ним). Здесь колено доворачивается ровно настолько, чтобы ступня вернулась на свою высоту.
   footFloorFix() {
-    if (!(this.sitS > 0.12) || this.mixer) return;
+    if (!(this.sitS > 0.3) || this.mixer) return;
     const X = new THREE.Vector3(1, 0, 0), v = new THREE.Vector3(), S = this.scale;
     // На коленях и четвереньках голень лежит на полу: ступню возвращаем на её высоту в обе стороны — и если
     // провалилась, и если задралась в воздух (пределы сустава срывали колено, и ступня повисала у бедра).
-    // …и в приседе тоже: при глубоком приседе с наклоном и сдвигом таза предел бедра задирал одну ступню на полметра.
-    const kneel = (this.kneelK ?? 0) > 0.5 || (this.squatK ?? 0) > 0.2;
+    const kneel = (this.kneelK ?? 0) > 0.5;
     for (const side of ['left', 'right']) {
       const knee = this.bones[`${side}LowerLeg`], foot = this.bones[`${side}Foot`], want = this.footWantY?.[side];
       if (!knee || !foot || want == null) continue;
@@ -2991,29 +2985,6 @@ export class Character {
     const chest = this.chestNode();
     chest.updateWorldMatrix(true, false);
     this.handTargets[side] = chest.worldToLocal(worldPoint.clone());
-    // Руку поставили на пол (на полу, низко) — она опора: остаётся на этом месте пола, когда двигаешь таз и корпус,
-    // а не едет вместе с грудью. Выше пола — как раньше, рука держит позу относительно тела.
-    (this.handWorld ??= {})[side] = this.sitS > 0.3 && worldPoint.y < 0.14 * this.scale ? { p: worldPoint.clone().setY(Math.max(worldPoint.y, 0.05 * this.scale)), sit: this.sitS } : null;
-  }
-
-  // Колено на полу (на коленях, четвереньках) взяли и повели — переставляем саму точку опоры колена вместе со ступнёй:
-  // ноги раздвигаются и сдвигаются по полу, таз сам опускается между ними.
-  moveKnee(side, pin0, foot0, d) {
-    const kp = this.kneePin;
-    if (!kp?.[side] || !pin0) return false;
-    const S = this.scale, m = d.clone().setY(0);
-    if (m.length() > 0.38 * S) m.setLength(0.38 * S);
-    const P = pin0.clone().add(m);
-    // Колено не заходит за середину (ноги не перекрещиваются).
-    const other = kp[side === 'left' ? 'right' : 'left'], hx = this.bones.hips.getWorldPosition(new THREE.Vector3()).x;
-    const out = Math.sign(pin0.x - (other ? other.x : hx)) || (side === 'left' ? 1 : -1);
-    const mid = other ? other.x : hx;
-    if ((P.x - mid) * out < 0.07 * S) P.x = mid + out * 0.07 * S;
-    const shift = P.clone().sub(pin0);
-    kp[side].copy(P);
-    if (kp.foot?.[side] && foot0) kp.foot[side].copy(foot0).add(shift);
-    kp.bad = 0; kp.user = true; // расставлено рукой — «устаревшими» эти точки не считаем
-    return true;
   }
 
   footWorld(side) {
@@ -3060,9 +3031,8 @@ export class Character {
     this.footSetSit = {};
     this.hipsSetSit = null;
     this.handAnchor = { left: null, right: null };
-    this.handWorld = { left: null, right: null };
     // Позу сбросили или вернули как было — колени больше не держатся за старые точки на полу.
-    if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.foot = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; this.kneePin.user = false; }
+    if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.foot = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; }
   }
 
   exportTouchPose() {
@@ -3121,16 +3091,7 @@ export class Character {
       // прямо сейчас: рука едет вместе с ней и не отлипает при наклоне/посадке/повторе.
       const anc = this.handAnchor?.[side];
       const ap = anc && this.handTargets[side] ? this.anchorPoint(anc) : null;
-      // Рука-опора на полу: держится за своё место; посадка сильно изменилась (встала, легла) — отпускает.
-      let hw = this.handTargets[side] ? this.handWorld?.[side] : null;
-      if (hw && Math.abs(this.sitS - hw.sit) > 0.22) { this.handWorld[side] = null; hw = null; }
-      if (hw) {
-        // Не дотягивается — ладонь по полу подшагивает к плечу ровно настолько, чтобы достать.
-        const up0 = this.bones[`${side}UpperArm`], r0 = up0 ? this.limbRest.get(up0.uuid) : null;
-        if (r0) { const sh = up0.getWorldPosition(new THREE.Vector3()), reach = (r0.l1 + r0.l2) * 0.97, dv = hw.p.clone().sub(sh), over = dv.length() - reach; if (over > 0) { dv.y = 0; if (dv.lengthSq() > 1e-8) hw.p.addScaledVector(dv.normalize(), -over * Math.min(1, (this.lastDt ?? 0.016) * 6)); } }
-        this.handTargets[side] = chest.worldToLocal(hw.p.clone());
-      }
-      const local = ap ? chest.worldToLocal(ap) : hw ? this.handTargets[side] : this.handTargets[side] ? this.dragPhys.hand[side]?.x : null;
+      const local = ap ? chest.worldToLocal(ap) : this.handTargets[side] ? this.dragPhys.hand[side]?.x : null;
       if (!local) {
         this.handsOnKnees(side);
         continue;
