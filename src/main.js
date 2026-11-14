@@ -2757,7 +2757,11 @@ function grabStart(e0) {
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
   // «Прилипание» к прошлой точке убрано: после колена или руки следующим касанием нельзя было взять ничего другого.
   const bias = character.sitS > 0.3 ? { hips: 0.45 } : {};
-  let hit = nearestHandle(e0, 70, Object.keys(bias).length ? bias : null) ?? zoneAt(e0, true);
+  // Палец на ней — берём ближайшую точку, как бы далеко она ни была на экране. Раньше искали только в 70 пикселях:
+  // при приближенной камере точки расходятся дальше, и вместо точки бралась «зона» — без свечения и с другим
+  // движением (присед вместо ноги). Мимо неё — по-прежнему только рядом с точкой.
+  const bz = Object.keys(bias).length ? bias : null, zone = zoneAt(e0, true);
+  let hit = nearestHandle(e0, zone ? 1e5 : 70, bz) ?? zone;
   if (!hit) return false;
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
   if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
@@ -4930,7 +4934,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 237;
+const WAIFU_BUILD = 238;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5075,7 +5079,8 @@ function showAutoStates(ms = 4500) {
     lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
-    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel();
+    // Палец при удержании немного дрожит — допуск 18 px (было 10: долгий тап срывался, и точка не бралась).
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 18) cancel();
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
