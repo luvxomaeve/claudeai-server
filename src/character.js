@@ -2820,6 +2820,24 @@ export class Character {
       const cur = hand.getWorldQuaternion(new THREE.Quaternion());
       this.setWorldQuat(hand, cur.slerp(pq.q, pq.w));
       hand.updateWorldMatrix(false, true);
+      // Запястье не перегибается сильнее, чем у человека: если плечо ушло далеко за ладонь (или перед ней), основание
+      // ладони приподнимается — кисть доворачивается к предплечью ровно на излишек.
+      {
+        const H = this.vrm.humanoid, mid = H.getNormalizedBoneNode(`${side}MiddleProximal`), el = this.bones[`${side}LowerArm`];
+        if (mid && el) {
+          const hp = hand.getWorldPosition(new THREE.Vector3());
+          const d = mid.getWorldPosition(new THREE.Vector3()).sub(hp).normalize(), fa = hp.clone().sub(el.getWorldPosition(new THREE.Vector3())).normalize();
+          const ang = d.angleTo(fa), LIM = 2.0; // ≈ 115°: больше — пальцы уходили бы в пол
+          if (ang > LIM) {
+            const ax = d.clone().cross(fa);
+            if (ax.lengthSq() > 1e-8) {
+              const fixQ = new THREE.Quaternion().setFromAxisAngle(ax.normalize(), ang - LIM);
+              this.setWorldQuat(hand, fixQ.multiply(hand.getWorldQuaternion(new THREE.Quaternion())));
+              hand.updateWorldMatrix(false, true);
+            }
+          }
+        }
+      }
     }
   }
 
