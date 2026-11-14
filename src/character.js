@@ -1812,6 +1812,27 @@ export class Character {
     if (side3.lengthSq() < 1e-4) side3.set(1, 0, 0);
     side3.normalize();
     const palmY = 0.035 * S;
+    // На четвереньках плечи не выше, чем достают руки: таз подняли/подали вперёд, а наклон корпуса догоняет с
+    // запозданием — плечи взлетали, и ладони отрывались от пола. Здесь спина сразу, в этом же кадре, наклоняется
+    // вперёд ровно настолько, чтобы руки доставали до пола.
+    {
+      const four0 = ph.b3 * (1 - ph.b4), spine = this.bones.spine, uL = this.bones.leftUpperArm, uR = this.bones.rightUpperArm;
+      if (four0 > 0.05 && spine && uL && uR && !this.mixer && !this.handTargets.left && !this.handTargets.right) {
+        const sp = spine.getWorldPosition(new THREE.Vector3());
+        const mid = uL.getWorldPosition(new THREE.Vector3()).add(uR.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+        const lim = palmY + (Math.min(this.armLength('left'), this.armLength('right')) + 0.07 * S) * 0.78;
+        const v = mid.clone().sub(sp), f = v.dot(fwd), r = Math.hypot(f, v.y);
+        if (r > 1e-4 && mid.y > lim) {
+          const a = Math.atan2(v.y, f), a2 = Math.asin(THREE.MathUtils.clamp((lim - sp.y) / r, -1, 1));
+          const d = THREE.MathUtils.clamp(a - a2, 0, 0.9) * THREE.MathUtils.smoothstep(four0, 0.05, 0.6);
+          if (d > 1e-4) {
+            const q = new THREE.Quaternion().setFromAxisAngle(side3, d).multiply(spine.getWorldQuaternion(new THREE.Quaternion()));
+            this.setWorldQuat(spine, q);
+            spine.updateWorldMatrix(false, true);
+          }
+        }
+      }
+    }
     for (const side of ['left', 'right']) {
       const upper = this.bones[`${side}UpperArm`];
       const lower = this.bones[`${side}LowerArm`];
@@ -2684,6 +2705,19 @@ export class Character {
         }
       }
       hand.getWorldPosition(v);
+      // Стоит на руках (четвереньки, упор): пределы суставов после расчёта могли оторвать ладонь от пола —
+      // возвращаем её на своё место на полу (как ступни), рука доворачивается локтем.
+      const sw = this.supW?.[side] ?? 0, pl = this.plant?.[side];
+      if (sw > 0.5 && pl && !this.handTargets[side] && v.y > pl.y + 0.03 * S) {
+        const k = THREE.MathUtils.smoothstep(sw, 0.5, 0.9);
+        const tgt = v.clone().lerp(pl, k);
+        const sx = side === 'left' ? 1 : -1;
+        const pole = lower.getWorldPosition(new THREE.Vector3()); pole.y += 0.25 * S;
+        const hq = hand.getWorldQuaternion(new THREE.Quaternion());
+        this.twoBoneIK(upper, lower, hand, tgt, pole);
+        this.setWorldQuat(hand, hq);
+        hand.getWorldPosition(v);
+      }
       if (v.y >= minY) continue;
       const target = v.clone().setY(minY);
       const pole = lower.getWorldPosition(new THREE.Vector3()); pole.y += 0.25 * S;
