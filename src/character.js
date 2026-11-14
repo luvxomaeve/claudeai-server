@@ -2387,7 +2387,7 @@ export class Character {
         this.kneePinTick = this.time;
         kp.w = THREE.MathUtils.clamp(kp.w + (on && kp.left ? dtp / 0.3 : -dtp / 0.25), 0, 1);
       }
-      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.foot = null; kp.sit = -1; kp.bad = 0; }
+      if (!on && kp.w <= 0) { kp.left = kp.right = null; kp.foot = null; kp.sit = -1; kp.bad = 0; kp.user = false; }
       if (kp.w > 0 && kp.left && kp.right) {
         const w = kp.w * kp.w * (3 - 2 * kp.w) * wLie;
         const corr = new THREE.Vector3();
@@ -2435,7 +2435,7 @@ export class Character {
           vert = D.y;
         }
         // Телу слишком долго приходится сильно тянуться к точкам колен — значит, они устарели: отпускаем и берём заново.
-        if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; const o = this.bodyOffset, moved = Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.03 * S || Math.abs(o.hipsRotX) > 0.1; /* таз сдвинут рукой — тянуться к коленям нормально, это не «устаревшие точки» */ kp.bad = Math.max(0, (kp.bad ?? 0) + (!moved && corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
+        if (this.kneeBadTick !== this.time) { this.kneeBadTick = this.time; const o = this.bodyOffset, moved = Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.03 * S || Math.abs(o.hipsRotX) > 0.1; /* таз сдвинут рукой — тянуться к коленям нормально, это не «устаревшие точки» */ kp.bad = Math.max(0, (kp.bad ?? 0) + (!moved && !kp.user && corr.length() + down > 0.1 * S ? dtp : -dtp * 2)); }
         const wp = b.hips.getWorldPosition(new THREE.Vector3());
         wp.x += corr.x * w; wp.z += corr.z * w; wp.y -= down * w;
         wp.y += vert * w;
@@ -2584,9 +2584,22 @@ export class Character {
       if (this.walk) target.addScaledVector(this.walk.foot[side], this.walk.k);
       if (this.turnStep > 0.01) target.y += Math.max(0, Math.sin((this.turnPhase ?? 0) + (L ? 0 : Math.PI))) * 0.035 * S * this.turnStep * (1 - p1);
       // Ступня, сдвинутая пальцем.
-      const footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
+      let footRaw = this.dragPhys.foot[side]?.x ?? null; // с инерцией
       (this.footBase ??= {})[side] = target.clone(); // где стопа стоит без сдвига
+      // Выставленная на полу ступня держит своё место: сдвиг пересчитывается от того, куда сейчас ушла нога с тазом.
+      {
+        const fp = this.footOffset[side] ? this.footPin?.[side] : null;
+        if (fp && Math.abs(this.sitS - fp.sit) > 0.22) { this.footPin[side] = null; }
+        else if (fp && footRaw) {
+          const o = fp.p.clone().sub(target);
+          o.x = THREE.MathUtils.clamp(o.x, -0.45 * S, 0.45 * S); o.y = THREE.MathUtils.clamp(o.y, -0.1 * S, 0.6 * S); o.z = THREE.MathUtils.clamp(o.z, -0.5 * S, 0.5 * S);
+          this.footOffset[side].copy(o); footRaw = o;
+        }
+      }
       const footOff = footRaw ? footRaw.clone().multiplyScalar(this.footOffK(side)) : null;
+      // Ногу подняли стоя, а потом она приседает (или таз ведут вниз) — поднятая ступня опускается и встаёт на пол:
+      // приседает на обеих ногах, а не с ногой в воздухе.
+      if (footOff && (this.footSetSit?.[side] ?? 0) < 0.3) footOff.y *= 1 - THREE.MathUtils.smoothstep(this.sitS, 0.06, 0.28);
       if (footOff) {
         target.add(footOff);
         // Ноги, выставленные на полу, не лежат «деревянно»: ступня чуть покачивается и переступает, колено дышит.
@@ -3052,6 +3065,26 @@ export class Character {
     (this.handPin ??= {})[side] = this.sitS > 0.3 ? { p: worldPoint.clone().setY(Math.max(worldPoint.y, 0.05 * this.scale)), sit: this.sitS, air: worldPoint.y >= 0.14 * this.scale } : null;
   }
 
+  // Колено на полу (на коленях, четвереньках) взяли и повели — переставляем саму точку опоры колена вместе со ступнёй:
+  // ноги раздвигаются и сдвигаются по полу, таз сам опускается между ними.
+  moveKnee(side, pin0, foot0, d) {
+    const kp = this.kneePin;
+    if (!kp?.[side] || !pin0) return false;
+    const S = this.scale, m = d.clone().setY(0);
+    if (m.length() > 0.38 * S) m.setLength(0.38 * S);
+    const P = pin0.clone().add(m);
+    // Колено не заходит за середину (ноги не перекрещиваются).
+    const other = kp[side === 'left' ? 'right' : 'left'], hx = this.bones.hips.getWorldPosition(new THREE.Vector3()).x;
+    const out = Math.sign(pin0.x - (other ? other.x : hx)) || (side === 'left' ? 1 : -1);
+    const mid = other ? other.x : hx;
+    if ((P.x - mid) * out < 0.07 * S) P.x = mid + out * 0.07 * S;
+    const shift = P.clone().sub(pin0);
+    kp[side].copy(P);
+    if (kp.foot?.[side] && foot0) kp.foot[side].copy(foot0).add(shift);
+    kp.bad = 0; kp.user = true; // расставлено рукой — «устаревшими» эти точки не считаем
+    return true;
+  }
+
   footWorld(side) {
     return this.bones[`${side}Foot`]?.getWorldPosition(new THREE.Vector3());
   }
@@ -3069,8 +3102,11 @@ export class Character {
       off.y = THREE.MathUtils.clamp(off.y, -0.1 * S, 0.6 * S);
       off.z = THREE.MathUtils.clamp(off.z, -0.5 * S, 0.5 * S);
       this.footOffset[side] = off;
+      // Ступню поставили — она держит это место на полу (в мире), пока двигаешь таз, а не едет вместе с ним.
+      (this.footPin ??= {})[side] = { p: this.footBase[side].clone().add(off), sit: this.sitS };
       return;
     }
+    if (this.footPin) this.footPin[side] = null;
     (this.footSetSit ??= {})[side] = this.sitS;
     const off = worldPoint.clone().sub(rest.pos);
     // Естественные пределы: вбок наружу до 25 см, внутрь — не дальше второй ноги,
@@ -3092,13 +3128,14 @@ export class Character {
     this.headOffset = { x: 0, y: 0 };
     this.bodyOffset = { spineX: 0, spineY: 0, spineZ: 0, hipsX: 0, hipsY: 0, hipsZ: 0, hipsRotX: 0, hipsFwd: 0 };
     this.footOffset = { left: null, right: null };
+    this.footPin = { left: null, right: null };
     this.armPreset = { left: null, right: null };
     this.footSetSit = {};
     this.hipsSetSit = null;
     this.handAnchor = { left: null, right: null };
     this.handPin = { left: null, right: null };
     // Позу сбросили или вернули как было — колени больше не держатся за старые точки на полу.
-    if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.foot = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; }
+    if (this.kneePin) { this.kneePin.left = this.kneePin.right = null; this.kneePin.foot = null; this.kneePin.w = 0; this.kneePin.sit = -1; this.kneePin.bad = 0; this.kneePin.user = false; }
   }
 
   exportTouchPose() {
@@ -3141,6 +3178,7 @@ export class Character {
     if (data.body) Object.assign(this.bodyOffset, data.body);
     for (const side of ['left', 'right']) {
       if (data.feet?.[side]) this.footOffset[side] = new THREE.Vector3().fromArray(data.feet[side]);
+      if (this.footPin) this.footPin[side] = null; // точка из сохранённого/повтора — без привязки к месту
     }
     this.footSetSit = { ...(data.footSit ?? {}) };
     this.handAnchor = { left: data.anchors?.left ?? null, right: data.anchors?.right ?? null };

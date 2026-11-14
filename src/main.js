@@ -2921,6 +2921,13 @@ function poseDragMove(e) {
       }
       if (poseDrag.start0) dragPoint.sub(poseDrag.p0).add(poseDrag.start0);
       if (poseDrag.kind === 'knee' && character.sitS > 0.3) {
+        // На коленях и четвереньках колено стоит на полу: ведём саму точку опоры — ноги раздвигаются по полу.
+        const kp = character.kneePin, sd = poseDrag.side;
+        if (kp?.[sd] && kp.w > 0.5 && (character.kneelK ?? 0) > 0.5 && !character.footOffset[sd]) {
+          poseDrag.pin0 ??= kp[sd].clone(); poseDrag.foot0 ??= kp.foot?.[sd]?.clone() ?? null;
+          character.moveKnee(sd, poseDrag.pin0, poseDrag.foot0, dragPoint.clone().sub(poseDrag.kneeStart));
+          return;
+        }
         // На полу колено ведёт всю ногу: стопа сдвигается вместе с коленом.
         character.setFootTarget(poseDrag.side, poseDrag.footStart.clone().add(dragPoint.clone().sub(poseDrag.kneeStart)));
       } else if (poseDrag.kind === 'knee') {
@@ -4931,7 +4938,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 249;
+const WAIFU_BUILD = 250;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
