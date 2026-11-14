@@ -4982,7 +4982,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 269;
+const WAIFU_BUILD = 270;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5001,9 +5001,9 @@ const STANCES = [
 const FURN = [
   { id: 'none', icon: '🪑', name: 'Без мебели' },
   { id: 'pouf', icon: '🟣', name: 'Пуф', h: 0.42, back: 0.3 },
-  { id: 'chair', icon: '🪑', name: 'Стеклянный стул', h: 0.44, back: 0.32 },
+  { id: 'chair', icon: '🔮', name: 'Стеклянное кресло-шар', h: 0.44, back: 0.32 },
   { id: 'table', icon: '🔷', name: 'Стеклянный стол', h: 0.66, back: 0.2 },
-  { id: 'throne', icon: '👑', name: 'Трон', h: 0.47, back: 0.33 },
+  { id: 'throne', icon: '👑', name: 'Трон', h: 0.48, back: 0.34 },
 ];
 var furnIdx = 0;
 const furnGroup = new THREE.Group();
@@ -5028,14 +5028,19 @@ function buildFurn(f, S) {
     lathe([[0, 0], [0.17, 0], [0.2, 0.03], [0.215, top * 0.5], [0.2, top - 0.05], [0.16, top - 0.008], [0, top - 0.015]], velvet);
     lathe([[0.2, 0.035], [0.222, 0.045], [0.2, 0.06]], trim);
   } else if (f.id === 'chair') {
-    // Маленький стеклянный стул: круглое сиденье, тонкие ножки, невысокая выгнутая спинка.
-    const g = glass(), e = edge();
-    lathe([[0, top - 0.025], [0.165, top - 0.025], [0.17, top - 0.012], [0.165, top], [0, top]], g);
-    ring(0.168, 0.004, 0, top - 0.012, 0, e);
-    for (const [x, z] of [[-0.11, -0.11], [0.11, -0.11], [-0.11, 0.11], [0.11, 0.11]]) rod(0.011, top - 0.025, x, (top - 0.025) / 2, z, g);
-    for (const x of [-0.1, 0.1]) rod(0.009, 0.26, x, top + 0.12, -0.15, g);
-    const back = add(new THREE.CapsuleGeometry(0.05 * S, 0.17 * S, 6, 14), g, 0, top + 0.25, -0.15); back.rotation.z = Math.PI / 2; back.scale.z = 0.28;
-    const be = add(new THREE.TorusGeometry(0.05 * S, 0.004 * S, 6, 24), e, 0, top + 0.25, -0.15); be.scale.x = 2.7;
+    // Прозрачное кресло-шар: стеклянная сфера с открытым передом, внутри мягкая подушка, снизу тонкая ножка на диске.
+    const g = glass(), e = edge(), cushion = mat(0xf2c6da, 0.95), steel = mat(0xdfe6f2, 0.25);
+    const R = 0.43, cy = top + 0.24, cz = -0.1;
+    const shell = add(new THREE.SphereGeometry(R * S, 40, 28, Math.PI * 5 / 6, Math.PI * 4 / 3), g, 0, cy, cz);
+    shell.renderOrder = 2;
+    // Кромка проёма — два светлых обода по краям выреза.
+    for (const phi of [Math.PI * 5 / 6, Math.PI * 5 / 6 + Math.PI * 4 / 3]) { const rim = add(new THREE.TorusGeometry(R * S, 0.006 * S, 8, 64), e, 0, cy, cz); rim.rotation.y = phi - Math.PI; }
+    // Подушка-сиденье внутри шара.
+    lathe([[0, top - 0.09], [0.26, top - 0.09], [0.3, top - 0.05], [0.28, top - 0.008], [0, top - 0.015]], cushion, 0, cz + 0.02);
+    // Ножка и диск-основание.
+    rod(0.022, cy - R + 0.02, 0, (cy - R + 0.02) / 2, cz, steel);
+    lathe([[0, 0], [0.24, 0], [0.24, 0.012], [0.05, 0.03], [0, 0.03]], steel, 0, cz);
+    ring(0.24, 0.005, 0, 0.012, cz, e);
   } else if (f.id === 'table') {
     // Стеклянный стол: круглая столешница на одной изящной ножке; она присаживается на край.
     const g = glass(), e = edge();
@@ -5044,15 +5049,15 @@ function buildFurn(f, S) {
     lathe([[0, 0], [0.19, 0], [0.19, 0.012], [0.05, 0.03], [0.022, 0.12], [0.018, top - 0.1], [0.07, top - 0.02], [0, top - 0.02]], g, 0, -0.16);
     ring(0.19, 0.004, 0, 0.008, -0.16, e);
   } else {
-    // Трон поменьше и изящнее: узкое основание на ножках, мягкое сиденье, высокая округлая спинка.
+    // Трон — массивный, как в первой версии (он понравился больше): основание, бархатная подушка, высокая спинка
+    // с бархатной вставкой, широкие подлокотники, золотая кайма; углы спинки — с золотыми шарами.
     const gold = mat(0xd9b45a, 0.35), velvet = mat(0x7a1f4d, 0.9), body = mat(0x3a2147, 0.6);
-    box(0.44, 0.07, 0.5, 0, top - 0.075, -0.04, body);
-    lathe([[0, top - 0.04], [0.19, top - 0.04], [0.205, top - 0.022], [0.18, top - 0.006], [0, top - 0.012]], velvet);
-    for (const [x, z] of [[-0.19, -0.18], [0.19, -0.18], [-0.19, 0.18], [0.19, 0.18]]) { rod(0.018, top - 0.11, x, (top - 0.11) / 2, z, gold); }
-    const back = add(new THREE.CapsuleGeometry(0.19 * S, 0.5 * S, 8, 20), body, 0, top + 0.36, -0.29); back.scale.z = 0.16;
-    const pad = add(new THREE.CapsuleGeometry(0.15 * S, 0.44 * S, 8, 20), velvet, 0, top + 0.36, -0.275); pad.scale.z = 0.14;
-    add(new THREE.SphereGeometry(0.035 * S, 14, 10), gold, 0, top + 0.83, -0.29);
-    for (const sx of [-1, 1]) { rod(0.014, 0.17, sx * 0.21, top + 0.05, 0.14, gold); const arm = add(new THREE.CapsuleGeometry(0.02 * S, 0.3 * S, 6, 10), gold, sx * 0.21, top + 0.14, -0.02); arm.rotation.x = Math.PI / 2; }
+    box(0.6, top - 0.06, 0.52, 0, (top - 0.06) / 2, 0, body); // основание
+    box(0.5, 0.06, 0.46, 0, top - 0.03, 0.02, velvet); // подушка
+    box(0.6, 1.0, 0.07, 0, top + 0.44, -0.3, body); box(0.46, 0.8, 0.03, 0, top + 0.42, -0.255, velvet); // спинка
+    box(0.64, 0.05, 0.09, 0, top + 0.96, -0.3, gold); // верх спинки
+    for (const sx of [-1, 1]) { box(0.07, 0.24, 0.5, sx * 0.3, top + 0.1, 0, body); box(0.09, 0.03, 0.52, sx * 0.3, top + 0.235, 0, gold); add(new THREE.SphereGeometry(0.04 * S, 14, 10), gold, sx * 0.3, top + 1.0, -0.3); } // подлокотники и шары
+    box(0.64, 0.03, 0.56, 0, 0.015, 0, gold); // кайма у пола
   }
 }
 const furnBase = new THREE.Vector3();
