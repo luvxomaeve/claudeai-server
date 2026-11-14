@@ -4,13 +4,24 @@ import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { VRMAnimationLoaderPlugin, VRMLookAtQuaternionProxy, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 import { saveFile, deleteFile, listFiles } from './storage.js';
 import { Stockings, STOCKING_STYLES } from './stockings.js';
-import { Character, POSES, BASE_POSE } from './character.js';
-import { REACTIONS, IDLE_LINES, TIERS, tierFor, pick } from './dialogue.js';
+import { parseMixamo, mixamoClip } from './mixamo.js';
+import { MOCAP, loadMocap, mocapClip, mocapUpperClip } from './mocap.js';
+import { PieceWardrobe, PIECE_CATS, setSheenOn, setStockSheen, setSkinSheenOn } from './outfits.js';
+import { Character, POSES, LOOPS } from './character.js';
+import { initPlatform, gameReady, rewarded as adsRewarded, interstitial, onAdPause, hasAds } from './ads.js';
+import { REACTIONS, STROKES, IDLE_LINES, pick } from './dialogue.js';
 
 // Тестовая модель (семпл из репозитория three-vrm). Замени на свою из VRoid Studio:
 // положи файл рядом, например models/waifu.vrm, и укажи путь здесь,
 // или просто перетащи .vrm в окно / добавь через 👗 Гардероб.
-const DEFAULT_MODEL = window.WAIFU_MODEL_URL ??
+// Девушки: window.WAIFU_GIRLS = [{ id, name, url, baseNames, baseLegs, cats, lvl }]. Первая — по умолчанию.
+// Выбранная запоминается; у каждой свой набор надетых вещей и цветов. Одежда остальных — в общем шкафу.
+const GIRLS = Array.isArray(window.WAIFU_GIRLS) && window.WAIFU_GIRLS.length ? window.WAIFU_GIRLS : null;
+let girlId = null;
+try { girlId = localStorage.getItem('waifu-girl'); } catch { /* ignore */ }
+const GIRL = GIRLS ? (GIRLS.find((g) => g.id === girlId) ?? GIRLS[0]) : null;
+const girlKey = (k) => (GIRL && GIRL !== GIRLS[0] ? `${k}@${GIRL.id}` : k);
+const DEFAULT_MODEL = GIRL?.url ?? window.WAIFU_MODEL_URL ??
   'https://cdn.jsdelivr.net/gh/pixiv/three-vrm@v3.1.0/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm';
 
 const $ = (id) => document.getElementById(id);
@@ -23,13 +34,155 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 20);
+const camera = new THREE.PerspectiveCamera(32, 1, 0.02, 20);
 const cameraLookAt = new THREE.Vector3(0, 1, 0);
 
+// Свет как в студии: основной (с мягкой тенью на пол) + розоватый контровой
+// сзади — силуэт отделяется от фона и выглядит объёмнее.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const light = new THREE.DirectionalLight(0xffffff, Math.PI);
-light.position.set(1, 1.5, 2).normalize();
+light.position.set(1.1, 3.2, 2.4);
+light.castShadow = true;
+light.shadow.mapSize.set(1024, 1024);
+Object.assign(light.shadow.camera, { left: -1.6, right: 1.6, top: 1.6, bottom: -1.6, near: 0.5, far: 8 });
+light.shadow.bias = -0.0006;
+light.shadow.normalBias = 0.02;
 scene.add(light);
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const rim = new THREE.DirectionalLight(0xffd2ec, 0.9);
+rim.position.set(-1.2, 1.8, -2.2);
+scene.add(rim);
+const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambient);
+
+// Пол: невидимый, только тень от неё + мягкая «контактная» тень под телом,
+// чтобы она стояла, сидела и лежала на полу, а не парила.
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.ShadowMaterial({ opacity: 0.42, side: THREE.DoubleSide }));
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+// Стеклянный пол: прозрачная круглая плита с ярким тонким краем и белыми бликами — видно саму поверхность,
+// на которую она опирается. Цвета почти нет, только свет на стекле.
+const floorDiscTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const g = c.getContext('2d');
+  const R = 500;
+  // Само стекло: едва заметная светлая дымка, плотнее к краю (как торец стекла).
+  const grd = g.createRadialGradient(512, 512, 0, 512, 512, R);
+  // Матовое стекло: под ней поверхность хорошо видна (иначе кажется, что она висит), к краю растворяется.
+  grd.addColorStop(0, 'rgba(205,195,255,0.20)');
+  grd.addColorStop(0.35, 'rgba(200,190,255,0.15)');
+  grd.addColorStop(0.75, 'rgba(200,190,255,0.07)');
+  grd.addColorStop(1, 'rgba(200,190,255,0.0)');
+  g.fillStyle = grd;
+  g.beginPath(); g.arc(512, 512, R, 0, Math.PI * 2); g.fill();
+  // Блики: широкие мягкие полосы света поперёк плиты.
+  g.save();
+  g.beginPath(); g.arc(512, 512, R, 0, Math.PI * 2); g.clip();
+  g.translate(512, 512); g.rotate(-0.5);
+  for (const [x, w, a] of [[-250, 120, 0.05], [-60, 40, 0.04], [190, 170, 0.045]]) {
+    const lg = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+    lg.addColorStop(0, 'rgba(255,255,255,0)'); lg.addColorStop(0.5, `rgba(255,255,255,${a})`); lg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = lg; g.fillRect(x - w / 2, -600, w, 1200);
+  }
+  g.restore();
+  // Край: яркая тонкая кромка и вторая, тусклая, чуть внутри (толщина стекла).
+  // Яркого края больше нет: с низкой камеры он рисовался ниже её колен и рук и создавал ощущение,
+  // что пол где-то под ней. Теперь плита большая и просто тает к краям.
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+})();
+const floorDisc = new THREE.Mesh(new THREE.PlaneGeometry(9, 9), new THREE.MeshBasicMaterial({ map: floorDiscTex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+floorDisc.rotation.x = -Math.PI / 2;
+floorDisc.position.y = 0.001;
+floorDisc.renderOrder = -2;
+scene.add(floorDisc);
+// Тени касания: под каждой точкой опоры (ступни, колени, ладони) своё мягкое пятно. Чем ближе точка к полу,
+// тем пятно темнее и собраннее — видно, что она стоит на полу и давит на него весом.
+const touchTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(20,6,30,0.85)');
+  grd.addColorStop(0.45, 'rgba(20,6,30,0.4)');
+  grd.addColorStop(1, 'rgba(20,6,30,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const TOUCH_BONES = [['leftFoot', 0.2, 0.1], ['rightFoot', 0.2, 0.1], ['leftLowerLeg', 0.2, 0.09], ['rightLowerLeg', 0.2, 0.09], ['leftHand', 0.17, 0.07], ['rightHand', 0.17, 0.07], ['leftLowerArm', 0.16, 0.07], ['rightLowerArm', 0.16, 0.07], ['head', 0.26, 0.14], ['chest', 0.34, 0.14]];
+const touchBlobs = TOUCH_BONES.map(() => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: touchTex, transparent: true, depthWrite: false, opacity: 0, side: THREE.DoubleSide }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.004;
+  m.renderOrder = -1;
+  scene.add(m);
+  return m;
+});
+const touchV = new THREE.Vector3();
+function updateTouchBlobs() {
+  if (!character?.bones) return;
+  const S = character.scale ?? 1;
+  TOUCH_BONES.forEach(([name, size, rad], i) => {
+    const bone = character.bones[name], m = touchBlobs[i];
+    if (!bone) { m.visible = false; return; }
+    bone.getWorldPosition(touchV);
+    // Высота низа этой части тела над полом (кость — в середине, отнимаем её «толщину»).
+    const h = Math.max(0, touchV.y / S - rad);
+    const k = 1 - THREE.MathUtils.smoothstep(h, 0.0, 0.16);
+    m.visible = k > 0.01;
+    if (!m.visible) return;
+    m.position.x = touchV.x; m.position.z = touchV.z;
+    const sz = size * S * (1 + 1.3 * (1 - k)); // выше — пятно шире и бледнее
+    m.scale.set(sz, sz, 1);
+    m.material.opacity = 0.95 * k * k;
+  });
+}
+const blobTex = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0, 'rgba(60,20,70,0.55)');
+  grd.addColorStop(0.5, 'rgba(60,20,70,0.22)');
+  grd.addColorStop(1, 'rgba(60,20,70,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+})();
+const blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+blob.rotation.x = -Math.PI / 2;
+blob.position.y = 0.003;
+blob.renderOrder = -1;
+scene.add(blob);
+const blobHips = new THREE.Vector3();
+function updateBlob() {
+  if (!character?.bones.hips) return;
+  character.bones.hips.getWorldPosition(blobHips);
+  // Сидит/лежит — пятно шире и темнее (тело ближе к полу).
+  const low = THREE.MathUtils.clamp(1 - blobHips.y / 0.95, 0, 1);
+  blob.position.x = blobHips.x;
+  blob.position.z = blobHips.z;
+  blob.scale.set(0.55 + low * 0.9, 0.42 + low * 0.5, 1);
+  blob.material.opacity = 0.7 + low * 0.3;
+  updateTouchBlobs();
+  // Камера ушла ниже пола — смотрим на неё сквозь стекло снизу. Пол не исчезает: он рисуется с обеих сторон и
+  // поверх тела (он ближе к камере), матовее, а пятна касания видны сквозь него — она стоит на стекле, а не висит.
+  const below = camera.position.y < 0.0;
+  if (below !== floorBelow) {
+    floorBelow = below;
+    floorDisc.renderOrder = below ? 12 : -2;
+    floorDisc.material.opacity = below ? 1.6 : 1;
+    floor.renderOrder = below ? 10 : 0;
+    blob.renderOrder = below ? 11 : -1;
+    for (const m of touchBlobs) m.renderOrder = below ? 11 : -1;
+  }
+}
+let floorBelow = false;
 
 function resize() {
   const w = window.innerWidth;
@@ -43,6 +196,7 @@ window.addEventListener('resize', resize);
 let character = null;
 let fullBody = false;
 let camTween = 1;
+var autoSmoothCam = false; // «Авто»: камера не прыгает в новое положение, а плавно доезжает (везде)
 const camFrom = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
 const camTo = { pos: new THREE.Vector3(), look: new THREE.Vector3() };
 
@@ -66,8 +220,8 @@ function frameCamera() {
   camFrom.pos.copy(camera.position);
   camFrom.look.copy(cameraLookAt);
   orbitTarget(camTo);
-  camTween = character && animateCamera ? 0 : 1;
-  if (camTween === 1) {
+  camTween = character && animateCamera && !freeCam ? 0 : 1;
+  if (camTween === 1 && !freeCam) {
     camera.position.copy(camTo.pos);
     cameraLookAt.copy(camTo.look);
     camera.lookAt(cameraLookAt);
@@ -79,43 +233,249 @@ let animateCamera = false;
 // Орбита камеры вокруг девушки: поворот (yaw) и приближение (zoom).
 const camBase = { dist: 2, cy: 1, S: 1 };
 let camYaw = 0;
+let camLift = 0; // сдвиг кадра вверх/вниз (двумя пальцами)
+const camPanH = new THREE.Vector3(); // сдвиг кадра вбок (двумя пальцами)
+let camPitch = 0.05; // наклон камеры: < 0 — снизу, > 0 — сверху
 let camZoom = 1; // < 1 — ближе, > 1 — дальше
-const ZOOM_MIN = 0.35;
-const ZOOM_MAX = 1.8;
+const ZOOM_MIN = 0.05; // можно подлететь вплотную к лицу
+const ZOOM_MAX = 3;
 
+// Середина тела лёжа (сглаженная, чтобы камера не дрожала от дыхания).
+const lieMid = new THREE.Vector3(0, 0.3, 0);
+// Голова (сглаженно): при приближении камера ведёт за лицом — наклонилась, села,
+// повернулась — лицо остаётся в кадре.
+const headTrack = new THREE.Vector3(0, 1.4, 0);
+let headTrackInit = false;
+function updateLieMid(dt) {
+  if (!character?.bones.hips || !character.bones.head) return;
+  const hp = character.bones.head.getWorldPosition(new THREE.Vector3());
+  hp.y += 0.05 * camBase.S;
+  if (!headTrackInit) { headTrack.copy(hp); headTrackInit = true; }
+  headTrack.lerp(hp, 1 - Math.exp(-dt * 4));
+  const m = character.bones.hips.getWorldPosition(new THREE.Vector3())
+    .add(character.bones.head.getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
+  lieMid.lerp(m, 1 - Math.exp(-dt * 3));
+}
+// ---------- Ручная камера (после жестов двумя пальцами / двойного тапа) ----------
+// Точка взгляда T привязана к её тазу (едет вместе с ней, когда садится/ложится),
+// камера — на сфере вокруг T: поворот (camYaw/camPitch) и расстояние. Ничего не «утягивает»
+// кадр к голове — где поставил, там и стоит.
+let manualCam = null; // { off: Vector3, dist }
+const hipsTrack = new THREE.Vector3(0, 0.9, 0);
+let hipsTrackInit = false;
+function updateHipsTrack(dt) {
+  if (!character?.bones.hips) return;
+  const h = character.bones.hips.getWorldPosition(new THREE.Vector3());
+  // Сама прохаживается — кадр за ней не едет: камера стоит, она делает шаги внутри кадра.
+  const wk = character.walk;
+  if (wk) { h.x -= wk.out.x; h.z -= wk.out.z; }
+  if (!hipsTrackInit) { hipsTrack.copy(h); hipsTrackInit = true; }
+  hipsTrack.lerp(h, 1 - Math.exp(-dt * 4));
+  // Камера «прицеплена» к части тела (см. lockCamBone): плавно идёт за ней.
+  if (manualCam?.bone) manualCam.track.lerp(manualCam.bone.getWorldPosition(camBoneV), 1 - Math.exp(-dt * 7));
+}
+// Подстроил камеру к какому-то месту (голова, грудь, бёдра, колени, ступни…) — оно остаётся в центре кадра,
+// как бы она ни двигалась: камера цепляется к ближайшей кости и идёт за ней. Сдвинул двумя пальцами —
+// цепляется к новому месту. Домик / двойной тап по фону — отпускает.
+const camBoneV = new THREE.Vector3();
+const CAM_BONES = ['head', 'neck', 'chest', 'spine', 'hips', 'leftUpperLeg', 'rightUpperLeg', 'leftLowerLeg', 'rightLowerLeg', 'leftFoot', 'rightFoot', 'leftHand', 'rightHand', 'leftLowerArm', 'rightLowerArm'];
+const camAnchor = () => (manualCam?.bone ? manualCam.track : hipsTrack);
+function lockCamBone() {
+  if (!manualCam || !character) return;
+  const T = camAnchor().clone().add(manualCam.off);
+  let best = null, bd = Infinity;
+  for (const n of CAM_BONES) {
+    const b = character.bones[n];
+    if (!b) continue;
+    const d = b.getWorldPosition(camBoneV).distanceTo(T);
+    if (d < bd) { bd = d; best = b; }
+  }
+  if (!best) return;
+  manualCam.bone = best;
+  manualCam.track = best.getWorldPosition(new THREE.Vector3());
+  manualCam.off = T.sub(manualCam.track);
+}
+function enterManualCam() {
+  if (manualCam) return;
+  if (typeof freeCam !== 'undefined' && freeCam) exitFreeCam();
+  if (typeof faceCam !== 'undefined' && faceCam) setFaceCam(false);
+  const T = cameraLookAt.clone();
+  const v = camera.position.clone().sub(T);
+  const dist = v.length();
+  camYaw = Math.atan2(v.x, v.z);
+  camPitch = Math.asin(THREE.MathUtils.clamp(v.y / dist, -1, 1));
+  manualCam = { off: T.sub(hipsTrack), dist };
+  lockCamBone();
+  camTween = 1;
+}
+function exitManualCam() { manualCam = null; }
+function manualTarget(out) {
+  const T = camAnchor().clone().add(manualCam.off);
+  const cp = Math.cos(camPitch);
+  out.look.copy(T);
+  out.pos.set(T.x + Math.sin(camYaw) * manualCam.dist * cp, T.y + Math.sin(camPitch) * manualCam.dist, T.z + Math.cos(camYaw) * manualCam.dist * cp);
+  out.pos.y = Math.max(camFloor(), out.pos.y);
+  return out;
+}
+
+// Самая низкая точка камеры. В релизе (Яндекс Игры) — не ниже колен:
+// без ракурсов снизу (требования модерации).
+function camFloor() { return (window.WAIFU_RELEASE ? 0.5 : 0.05) * camBase.S; }
 function orbitTarget(out) {
+  if (manualCam) return manualTarget(out);
   const d = camBase.dist * camZoom;
   // При приближении смещаем точку взгляда к лицу.
   const headY = (character ? character.headHeight : 1.4) + 0.05 * camBase.S;
-  const lookY = THREE.MathUtils.lerp(headY, camBase.cy, THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1));
-  out.look.set(0, lookY, 0);
-  out.pos.set(Math.sin(camYaw) * d, lookY + 0.05 * camBase.S, Math.cos(camYaw) * d);
+  let lookY = THREE.MathUtils.lerp(headY, camBase.cy, THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1));
+  // Когда она садится, камера опускается вместе с ней.
+  if (character) lookY -= (character.sitDropNow ?? 0) * 0.6;
+  // Лёжа тело вытянуто по полу: камера смотрит на середину тела, отъезжает и
+  // чуть приподнимается — видна вся, а не одна голова у края экрана.
+  let cx = 0;
+  let cz = 0;
+  let dd = d;
+  let pitch = camPitch;
+  if (character?.bones.hips && character.bones.head) {
+    const lie = THREE.MathUtils.smoothstep(character.sitS, 0.8, 1.25);
+    if (lie > 0) {
+      // Ближе к лицу: смотрим между серединой тела и головой.
+      const mid = lieMid.clone().lerp(headTrack, 0.45);
+      cx = mid.x * lie;
+      cz = mid.z * lie;
+      lookY = THREE.MathUtils.lerp(lookY, mid.y + 0.05 * camBase.S, lie);
+      dd = d * (1 + 0.1 * lie);
+      pitch = camPitch + 0.3 * lie;
+    }
+  }
+  // Приближено — смотрим на реальное положение головы (а не на «где голова стоя»).
+  if (character && headTrackInit) {
+    const zoomK = 1 - THREE.MathUtils.clamp((camZoom - ZOOM_MIN) / (1 - ZOOM_MIN), 0, 1);
+    const k = THREE.MathUtils.smoothstep(zoomK, 0.1, 0.8);
+    if (k > 0) {
+      cx = THREE.MathUtils.lerp(cx, headTrack.x, k);
+      cz = THREE.MathUtils.lerp(cz, headTrack.z, k);
+      lookY = THREE.MathUtils.lerp(lookY, headTrack.y, k);
+    }
+  }
+  lookY += camLift;
+  cx += camPanH.x;
+  cz += camPanH.z;
+  out.look.set(cx, lookY, cz);
+  const cp = Math.cos(pitch);
+  out.pos.set(cx + Math.sin(camYaw) * dd * cp, Math.max(camFloor(), lookY + Math.sin(pitch) * dd), cz + Math.cos(camYaw) * dd * cp);
   return out;
 }
 
 // Мгновенно применить yaw/zoom (при жестах и кнопках).
+// Свободная камера (как дрон): шарик — лететь вперёд/назад и вбок;
+// палец по фону — оглядеться; два пальца — щипок вперёд/назад, вверх/вниз — высота.
+let freeCam = null; // { yaw, pitch } — куда смотрит камера
+function freeDir(out = new THREE.Vector3()) {
+  const cp = Math.cos(freeCam.pitch);
+  return out.set(Math.sin(freeCam.yaw) * cp, Math.sin(freeCam.pitch), Math.cos(freeCam.yaw) * cp);
+}
+function enterFreeCam() {
+  if (freeCam) return;
+  exitManualCam();
+  if (typeof faceCam !== 'undefined' && faceCam) setFaceCam(false);
+  const d = cameraLookAt.clone().sub(camera.position).normalize();
+  freeCam = { yaw: Math.atan2(d.x, d.z), pitch: Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)) };
+  camTween = 1;
+  showToast('🛸 Свободная камера · ⌂ — вернуть');
+}
+function exitFreeCam() { freeCam = null; }
+function applyFree() {
+  camera.position.y = Math.max(camFloor(), camera.position.y);
+  cameraLookAt.copy(camera.position).add(freeDir());
+  camera.lookAt(cameraLookAt);
+}
+// Скорость: у неё вблизи — медленно и точно, издалека — быстрее.
+function freeSpeed() {
+  const h = character?.bones.head?.getWorldPosition(new THREE.Vector3()) ?? new THREE.Vector3(0, 1.4, 0);
+  return THREE.MathUtils.clamp(camera.position.distanceTo(h) * 0.9, 0.12, 1.6);
+}
+
 function applyOrbit() {
+  if (freeCam) { applyFree(); return; }
   orbitTarget(camTo);
   camTween = 1;
+  if (autoSmoothCam) return; // доедет плавно в updateCamera
   camera.position.copy(camTo.pos);
   cameraLookAt.copy(camTo.look);
   camera.lookAt(cameraLookAt);
 }
 
-function rotateBy(delta) {
+// Для отладки и записи кадров.
+window.__setYaw = (y, pitch) => { camYaw = y; if (pitch != null) camPitch = pitch; applyOrbit(); };
+
+var autoCentered = false; // «Авто»: камера уже возвращена по центру двойным тапом (сдвинул сам — сбрасывается)
+let lastCamMove = 0; // когда последний раз крутили камеру — точки не ловят палец
+function rotateBy(delta, dPitch = 0) {
+  lastCamMove = performance.now();
+  autoCentered = false;
+  if (freeCam) {
+    // Свободная камера: палец по фону — оглядеться.
+    freeCam.yaw += delta * 0.6;
+    freeCam.pitch = THREE.MathUtils.clamp(freeCam.pitch - dPitch * 0.8, -1.4, 1.4);
+    applyFree();
+    return;
+  }
+  if (faceCam) setFaceCam(false); // крутишь сам — слежение за лицом выключается
   camYaw = (camYaw + delta) % (Math.PI * 2);
+  camPitch = THREE.MathUtils.clamp(camPitch + dPitch, manualCam ? -1.2 : -0.6, manualCam ? 1.45 : 1.35);
   applyOrbit();
 }
 
 function zoomBy(factor) {
+  autoCentered = false;
+  if (!freeCam && touches.size === 2) {
+    enterManualCam();
+    // Ближе/дальше ровно по центру кадра: то, на что навёл, остаётся в центре.
+    manualCam.dist = THREE.MathUtils.clamp(manualCam.dist * factor, 0.12 * camBase.S, 6 * camBase.S);
+    applyOrbit();
+    return;
+  }
+  if (manualCam) {
+    manualCam.dist = THREE.MathUtils.clamp(manualCam.dist * factor, 0.12 * camBase.S, 6 * camBase.S);
+    applyOrbit();
+    return;
+  }
+  if (freeCam) {
+    camera.position.addScaledVector(freeDir(), (1 - factor) * freeSpeed() * 1.5);
+    applyFree();
+    return;
+  }
   camZoom = THREE.MathUtils.clamp(camZoom * factor, ZOOM_MIN, ZOOM_MAX);
   applyOrbit();
 }
 
 // Плавный переезд камеры между «крупно» и «во весь рост».
+let camSitSeen = 0;
 function updateCamera(dt) {
-  if (camTween >= 1) return;
-  camTween = Math.min(1, camTween + dt / 0.6);
+  // Следим за посадкой: если она садится/встаёт, плавно ведём камеру.
+  updateLieMid(dt);
+  updateHipsTrack(dt);
+  updateStick(dt);
+  if (freeCam) return; // свободная камера — орбита не вмешивается
+  if (manualCam) { if (camTween >= 1) applyOrbit(); }
+  updateFaceCam(dt);
+  const lying = character && character.sitS > 0.8;
+  const zoomedIn = camZoom < 0.9;
+  if (character && camTween >= 1 && (lying || zoomedIn || Math.abs(character.sitS - camSitSeen) > 0.002)) {
+    camSitSeen = character.sitS;
+    applyOrbit();
+  }
+  if (camTween >= 1) {
+    if (autoSmoothCam) {
+      // «Авто»: любое движение камеры (поворот, щипок, сдвиг, слежение за ней) — мягко, без рывков.
+      const a = 1 - Math.exp(-dt * 9);
+      camera.position.lerp(camTo.pos, a);
+      cameraLookAt.lerp(camTo.look, a);
+      camera.lookAt(cameraLookAt);
+    }
+    return;
+  }
+  camTween = Math.min(1, camTween + dt / (autoSmoothCam ? 0.9 : 0.6));
   const k = camTween < 0.5 ? 2 * camTween * camTween : 1 - Math.pow(-2 * camTween + 2, 2) / 2;
   camera.position.lerpVectors(camFrom.pos, camTo.pos, k);
   cameraLookAt.lerpVectors(camFrom.look, camTo.look, k);
@@ -132,16 +492,83 @@ let hitboxGroup = null;
 
 // Модель, упакованная в JSON как base64 ({ "vrm": "..." }) — для хостингов,
 // которые не отдают бинарные .vrm/.glb файлы.
+// Скачанная модель запоминается в браузере (Cache Storage): со второго раза — мгновенно.
+const MODEL_CACHE = 'waifu-model-v1';
+async function cachedModel(url) {
+  try {
+    const cache = await caches.open(MODEL_CACHE);
+    const hit = await cache.match(url);
+    return hit ? await hit.arrayBuffer() : null;
+  } catch { return null; }
+}
+async function storeModel(url, buffer) {
+  try {
+    const cache = await caches.open(MODEL_CACHE);
+    await cache.put(url, new Response(buffer, { headers: { 'Content-Type': 'application/octet-stream' } }));
+  } catch { /* нет места или приватный режим — просто без кэша */ }
+}
+
 async function loadPackedModel(url) {
+  const cached = await cachedModel(url);
+  if (cached) {
+    $('loading-text').textContent = 'Загрузка… почти готово';
+    return cached;
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const { vrm } = await res.json();
-  return Uint8Array.from(atob(vrm), (c) => c.charCodeAt(0)).buffer;
+  // Читаем по кусочкам и показываем, сколько скачано, — чтобы было видно, что идёт.
+  const total = Number(res.headers.get('Content-Length')) || 0;
+  const reader = res.body?.getReader();
+  let text;
+  if (reader) {
+    const chunks = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      got += value.length;
+      $('loading-text').textContent = total
+        ? `Загрузка… ${Math.round((got / total) * 100)}%`
+        : `Загрузка… ${(got / 1048576).toFixed(1)} МБ`;
+    }
+    const all = new Uint8Array(got);
+    let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    // Бинарная модель (.glb/.vrm) — сразу готова, без распаковки.
+    if (!/\.json($|\?)/.test(url)) { storeModel(url, all.buffer.slice(0)); return all.buffer; }
+    text = new TextDecoder().decode(all);
+  } else {
+    if (!/\.json($|\?)/.test(url)) { const buf = await res.arrayBuffer(); storeModel(url, buf.slice(0)); return buf; }
+    text = await res.text();
+  }
+  $('loading-text').textContent = 'Загрузка… распаковка';
+  const b64 = JSON.parse(text).vrm;
+  // Быстрая распаковка base64 средствами браузера.
+  let buffer;
+  try {
+    buffer = await (await fetch(`data:application/octet-stream;base64,${b64}`)).arrayBuffer();
+  } catch {
+    // Если data:-ссылки запрещены — распаковываем вручную.
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    buffer = u8.buffer;
+  }
+  storeModel(url, buffer.slice(0));
+  return buffer;
 }
 
 // source: { url } — ссылка на .vrm (или упакованный .json), { buffer } — содержимое файла.
 async function parseModel(source) {
-  if (source.buffer) return loader.parseAsync(source.buffer.slice(0), '');
+  if (/\.glb$/.test(source.url)) {
+    // Облегчённая бинарная модель; если хостинг её не отдал — запасная упакованная (.json).
+    try { return await loader.parseAsync(await loadPackedModel(source.url), ''); } catch (err) {
+      console.warn('glb failed, fallback to json', err);
+      return loader.parseAsync(await loadPackedModel(source.url.replace(/\.glb$/, '.json')), '');
+    }
+  }
+  if (/\.json$/.test(source.url)) return loader.parseAsync(await loadPackedModel(source.url), ''); // с кэшем и прогрессом
   if (source.url.endsWith('.json')) return loader.parseAsync(await loadPackedModel(source.url), '');
   return loader.loadAsync(source.url, (e) => {
     if (e.total) $('loading-text').textContent = `Загрузка… ${Math.round((e.loaded / e.total) * 100)}%`;
@@ -179,9 +606,12 @@ async function loadModel(source) {
       scene.remove(prev.vrm.scene);
       VRMUtils.deepDispose(prev.vrm.scene);
     }
+    vrm.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
     scene.add(vrm.scene);
     character = new Character(vrm);
+    if (typeof lieMode !== 'undefined') character.lieStyle = lieMode === 'off' ? 'belly' : lieMode;
     window.__waifu = character; // для отладки из консоли
+    window.__cam = camera;
     if (prev) {
       character.setPose(prev.poseName);
       character.poseT = 1;
@@ -189,14 +619,25 @@ async function loadModel(source) {
     } else {
       setActivePoseButton('stand');
     }
-    if (currentAnim) character.playClip(createVRMAnimationClip(currentAnim.animation, vrm));
+    if (currentAnim) character.playClip(clipFor(currentAnim, vrm));
+    else if (currentMocap) playMocap(currentMocap);
     stockings = new Stockings(vrm);
+    pieceWardrobe.attachBase(vrm);
+    loadLookFor(currentOutfit);
     applyLook();
+    applyWear();
+    preloadWornSources();
+    if (!$('wardrobe').classList.contains('hidden')) renderWardrobe();
     buildHitboxes();
     frameCamera();
     $('loading').classList.add('done');
+    // Минималистичный вид (только она + меню ☰) — по умолчанию; классический со всеми кнопками — если выбрал его.
+    setTimeout(() => { let ui = null; try { ui = localStorage.getItem('waifu-ui'); } catch { /* ignore */ } if (ui !== 'classic' && !autoMode) setAutoMode(true); restoreLeft(); }, 0);
     if (firstLoad) {
-      setTimeout(() => say(pick(IDLE_LINES[tier()])), 600);
+      gameReady();
+      greetOnLoad();
+      // По умолчанию — живое ожидание на записях живых людей.
+      setTimeout(() => { if (!currentAnim && !currentMocap && !character.loop && !character.dancing) { liveIdle = true; playMocap(nextIdle()); } }, 300);
     } else {
       character.react({ expression: 'happy', motion: 'tiltHead' });
       setTimeout(() => say(pick(['Ну как я тебе? ♥', 'Та-дам! Нравится?', 'Хе-хе, переоделась~', 'Мне идёт?'])), 300);
@@ -213,28 +654,325 @@ async function loadModel(source) {
 
 // ---------- Симпатия ----------
 
-const STORAGE_KEY = 'waifu-affection';
-let affection = 10;
+// Очки симпатии 0…1000 и уровни. Реплики по-прежнему берутся по трём тирам
+// (незнакомец / друг / близкий), а уровней больше — прокачка дольше и интереснее.
+const STORAGE_KEY = 'waifu-love';
+const LEVELS = [
+  { min: 0, label: 'Незнакомец' },
+  { min: 60, label: 'Знакомый' },
+  { min: 150, label: 'Друг' },
+  { min: 300, label: 'Подруга' },
+  { min: 500, label: 'Близкий человек' },
+  { min: 750, label: 'Любимый' },
+  { min: 1000, label: 'Родная душа' },
+];
+const LOVE_MAX = 1000;
+let love = 50;
 try {
   const saved = Number(localStorage.getItem(STORAGE_KEY));
-  if (Number.isFinite(saved) && saved > 0) affection = saved;
+  if (Number.isFinite(saved) && localStorage.getItem(STORAGE_KEY) !== null) love = saved;
+  else {
+    const old = Number(localStorage.getItem('waifu-affection')); // старая шкала 0…100
+    if (Number.isFinite(old) && old > 0) love = old * 6;
+  }
 } catch { /* приватный режим — живём без сохранения */ }
+const levelOf = (v) => { let l = 0; LEVELS.forEach((x, i) => { if (v >= x.min) l = i; }); return l; };
+// Тир для реплик: 0 — до «Друга», 1 — до «Близкого», 2 — дальше.
+const tier = () => (love >= 500 ? 2 : love >= 150 ? 1 : 0);
 
-const tier = () => tierFor(affection);
-
-function changeAffection(delta) {
-  const before = tier();
-  affection = THREE.MathUtils.clamp(affection + delta, 0, 100);
-  try { localStorage.setItem(STORAGE_KEY, String(affection)); } catch { /* ignore */ }
+const LEVEL_UP_LINES = ['', 'Мы ведь уже знакомы~', 'Слушай, а с тобой весело!', 'Ты мне нравишься, правда-правда~',
+  'Кажется… ты мне правда нравишься ♥', 'Я тебя люблю… вот. Сказала ♥', 'Ты — самый родной ♥♥♥'];
+// Самый высокий достигнутый уровень. Пока до последнего уровня не дошёл — уровень может
+// и упасть (функции снова закроются). Дошёл до последнего — всё открыто навсегда.
+let reachedLvl = 0;
+const maxedOut = () => reachedLvl >= LEVELS.length - 1;
+try { reachedLvl = Number(localStorage.getItem('waifu-reached')) || 0; } catch { /* ignore */ }
+reachedLvl = Math.max(reachedLvl, levelOf(love)); // уже набранная симпатия тоже считается
+try { localStorage.setItem('waifu-reached', String(reachedLvl)); } catch { /* ignore */ }
+function setLove(v, silent = false) {
+  const before = levelOf(love);
+  const reachedBefore = Math.max(reachedLvl, before);
+  love = THREE.MathUtils.clamp(v, 0, LOVE_MAX);
+  try { localStorage.setItem(STORAGE_KEY, String(love)); } catch { /* ignore */ }
+  const after = levelOf(love);
+  if (after > reachedLvl) {
+    reachedLvl = after;
+    try { localStorage.setItem('waifu-reached', String(reachedLvl)); } catch { /* ignore */ }
+  }
   renderAffection();
-  if (tier() > before) say(tier() === 2 ? 'Кажется… ты мне правда нравишься ♥' : 'Слушай, а с тобой весело!', 'happy');
+  renderLocks();
+  if (!silent && after > before) {
+    say(LEVEL_UP_LINES[after], 'happy');
+    fxGlow();
+    fxBurst(window.innerWidth / 2, window.innerHeight * 0.4, 26, 150);
+    fxBanner(`✨ ${LEVELS[after].label} ✨`);
+    const opened = after > reachedBefore ? FEATURES.filter((f) => f.lvl === after && !adOpen(f.id)) : [];
+    if (opened.length) setTimeout(() => showToast(`🔓 Открыто: ${opened.map((f) => f.name).join(', ')}`), 2200);
+    $('affection').classList.remove('levelup');
+    void $('affection').offsetWidth;
+    $('affection').classList.add('levelup');
+  }
+}
+// Шкала стала в 10 раз длиннее, а прирост — только вдвое: прокачка идёт примерно в 5 раз дольше.
+// ---------- Прогресс: возможности открываются с ростом симпатии ----------
+// Можно открыть раньше — за рекламу (в Яндекс Играх); без рекламы (артефакт) открывается сразу.
+const FEATURES = [
+  { id: 'floor', lvl: 1, name: 'Сесть на пол и лечь', ids: [] },
+  { id: 'wardrobe', lvl: 1, name: 'Гардероб', ids: ['btn-wardrobe'] },
+  { id: 'poses', lvl: 2, name: 'Вкладка «Позы»', ids: ['btn-tab-pose', 'poses-toggle'] },
+  { id: 'photo', lvl: 2, name: 'Фото', ids: ['cam-photo'] },
+  { id: 'lieStyles', lvl: 3, name: 'Лечь на живот и на спину', ids: ['lie-toggle', 'lie-toggle2'] },
+  { id: 'handles', lvl: 3, name: 'Точки поз (всё тело)', ids: ['btn-handles'] },
+  { id: 'dance', lvl: 4, name: 'Танцы и анимации', ids: ['btn-anims'] },
+  { id: 'flow', lvl: 5, name: '«Повтор движения»', ids: ['cam-auto'] },
+];
+// Фича открывается навсегда: уровнем симпатии или сразу — за рекламу.
+for (const g of GIRLS ?? []) if (g.lvl) FEATURES.push({ id: `girl_${g.id}`, lvl: g.lvl, name: `Девушка «${g.name}»`, ids: [] });
+const UNLOCK_KEY = 'waifu-unlocked2';
+const AD_UNLOCK_FOREVER = 8.64e15; // «навсегда» (максимальная дата)
+let adUnlocked = {}; // id → до какого времени открыто
+try { adUnlocked = JSON.parse(localStorage.getItem(UNLOCK_KEY) || '{}') || {}; } catch { /* ignore */ }
+const adOpen = (id) => (adUnlocked[id] ?? 0) > Date.now();
+function unlocked(id) {
+  const f = FEATURES.find((x) => x.id === id);
+  if (!f) return true;
+  if (window.WAIFU_NOADS) return true; // сборка для проверки: всё открыто
+  return levelOf(love) >= f.lvl || maxedOut() || adOpen(id);
+}
+// Время вышло — замочки возвращаются (проверка раз в 5 с).
+let lockSig = '';
+setInterval(() => {
+  const sig = FEATURES.map((f) => (unlocked(f.id) ? 1 : 0)).join('');
+  if (lockSig && sig !== lockSig) {
+    const closed = FEATURES.filter((f, i) => lockSig[i] === '1' && sig[i] === '0');
+    if (closed.length) showToast(`⏳ Время вышло: ${closed.map((f) => f.name).join(', ')}`);
+  }
+  lockSig = sig;
+  renderLocks(); // кнопки всегда по текущему состоянию
+}, 5000);
+function renderLocks() {
+  for (const f of FEATURES) {
+    const on = unlocked(f.id);
+    for (const id of f.ids) $(id)?.classList.toggle('locked', !on);
+  }
+}
+let lockPop = null;
+function showLock(f) {
+  if (!lockPop) {
+    lockPop = document.createElement('div');
+    lockPop.id = 'lock-pop';
+    lockPop.innerHTML = '<div class="lp-title"></div><div class="lp-text"></div><div class="lp-btns"><button class="lp-ad primary"></button><button class="lp-ok">Ок</button></div>';
+    document.body.appendChild(lockPop);
+    lockPop.querySelector('.lp-ok').addEventListener('click', () => { lockPop.hidden = true; });
+  }
+  lockPop.querySelector('.lp-title').textContent = `🔒 ${f.name}`;
+  lockPop.querySelector('.lp-text').textContent = `Откроется на уровне ${f.lvl + 1} — «${LEVELS[f.lvl].label}». Общайся с ней, чтобы симпатия росла 💗`;
+  const ad = lockPop.querySelector('.lp-ad');
+  ad.textContent = '▶ Открыть сейчас (реклама)';
+  ad.hidden = !hasAds(); // без рекламы (нет SDK) — только по уровню
+  ad.onclick = () => {
+    lockPop.hidden = true;
+    adsRewarded(() => {
+      adUnlocked[f.id] = AD_UNLOCK_FOREVER;
+      try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(adUnlocked)); } catch { /* ignore */ }
+      lockSig = FEATURES.map((x) => (unlocked(x.id) ? 1 : 0)).join('');
+      renderLocks();
+      if (!$('wardrobe').classList.contains('hidden')) renderGirls();
+      showToast(`🔓 Открыто: ${f.name}`);
+      fxBurst(window.innerWidth / 2, window.innerHeight * 0.42, 16, 120);
+    }, () => showToast('Реклама не досмотрена — ничего страшного'));
+  };
+  lockPop.hidden = false;
+}
+// Нажатие на закрытую кнопку — вместо действия показываем, когда откроется.
+document.addEventListener('click', (e) => {
+  const el = e.target.closest?.('.locked');
+  if (!el) return;
+  const f = FEATURES.find((x) => x.ids.includes(el.id));
+  if (!f) return;
+  e.stopPropagation();
+  e.preventDefault();
+  showLock(f);
+}, true);
+
+// Темп симпатии: касания тратят «запас» (до 30 очков, +4 в минуту). Пока запас есть —
+// растёт как обычно, кончился — почти не растёт (натыкать всё сразу нельзя).
+// Полностью открыть всё — несколько часов игры (растягивается на дни);
+// не хочешь ждать — фичу можно открыть за рекламу.
+const GAIN_CAP = 30, GAIN_PER_MIN = 4, GAIN_KEY = 'waifu-gain';
+// «x2 симпатия на 10 минут» — за рекламу (кнопка в меню сердечка).
+const BOOST_KEY = 'waifu-boost', BOOST_MS = 10 * 60000;
+let boostUntil = 0;
+try { boostUntil = Number(localStorage.getItem(BOOST_KEY)) || 0; } catch { /* ignore */ }
+const boostOn = () => boostUntil > Date.now();
+let tiredHintAt = 0;
+let gainBudget = GAIN_CAP, gainAt = Date.now();
+try {
+  const g = JSON.parse(localStorage.getItem(GAIN_KEY) || 'null');
+  if (g && Number.isFinite(g.b) && Number.isFinite(g.t)) { gainBudget = g.b; gainAt = g.t; }
+} catch { /* ignore */ }
+function refillGain() {
+  const now = Date.now();
+  gainBudget = Math.min(GAIN_CAP, gainBudget + ((now - gainAt) / 60000) * GAIN_PER_MIN);
+  gainAt = now;
+}
+function changeAffection(delta) {
+  // Шкала никогда не откатывается назад: на тычки и «не те» зоны — только реакция и фраза.
+  if (!(delta > 0)) return;
+  let d = delta * 2;
+  if (d > 0) {
+    refillGain();
+    const full = Math.min(d, Math.max(0, gainBudget));
+    gainBudget -= full;
+    d = (full + (d - full) * 0.05) * (boostOn() ? 2 : 1);
+    try { localStorage.setItem(GAIN_KEY, JSON.stringify({ b: gainBudget, t: gainAt })); } catch { /* ignore */ }
+    // Запас кончился — подсказка про x2 (не чаще раза в 10 минут).
+    if (gainBudget < 1 && !boostOn() && hasAds() && Date.now() - tiredHintAt > 600000 && love < LOVE_MAX) {
+      tiredHintAt = Date.now();
+      setTimeout(() => showToast('💗 Нажми на сердечко сверху — x2 симпатия за рекламу'), 1500);
+    }
+  }
+  setLove(love + d);
 }
 
 function renderAffection() {
-  $('affection-fill').style.width = `${affection}%`;
-  $('affection-label').textContent = TIERS[tier()].label;
+  const l = levelOf(love);
+  const cur = LEVELS[l].min;
+  const next = LEVELS[l + 1]?.min ?? LOVE_MAX;
+  const k = l === LEVELS.length - 1 ? 1 : (love - cur) / (next - cur);
+  $('affection-fill').style.width = `${(k * 100).toFixed(1)}%`;
+  $('affection-label').textContent = LEVELS[l].label;
+  $('affection-lvl').textContent = String(l + 1);
+  $('affection').title = `${Math.round(love)} / ${LOVE_MAX}`;
+  renderLocks();
 }
+// Тап по шкале — окошко прогресса: уровни и что на каком открывается, x2 за рекламу.
+// «Макс» и «Сброс» — только для разработчика: 7 быстрых тапов по сердечку включают их.
+const DEV_KEY = 'waifu-dev';
+let devMode = false;
+try { devMode = localStorage.getItem(DEV_KEY) === '1'; } catch { /* ignore */ }
+let devTaps = [];
+const loveMenu = $('love-menu');
+loveMenu.innerHTML = '';
+const lmHead = document.createElement('div');
+lmHead.className = 'lm-head';
+const lmList = document.createElement('div');
+lmList.className = 'lm-levels';
+const lmBtns = document.createElement('div');
+lmBtns.className = 'lm-btns';
+const lmDev = document.createElement('div');
+lmDev.className = 'lm-dev';
+loveMenu.append(lmHead, lmDev, lmBtns, lmList); // «Макс» — сразу под заголовком, без прокрутки
+function renderLoveCard() {
+  const l = levelOf(love);
+  const next = LEVELS[l + 1];
+  lmHead.innerHTML = `<b>💗 ${LEVELS[l].label}</b><span>${Math.round(love)} / ${LOVE_MAX}</span>`
+    + (next ? `<small>До «${next.label}» — ещё ${Math.max(0, Math.ceil(next.min - love))} ♥</small>` : '<small>Максимум симпатии ♥</small>');
+  lmList.innerHTML = '';
+  LEVELS.forEach((lv, i) => {
+    const row = document.createElement('div');
+    const state = i < l ? 'done' : i === l ? 'cur' : 'lock';
+    row.className = `lm-lvl ${state}`;
+    const feats = FEATURES.filter((f) => f.lvl === i);
+    const items = feats.map((f) => {
+      const open = unlocked(f.id);
+      const byAd = open && i > l && !maxedOut();
+      return `<li class="${open ? 'open' : ''}">${open ? '✓' : '🔒'} ${f.name}${byAd ? ' <em>(за рекламу)</em>' : ''}</li>`;
+    }).join('');
+    const pct = state === 'cur' && next ? Math.round(((love - lv.min) / (next.min - lv.min)) * 100) : state === 'done' ? 100 : 0;
+    row.innerHTML = `<div class="lm-top"><span class="lm-n">${state === 'lock' ? '🔒' : i + 1}</span><span class="lm-name">${lv.label}</span><span class="lm-min">${lv.min} ♥</span></div>`
+      + (state === 'cur' && next ? `<div class="lm-bar"><i style="width:${pct}%"></i></div>` : '')
+      + (items ? `<ul>${items}</ul>` : '');
+    lmList.appendChild(row);
+  });
+  if (wishCount > 0) lmHead.insertAdjacentHTML('beforeend', `<small class="lm-wishes">💭 Исполнено желаний: ${wishCount}</small>`);
+  lmDev.hidden = !!window.WAIFU_RELEASE; // в версии для магазина «Макс» и «Сброс» скрыты
+}
+let devSuppressClick = false;
+function enableDev() {
+  if (window.WAIFU_RELEASE) return; // в версии для магазина режима разработчика нет
+  devSuppressClick = true; // клик после касания не должен закрыть окошко
+  if (devMode) { showToast('🛠 Режим разработчика уже включён'); return; }
+  devMode = true;
+  devTaps = [];
+  try { localStorage.setItem(DEV_KEY, '1'); } catch { /* ignore */ }
+  wakeUi();
+  // Открываем окошко после текущего касания (иначе оно сразу закроется «тапом мимо»).
+  setTimeout(() => { renderLoveCard(); loveMenu.hidden = false; }, 60);
+  showToast('🛠 Режим разработчика: «Макс» и «Сброс» в окошке прогресса');
+}
+// Секрет: 7 быстрых касаний по сердечку (шкала сверху или 💗 в окошке) или удержание 3 с.
+let devHold = 0;
+// Ловим на всём окне по месту сердечка: даже если кнопки спрятались (через 4 с без касаний),
+// касание туда всё равно считается.
+window.addEventListener('pointerdown', (e) => {
+  const t = e.target;
+  const r = $('affection').getBoundingClientRect();
+  const onBadge = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  if (!onBadge && !t.closest?.('.lm-head')) return;
+  if (t.closest?.('#love-menu') && !t.closest('.lm-head')) return;
+  const now = performance.now();
+  devTaps = devTaps.filter((x) => now - x < 10000);
+  devTaps.push(now);
+  if (devTaps.length >= 7) enableDev();
+  clearTimeout(devHold);
+  devHold = setTimeout(enableDev, 3000);
+}, true);
+for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, () => clearTimeout(devHold), true);
+$('affection').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (e.target.closest('#love-menu')) return;
+  if (devSuppressClick) { devSuppressClick = false; loveMenu.hidden = false; renderLoveCard(); return; }
+  loveMenu.hidden = !loveMenu.hidden;
+  if (!loveMenu.hidden) { renderLoveCard(); renderBoost(); }
+  document.body.classList.toggle('love-open', !loveMenu.hidden);
+});
+loveMenu.addEventListener('click', (e) => e.stopPropagation());
+new MutationObserver(() => document.body.classList.toggle('love-open', !loveMenu.hidden)).observe(loveMenu, { attributes: true, attributeFilter: ['hidden'] });
+const boostBtn = document.createElement('button');
+boostBtn.id = 'love-boost';
+lmBtns.appendChild(boostBtn);
+function renderBoost() {
+  boostBtn.hidden = !hasAds() || love >= LOVE_MAX;
+  if (boostOn()) {
+    boostBtn.textContent = `✨ x2 ещё ${Math.ceil((boostUntil - Date.now()) / 60000)} мин`;
+    boostBtn.disabled = true;
+  } else {
+    boostBtn.textContent = '▶ x2 симпатия 10 мин (реклама)';
+    boostBtn.disabled = false;
+  }
+}
+boostBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('love-menu').hidden = true;
+  if (boostOn()) return;
+  adsRewarded(() => {
+    boostUntil = Date.now() + BOOST_MS;
+    try { localStorage.setItem(BOOST_KEY, String(boostUntil)); } catch { /* ignore */ }
+    refillGain(); gainBudget = GAIN_CAP; // и запас касаний полный
+    showToast('✨ x2 симпатия на 10 минут!');
+    say(pick(['Ой, мне так хорошо с тобой~', 'Хи, я вся твоя ♥', 'Давай ещё пообщаемся~']), 'happy');
+    renderBoost();
+  }, () => showToast('Реклама не досмотрена — ничего страшного'));
+});
+$('affection').addEventListener('click', renderBoost, true);
+setInterval(() => { if (!$('love-menu').hidden) renderBoost(); }, 10000);
+{
+  const rs = document.createElement('button'); rs.id = 'love-reset'; rs.textContent = 'Сброс';
+  if (!window.WAIFU_RELEASE) {
+    // «Макс» — только в веб-версии для проверки (в приложении его нет).
+    const mx = document.createElement('button'); mx.id = 'love-max'; mx.textContent = '♥ Макс';
+    mx.addEventListener('click', (e) => { e.stopPropagation(); setLove(LOVE_MAX); loveMenu.hidden = true; showToast('♥ Максимум'); });
+    lmDev.append(mx);
+  }
+  lmDev.append(rs);
+}
+$('love-reset').addEventListener('click', (e) => { e.stopPropagation(); reachedLvl = 0; try { localStorage.setItem('waifu-reached', '0'); } catch { /* ignore */ } setLove(0, true); $('love-menu').hidden = true; showToast('Симпатия сброшена'); });
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#affection, #love-menu')) $('love-menu').hidden = true; });
 renderAffection();
+// В релизе (Яндекс Игры) кнопки «Макс» нет — симпатию надо заработать.
+// «Макс» в релизе — только в режиме разработчика (см. окошко прогресса).
+initPlatform();
 
 // ---------- Реплики и озвучка ----------
 
@@ -242,7 +980,28 @@ let voiceOn = true;
 let bubbleTimer = 0;
 let lastSpokeAt = 0;
 
+// Что сейчас на ногах: колготки (свои), чулки или гольфы — реплики подстраиваются.
+function legwear() {
+  try {
+    const id = wear.legs || 'base';
+    if (id === 'base') return GIRL?.baseLegs ?? window.WAIFU_BASE_LEGS ?? 'tights';
+    return PIECE_SOURCES.find((x) => x.id === id)?.legsKind ?? 'stockings';
+  } catch { return 'tights'; } // ещё не загрузилось
+}
+const LEGS_LINES = {
+  bare: ['Без чулок тоже неплохо~', 'Ножки отдыхают ♥', 'Так свободнее~'],
+  stockings: ['Тебе нравятся мои чулочки? ♥', 'Чулочки — моя слабость~', 'Хи, красивые чулки, правда?', 'Смотришь на мои чулки? 😳', 'Резинка не сползла?..'],
+  socks: ['Тебе нравятся мои гольфы? ♥', 'Хи, гольфики~', 'Мило же, да?'],
+  tights: ['Нравятся мои колготки? ♥', 'Колготки — классика~', 'Мягкие, правда?', 'Хи, гладкие, да?~'],
+};
+function legsText(text) {
+  const k = legwear();
+  if (k === 'tights' || !/колготк/i.test(text)) return text;
+  const w = k === 'socks' ? ['гольфы', 'гольфах', 'гольфами'] : ['чулочки', 'чулочках', 'чулочками'];
+  return text.replace(/колготках/gi, w[1]).replace(/колготками/gi, w[2]).replace(/колготки/gi, w[0]);
+}
 function say(text, expression) {
+  text = legsText(text);
   const bubble = $('bubble');
   bubble.textContent = text;
   bubble.classList.remove('hidden');
@@ -287,52 +1046,182 @@ function toNdc(e) {
   pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
 }
 
-function zoneAt(e) {
+function zoneAt(e, deep = false) {
   if (!character) return null;
   toNdc(e);
   raycaster.setFromCamera(pointer, camera);
-  return character.hitTest(raycaster.ray);
+  const hit = character.hitTest(raycaster.ray);
+  // Хвостики волос — своя зона (ей нравится, когда их гладят), если они ближе к пальцу.
+  const hair = character.hitHair?.(raycaster.ray);
+  if (hair) {
+    const ht = hit ? hit.point.clone().sub(raycaster.ray.origin).dot(raycaster.ray.direction) : Infinity;
+    if (!hit || hair.t < ht + 0.01 * character.scale) return hair;
+  }
+  if (hit || !deep) return hit;
+  // Не попали в зону — проверяем саму модель (край юбки, бёдра, плечи, волосы…).
+  return character.hitTestMesh(raycaster);
+}
+
+// Отклик под пальцем: касание засчитано.
+function touchRipple(x, y) {
+  const el = document.createElement('div');
+  el.className = 'ripple';
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 600);
 }
 
 // Активные касания: для щипка (зум) двумя пальцами и поворота свайпом по фону.
 const touches = new Map();
 let orbitDrag = null; // { lastX }
+let camPid = null, camLast = null; // второй палец во время захвата точки — крутит камеру
+var grabHeldFn = () => false; // долгий зажим уже сработал, точка ещё не взята
+let stroking = null;
+let lastOnHerAt = 0; // когда последний раз палец был на ней (для «Авто»: промах ≠ жест камерой)
+let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
 let pinchDist = 0;
+const pinch2 = { mode: null, both: false, d0: null, x0: 0, y0: 0 }; // что делает текущий жест двумя пальцами: 'zoom' | 'pan'
+let pinchMidY = null;
+let pinchMidX = 0;
+let pinchAng = 0;
 
 function pinchDistance() {
   const [a, b] = [...touches.values()];
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+// Двойной тап: по ней — камера плавно подлетает к этому месту; по фону — обычный вид.
+let lastTap = { t: 0, x: 0, y: 0 };
+function focusAt(e) {
+  const hit = character ? zoneAt(e, true) : null;
+  if (!hit) { resetView(); showToast('⌂ Обычный вид'); return; }
+  exitFreeCam();
+  setFaceCam(false);
+  enterManualCam();
+  // Плавно: точка взгляда — туда, куда тапнул, и камера ближе.
+  const from = { off: manualCam.off.clone(), dist: manualCam.dist };
+  const to = { off: hit.point.clone().sub(camAnchor()), dist: Math.min(manualCam.dist, 0.7 * camBase.S) };
+  let t0 = performance.now();
+  const step = () => {
+    if (!manualCam) return;
+    const k = Math.min(1, (performance.now() - t0) / 450);
+    const e2 = k * k * (3 - 2 * k);
+    manualCam.off.lerpVectors(from.off, to.off, e2);
+    manualCam.dist = from.dist + (to.dist - from.dist) * e2;
+    applyOrbit();
+    if (k < 1) requestAnimationFrame(step);
+    else lockCamBone(); // подлетела — цепляемся к этому месту
+  };
+  step();
+}
 canvas.addEventListener('pointerdown', (e) => {
+  // Двойной тап больше не приближает (мешал гладить/тапать её).
   if (!character) return;
-  canvas.setPointerCapture(e.pointerId);
+  // Открыт список поз — касание по сцене просто закрывает его.
+  if (!$('pose-list').hidden && !poseMode) { setPoseListOpen(false); return; }
+  if (e.isPrimary && touches.size) touches.clear(); // первый палец, а в списке кто-то остался — это «залипший»
+  try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 1) flickStart = { x: e.clientX, y: e.clientY, t: performance.now(), onHer: !!zoneAt(e) || nearHerOnScreen(e) };
   pointerActive = true;
   $('hint').style.opacity = 0;
 
+  // Держишь точку одним пальцем (или зажал и ещё не повёл), а вторым касаешься экрана — второй палец крутит камеру,
+  // захват не сбрасывается: можно расставлять её и одновременно смотреть с другой стороны.
+  if (touches.size === 2 && autoMode && (poseDrag?.grab || grabHeldFn())) {
+    camPid = e.pointerId; camLast = { x: e.clientX, y: e.clientY };
+    return;
+  }
+  // Два пальца в любом режиме — щипок: приблизить/отдалить.
   if (touches.size === 2) {
-    // Второй палец: начинаем щипок, отменяем поглаживание и поворот.
+    // Двойной тап двумя пальцами — чистый экран: пропадает весь интерфейс, остаётся только она. Ещё раз — вернуть.
+    // Считаются только настоящие короткие тапы (см. endPointer): щипки и сдвиги камеры подряд экран не прячут.
+    twoTap = { t: performance.now(), start: [...touches.entries()].map(([id, v]) => [id, v.x, v.y]) };
+    pinchDist = pinchDistance();
+    poseDrag = null;
+    orbitDrag = null;
+    bgSwipe = null;
+    petting = null;
+    stroking = null;
+    canvas.classList.remove('petting');
+    return;
+  }
+  if (touches.size > 2) return;
+
+  // Режим позы: хватаем руку или голову. Точки спрятаны (⁘) или «чистый вид» —
+  // касания как на главной: гладь и тапай её, поза и повтор остаются.
+  if (poseMode && !petInPose()) {
+    poseDragStart(e);
+    return;
+  }
+
+  // Режим камеры: пальцы крутят и приближают, реакций нет.
+  if (cameraMode) {
+    if (touches.size === 1 && zoneAt(e) && performance.now() - camHintAt > 5000) {
+      camHintAt = performance.now();
+      showToast('Касания выключены — нажми 🎥 ещё раз');
+    }
+    if (touches.size === 2) {
+      pinchDist = pinchDistance();
+      orbitDrag = null;
+    } else if (touches.size === 1) {
+      orbitDrag = { lastX: e.clientX, lastY: e.clientY, sx: e.clientX, sy: e.clientY, axis: null };
+    }
+    return;
+  }
+
+  if (touches.size === 2) {
+    // Второй палец в обычном режиме: отменяем поглаживание.
     pinchDist = pinchDistance();
     petting = null;
+    stroking = null;
     orbitDrag = null;
     canvas.classList.remove('petting');
     return;
   }
   if (touches.size > 2) return;
 
-  const hit = zoneAt(e);
+  // Открыт гардероб — палец по экрану только крутит камеру (её не гладим и не двигаем): удобно разглядывать наряд.
+  const dressing = !$('wardrobe').classList.contains('hidden') || (autoMode && camOnly); // и режим «Камера»: её не задеваем
+  const hit = dressing ? null : zoneAt(e, true);
+  if (hit) touchRipple(e.clientX, e.clientY);
   if (!hit) {
-    orbitDrag = { lastX: e.clientX };
+    // Пустое место в обычном режиме: свайп крутит камеру (сесть/встать — у левого края).
+    bgSwipe = { sy: e.clientY, sx: e.clientX, lastX: e.clientX, lastY: e.clientY, axis: null };
+    if (autoMode) {
+      // Рядом с ней (в пределах пальца) или сразу после поглаживания — это промах мимо неё, а не жест камерой.
+      bgSwipe.near = !dressing && performance.now() - lastOnHerAt < 450;
+      for (let a = 0; a < 8 && !bgSwipe.near && !dressing; a++) {
+        if (zoneAt({ clientX: e.clientX + Math.cos(a * Math.PI / 4) * 16, clientY: e.clientY + Math.sin(a * Math.PI / 4) * 16 }, true)) bgSwipe.near = true;
+      }
+    }
     return;
   }
+
+  // Одежда и волосы рядом с пальцем качнулись от прикосновения.
+  { character.poke(hit.point, raycaster.ray.direction, 0.8); pieceWardrobe.poke(hit.point, raycaster.ray.direction, 0.8, character.scale); }
+  // Тап: ткань в этом месте слегка «вздрагивает».
+  pieceWardrobe.clothPush(hit.point, clothAx.setFromMatrixColumn(camera.matrixWorld, 2), 0.7, character.scale);
 
   if (hit.zone === 'headpat') {
     petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 0 };
     canvas.classList.add('petting');
     return;
   }
+  // Ждём: если палец поведут — это поглаживание, если отпустят — тычок.
+  stroking = { hit, lastX: e.clientX, lastY: e.clientY, sx: e.clientX, sy: e.clientY, moved: 0, dist: 0, ticks: 0 };
+});
 
+// Тычок: срабатывает, когда палец отпустили, не поведя им.
+function tapReaction(hit, e) {
+  if (hit?.zone === 'legs' && LEGS_LINES[legwear()] && Math.random() < 0.5) {
+    character.react({ expression: 'happy', motion: 'shyLegs' });
+    changeAffection(0.4);
+    floatHeart(e.clientX, e.clientY);
+    say(pick(LEGS_LINES[legwear()]));
+    return;
+  }
   // Слишком частые тычки — обижается.
   const now = performance.now();
   recentTaps = recentTaps.filter((t) => now - t < 2500);
@@ -343,23 +1232,223 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
   triggerReaction(hit.zone, hit, e);
-});
+}
+
+// Поглаживание любой зоны, кроме головы: мягкая реакция раз в ~80px.
+let lastStrokeLineAt = 0;
+let lastDragPoke = 0;
+function strokeTick(e) {
+  const r = STROKES[stroking.hit.zone];
+  if (!r) return;
+  wishEvent(stroking.hit.zone);
+  const t = tier();
+  stroking.ticks++;
+  // Одежду ведёт за пальцем.
+  const hit = zoneAt(e);
+  if (hit) { character.poke(hit.point, dragDirection(e), 0.7); pieceWardrobe.poke(hit.point, dragDirection(e), 0.7, character.scale); }
+  if (stroking.ticks % 3 === 1 && !character.motions.some((m) => m.name === r.motion)) {
+    character.react({ expression: r.expression[t], motion: r.motion, side: stroking.hit.side, strength: 0.7 });
+  }
+  changeAffection(r.affection[t]);
+  if (r.affection[t] > 0 && stroking.ticks % 2 === 0) floatHeart(e.clientX, e.clientY);
+  else if (r.affection[t] <= 0) lockedStroke(stroking.hit.zone, r, e);
+  const now = performance.now();
+  if (now - lastStrokeLineAt > 2600 && now - lastSpokeAt > 1800) {
+    lastStrokeLineAt = now;
+    // Ноги — про чулки/гольфы/колготки, как при тапе (иногда — обычная фраза).
+    const lw = stroking.hit.zone === 'legs' ? LEGS_LINES[legwear()] : null;
+    // Спит — отвечает сонно, а не обычной фразой.
+    say(pick(character.sleep > 0.5 ? SLEEP_LINES : lw && Math.random() < 0.4 ? lw : r.lines[t]));
+  }
+}
+
+// Направление движения пальца в мире (по горизонтали).
+const dragVec = new THREE.Vector3();
+// Ткань под пальцем уходит туда, куда ведёшь (и чуть «на тебя», чтобы не проваливалась в тело).
+const clothDir = new THREE.Vector3();
+const clothAx = new THREE.Vector3();
+function clothDrag(e, lastX, lastY) {
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  const sp = Math.hypot(dx, dy);
+  if (sp < 0.5 || !character) return;
+  const h = zoneAt(e, true);
+  if (!h) return;
+  clothDir.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(dx / sp);
+  clothDir.addScaledVector(clothAx.setFromMatrixColumn(camera.matrixWorld, 1), -dy / sp);
+  clothDir.addScaledVector(clothAx.setFromMatrixColumn(camera.matrixWorld, 2), 0.3);
+  pieceWardrobe.clothPush(h.point, clothDir, Math.min(sp / 14, 1.4), character.scale);
+}
+function dragDirection(e) {
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+  const fwd = raycaster.ray.direction.clone();
+  const dx = Math.sign(e.clientX - stroking.lastX) || 0;
+  return dragVec.copy(fwd).multiplyScalar(0.6).addScaledVector(right, dx);
+}
 
 canvas.addEventListener('pointermove', (e) => {
+  if (camPid != null && e.pointerId === camPid) {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    rotateBy(-(e.clientX - camLast.x) * 0.01, (e.clientY - camLast.y) * 0.005);
+    camLast = { x: e.clientX, y: e.clientY };
+    return;
+  }
   toNdc(e);
   if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size === 2 && pinchDist > 0) {
     const d = pinchDistance();
-    zoomBy(pinchDist / d);
+    // Два пальца — одно из двух за жест: щипок (ближе/дальше, центр кадра остаётся на месте) или сдвиг кадра
+    // (ведёшь оба пальца вместе). Раньше делалось сразу и то и другое, и при щипке центровка съезжала.
+    const [a, b] = [...touches.values()];
+    const midX = (a.x + b.x) / 2;
+    const midY = (a.y + b.y) / 2;
+    const ang = 0;
+    if (!pinch2.mode) {
+      // Смотрим на итог с начала жеста (события приходят по одному пальцу, по шагам судить нельзя).
+      if (pinch2.d0 == null) { pinch2.d0 = d; pinch2.x0 = midX; pinch2.y0 = midY; }
+      const nd = Math.abs(d - pinch2.d0), nm = Math.hypot(midX - pinch2.x0, midY - pinch2.y0);
+      if (Math.max(nd, nm) > 14) pinch2.mode = nd > nm * 1.15 ? 'zoom' : 'pan';
+    } else if (!pinch2.both) {
+      // Второе действие подключается, только если его делают заметно: при щипке повёл пальцы в сторону —
+      // кадр поедет; при сдвиге развёл пальцы — начнёт приближать. Случайное дрожание ничего не сбивает.
+      const nd = Math.abs(d - pinch2.d0), nm = Math.hypot(midX - pinch2.x0, midY - pinch2.y0);
+      if ((pinch2.mode === 'zoom' ? nm : nd) > 28) pinch2.both = true;
+    }
+    if (pinch2.mode === 'zoom' || pinch2.both) zoomBy(pinchDist / d);
     pinchDist = d;
+    if (pinchMidY != null && (pinch2.mode === 'pan' || pinch2.both)) {
+      const dx = midX - pinchMidX;
+      const dy = midY - pinchMidY;
+      if (freeCam) {
+        const dist = 1.5;
+        const k = (2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / window.innerHeight;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+        camera.position.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
+        applyFree();
+      } else {
+        enterManualCam();
+        const k = (2 * manualCam.dist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / window.innerHeight;
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+        manualCam.off.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
+        applyOrbit();
+      }
+    }
+    pinchMidX = midX;
+    pinchMidY = midY;
+    pinchAng = ang;
+    return;
+  }
+  if (poseDrag) {
+    poseDragMove(e);
     return;
   }
   if (orbitDrag) {
-    rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01);
+    // Сначала понимаем направление жеста: вбок — крутим камеру (сесть/встать — только ползунком).
+    rotateBy(-(e.clientX - orbitDrag.lastX) * 0.01, (e.clientY - orbitDrag.lastY) * 0.005);
     orbitDrag.lastX = e.clientX;
+    orbitDrag.lastY = e.clientY;
+    return;
+  }
+  if (bgSwipe) {
+    // Пустое место в обычном режиме — камера свободно вращается (со всех ракурсов).
+    // В «Авто» одним пальцем: вбок — вокруг неё, вверх/вниз — ближе/дальше.
+    if (autoMode) {
+      // Палец соскользнул с неё (только что гладил) — камеру не трогаем, она не «уезжает» при поглаживании.
+      if (bgSwipe.near) return;
+      // Свободно вокруг неё: вбок — по кругу, вверх-вниз — сверху/снизу. Плавно (см. camEase).
+      camEase.yaw += -(e.clientX - bgSwipe.lastX) * 0.009;
+      camEase.pitch += (e.clientY - bgSwipe.lastY) * 0.0045;
+    } else rotateBy(-(e.clientX - bgSwipe.lastX) * 0.01, (e.clientY - bgSwipe.lastY) * 0.005);
+    bgSwipe.lastX = e.clientX;
+    bgSwipe.lastY = e.clientY;
+    return;
+  }
+  if (stroking && autoMode && !poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
+    // «Авто»: повёл по ней вверх-вниз — ведёшь её саму (палец = положение, сколько провёл — столько и сдвинулась):
+    // выше пояса — наклон вперёд / прогиб назад, ниже пояса — присесть / сесть / лечь / встать.
+    // Вбок или по кругу — гладишь.
+    const dx = e.clientX - stroking.sx, dy = e.clientY - stroking.sy;
+    if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.25 && autoState !== 'freeze' && autoState !== 'hold') { // «Замри» — только гладим, не двигаем
+      // «Выше пояса» считаем вдоль самого тела (от таза к груди), а не по высоте над полом —
+      // так работает и стоя, и сидя, и лёжа.
+      const B = character.bones, P = (n) => n.getWorldPosition(new THREE.Vector3());
+      const waistP = P(B.spine ?? B.hips), axis = P(B.neck ?? B.head).sub(P(B.hips)).normalize();
+      const upper = stroking.hit.point ? stroking.hit.point.clone().sub(waistP).dot(axis) > 0.04 * (character.scale ?? 1) : ['body', 'arm', 'face'].includes(stroking.hit.zone);
+      // Идёт повтор — рукой его не сбить, останавливает только «отмена». Движение, за которое взялся
+      // (наклон или приседание), на время идёт за пальцем, остальное продолжает повторяться. Отпустил:
+      // предложит «+ Повторить и это» (заменит/добавит это движение), а не нажмёшь — вернётся прежний повтор.
+      const dk = upper ? 'bend' : 'sit';
+      const layering = reps.home.on && reps.home.state === 'play';
+      if (reps.home.on && !layering) { setRepeat(false, true); autoLayer = null; renderAutoRep(); }
+      // Это движение уже повторяется (в основном повторе или вторым слоем) — повтор НЕ останавливаем и не
+      // перехватываем: она продолжает повторять, а палец лишь сдвигает движение (глубже/выше).
+      const repeatsIt = layering && (autoLayer?.kind === dk || reps.home.autoKind === dk || reps.home.autoKind === 'both');
+      var dragShift = repeatsIt;
+      if (layering && !repeatsIt) { autoLayerDrag = dk; autoRec = null; if (dk === 'bend') { reps.home.layerBend ??= character.bodyOffset.hipsRotX; autoBendTarget = reps.home.layerBend; } }
+      else autoLayerDrag = null;
+      stopAuto(true);
+      stroking = null;
+      if (autoState === 'sleep') setAutoState('live'); // взялся её двигать — просыпается
+      poseDrag = { kind: upper ? 'benddrag' : 'sitdrag', y: e.clientY, t: performance.now(), auto: true, dir: 0, run: 0, turns: 0, shift: dragShift };
+      try { navigator.vibrate?.(8); } catch { /* ignore */ } // лёгкий отклик: «взял её»
+      showLabel(upper ? 'Ниже — наклон, выше — прогиб' : 'Ниже — сесть / лечь, выше — встать');
+      return;
+    }
+  } else if (stroking && poseMode && stroking.ticks === 0 && stroking.hit.zone !== 'hair') {
+    // Режим позы без точек: повёл по ней вверх-вниз — сажаем/поднимаем (как правая полоса);
+    // вбок или по кругу — поглаживание.
+    const ax = Math.abs(e.clientX - stroking.sx), ay = Math.abs(e.clientY - stroking.sy);
+    if (ay > 22 && ay > ax * 1.5) {
+      stroking = null;
+      poseDrag = { kind: 'sitdrag', y: e.clientY, t: performance.now() };
+      showLabel('Ниже — сесть / лечь, выше — встать');
+      return;
+    }
+  }
+  if (stroking) {
+    lastOnHerAt = performance.now();
+    const d = Math.hypot(e.clientX - stroking.lastX, e.clientY - stroking.lastY);
+    stroking.moved += d;
+    stroking.dist += d;
+    if (stroking.moved > 18) {
+      while (stroking.dist > 80) {
+        stroking.dist -= 80;
+        // Не отрывая пальца перешёл на другую зону — гладим уже её.
+        const now = zoneAt(e, true);
+        if (now && now.zone === 'headpat') {
+          petting = { lastX: e.clientX, lastY: e.clientY, dist: 0, ticks: 1 };
+          canvas.classList.add('petting');
+          stroking = null;
+          break;
+        }
+        if (now && STROKES[now.zone]) stroking.hit = now;
+        strokeTick(e);
+      }
+      if (!stroking) return;
+    }
+    clothDrag(e, stroking.lastX, stroking.lastY);
+    // Ткань и волосы идут за пальцем непрерывно, пока ведёшь (а не только раз в «тик»).
+    if (stroking.moved > 18 && performance.now() - lastDragPoke > 70) {
+      lastDragPoke = performance.now();
+      const h = zoneAt(e, true);
+      if (h) {
+        const dir = dragDirection(e);
+        character.poke(h.point, dir, 0.55);
+        pieceWardrobe.poke(h.point, dir, 0.55, character.scale);
+      }
+    }
+    stroking.lastX = e.clientX;
+    stroking.lastY = e.clientY;
     return;
   }
   if (!petting) return;
+  // Поглаживание головы тоже качает волосы.
+  if (petting.dist > 35) {
+    const hit = zoneAt(e);
+    if (hit) { character.poke(hit.point, raycaster.ray.direction, 0.4); pieceWardrobe.poke(hit.point, raycaster.ray.direction, 0.4, character.scale); }
+  }
+  clothDrag(e, petting.lastX, petting.lastY);
   const dx = e.clientX - petting.lastX;
   const dy = e.clientY - petting.lastY;
   petting.dist += Math.hypot(dx, dy);
@@ -368,7 +1457,19 @@ canvas.addEventListener('pointermove', (e) => {
   // Каждые ~70px поглаживания — «тик»: симпатия и сердечко.
   while (petting.dist > 70) {
     petting.dist -= 70;
+    // Ушёл с макушки на другую зону, не отрывая пальца, — дальше гладим её.
+    {
+      const now = zoneAt(e, true);
+      if (now && now.zone !== 'headpat' && STROKES[now.zone]) {
+        stroking = { hit: now, lastX: e.clientX, lastY: e.clientY, sx: e.clientX, sy: e.clientY, moved: 99, dist: 0, ticks: 1 };
+        petting = null;
+        canvas.classList.remove('petting');
+        strokeTick(e);
+        return;
+      }
+    }
     petting.ticks++;
+    wishEvent('headpat');
     changeAffection(0.4);
     floatHeart(e.clientX, e.clientY);
     if (petting.ticks % 6 === 1 && performance.now() - lastSpokeAt > 2500) {
@@ -377,9 +1478,97 @@ canvas.addEventListener('pointermove', (e) => {
   }
 });
 
+// Два быстрых свайпа по ней подряд (на главной): вниз — на одно положение ниже
+// (стоя → присела → на коленях → села → легла), вверх — на одно выше.
+let flickStart = null;
+// Палец в пределах её силуэта на экране (по костям, с запасом) — быстро, без пересчёта сетки.
+function nearHerOnScreen(e) {
+  if (!character) return false;
+  const v = new THREE.Vector3();
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const n of ['head', 'hips', 'leftFoot', 'rightFoot', 'leftHand', 'rightHand', 'leftLowerLeg', 'rightLowerLeg']) {
+    const bn = character.bones[n] ?? character.vrm.humanoid.getNormalizedBoneNode(n);
+    if (!bn) continue;
+    bn.getWorldPosition(v).project(camera);
+    const sx = (v.x * 0.5 + 0.5) * window.innerWidth, sy = (-v.y * 0.5 + 0.5) * window.innerHeight;
+    x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+  }
+  const m = 30;
+  return e.clientX > x0 - m && e.clientX < x1 + m && e.clientY > y0 - m * 2 && e.clientY < y1 + m;
+}
+let lastFlick = null;
+const SIT_STEPS = [0, 0.45, 0.8, 1.0, 1.3];
+function checkFlick(e) {
+  const f = flickStart;
+  flickStart = null;
+  if (!f || !character || poseMode || cameraMode || touches.size > 1) return;
+  const dt = performance.now() - f.t;
+  const dy = e.clientY - f.y;
+  const dx = e.clientX - f.x;
+  if (!f.onHer || dt > (window.__flickMaxDt ?? 450) || Math.abs(dy) < 45 || Math.abs(dx) > Math.abs(dy) * 0.8) return;
+  const dir = Math.sign(dy);
+  const now = performance.now();
+  if (lastFlick && lastFlick.dir === dir && now - lastFlick.t < (window.__flickMaxGap ?? 900)) {
+    lastFlick = null;
+    const cur = character.sit;
+    const max = sitMax();
+    let next;
+    if (dir > 0) next = SIT_STEPS.find((v) => v > cur + 0.05 && v <= max + 1e-6);
+    else next = [...SIT_STEPS].reverse().find((v) => v < cur - 0.05);
+    if (next == null) return;
+    character.sitRate = 0.9;
+    sitBy((next - cur) / 0.004);
+    showToast({ 0: '⬆ Встала', 0.45: '⬇ Присела', 0.8: '⬇ На коленях', 1: '⬇ Села', 1.3: '⬇ Легла' }[next] ?? '');
+    return;
+  }
+  lastFlick = { dir, t: now };
+}
+
+let autoTap = null;
+let twoTap = null; // два пальца коснулись: когда и где (для «двойного тапа двумя пальцами»)
+let twoTapAt = 0;
 function endPointer(e) {
+  if (camPid != null && e.pointerId === camPid) { camPid = null; camLast = null; touches.delete(e.pointerId); return; } // убрал палец камеры — захват точки продолжается
+  if (camPid != null) { touches.delete(camPid); camPid = null; camLast = null; } // отпустил точку — палец камеры больше не считается
+  if (twoTap && touches.size === 2) {
+    const now = performance.now();
+    const still = twoTap.start.every(([id, x, y]) => { const c = touches.get(id); return c && Math.hypot(c.x - x, c.y - y) < 14; });
+    if (e.type === 'pointerup' && still && now - twoTap.t < 300) {
+      if (now - twoTapAt < 550) { twoTapAt = 0; setCleanScreen(!document.body.classList.contains('cleanscreen')); }
+      else twoTapAt = now;
+    } else twoTapAt = 0;
+    twoTap = null;
+  }
+  if (e.type === 'pointerup') checkFlick(e);
+  // «Авто»: двойной тап по ней — переодевается сама; двойной тап по фону — крупно / в полный рост.
+  if (autoMode && e.type === 'pointerup' && touches.size === 1) {
+    const bgTap = bgSwipe && Math.hypot(e.clientX - bgSwipe.sx, e.clientY - bgSwipe.sy) < 12;
+    const herTap = (stroking && stroking.moved <= 18) || (petting && petting.ticks === 0);
+    if (bgTap || herTap) {
+      const now = performance.now();
+      if (autoTap && now - autoTap.t < 340 && autoTap.her === !!herTap && Math.hypot(e.clientX - autoTap.x, e.clientY - autoTap.y) < 48) {
+        autoTap = null;
+        if (herTap) {
+          // В обычном режиме двойной тап по ней — это просто два касания (её тыкают): камеру не трогаем.
+        } else if (camOnly && zoneAt(e, true)) {
+          // Режим «🎥 Камера»: двойной тап по ней — камера подлетает к этому месту и держит его в центре.
+          focusAt(e); autoCentered = false;
+        } else {
+          // Первый двойной тап — камера возвращается по центру (она продолжает, что делала);
+          // второй подряд — всё возвращается: она встаёт ровно, повтор снимается.
+          if (!autoCentered) { camEase.yaw = 0; camEase.pitch = 0; resetView(); autoCentered = true; }
+          else { autoReturn(); autoCentered = false; }
+        }
+      } else autoTap = { t: now, x: e.clientX, y: e.clientY, her: !!herTap };
+    } else autoTap = null;
+  }
+  activeHandle = null;
+  snapAnchor = null;
   touches.delete(e.pointerId);
-  if (touches.size < 2) pinchDist = 0;
+  if (poseDrag?.grab) grabRelease();
+  poseDrag = null;
+  bgSwipe = null;
+  if (touches.size < 2) { if (pinchDist && manualCam) lockCamBone(); pinchDist = 0; pinchMidY = null; pinch2.mode = null; pinch2.both = false; pinch2.d0 = null; }
   orbitDrag = null;
   if (touches.size > 0) return;
   pointerActive = false;
@@ -389,8 +1578,15 @@ function endPointer(e) {
     if (petting.ticks === 0) triggerReaction('headpat', null, e);
     petting = null;
   }
+  if (stroking) {
+    if (stroking.moved <= 18) tapReaction(stroking.hit, e);
+    stroking = null;
+  }
 }
 canvas.addEventListener('pointerup', endPointer);
+// Система забрала палец без «отпускания» (жест навигации, шторка) — не оставляем «залипший» палец:
+// из-за него один палец считался бы вторым, и жесты с долгим тапом переставали работать.
+canvas.addEventListener('lostpointercapture', (e) => { if (touches.has(e.pointerId)) endPointer(e); });
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   zoomBy(Math.exp(e.deltaY * 0.001));
@@ -409,26 +1605,322 @@ function holdButton(id, action) {
   });
   for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
 }
-holdButton('cam-left', () => rotateBy(-0.06));
-holdButton('cam-right', () => rotateBy(0.06));
 holdButton('cam-in', () => zoomBy(0.96));
 holdButton('cam-out', () => zoomBy(1.04));
-$('cam-reset').addEventListener('click', () => {
+// ---------- Быстрые ракурсы ----------
+// 🙂 «К лицу»: камера встаёт перед её лицом и держится там, как бы она ни
+// наклонялась, ни садилась и ни ложилась. Крутишь пальцем — слежение выключается.
+let faceCam = false;
+function setFaceCam(on) {
+  if (on) { exitFreeCam(); exitManualCam(); }
+  faceCam = on;
+  $('cam-face').classList.toggle('active', on);
+  if (on) {
+    camZoom = Math.min(camZoom, 0.28);
+    showToast('🙂 Близко к лицу · щипок — ещё ближе');
+  }
+}
+function wrapAngle(a) { return Math.atan2(Math.sin(a), Math.cos(a)); }
+function updateFaceCam(dt) {
+  if (!faceCam || !character) return;
+  const f = character.faceDir();
+  const yaw = Math.atan2(f.x, f.z);
+  // Лицо смотрит вниз (наклон) — камера опускается под лицо, к самому полу.
+  const pitch = THREE.MathUtils.clamp(Math.asin(THREE.MathUtils.clamp(f.y, -1, 1)) + 0.08, -1.35, 1.35);
+  const k = 1 - Math.exp(-dt * 3);
+  camYaw += wrapAngle(yaw - camYaw) * k;
+  camPitch += (pitch - camPitch) * k;
+  if (camTween >= 1) applyOrbit();
+}
+// 🎥 Ракурсы по кругу: спереди → сбоку → сзади → сверху → снизу.
+const VIEWS = [
+  { name: 'Спереди', yaw: 0, pitch: 0.05 },
+  { name: 'Сбоку', yaw: Math.PI / 2, pitch: 0.1 },
+  { name: 'Сзади', yaw: Math.PI, pitch: 0.15 },
+  { name: 'Сверху', yaw: 0.3, pitch: 1.2 },
+  { name: 'Снизу', yaw: -0.4, pitch: -0.45 },
+];
+let viewIdx = 0;
+function setView(v) {
+  exitFreeCam();
+  exitManualCam();
+  setFaceCam(false);
+  // Ракурс — относительно того, куда она повёрнута телом.
+  const f = character ? character.faceDir() : new THREE.Vector3(0, 0, 1);
+  const base = Math.abs(f.y) > 0.8 ? 0 : Math.atan2(f.x, f.z);
+  camYaw = base + v.yaw;
+  camPitch = v.pitch;
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+  showToast(`🎥 ${v.name}`);
+}
+$('cam-face').addEventListener('click', () => setFaceCam(!faceCam));
+$('cam-auto').addEventListener('click', () => setRepeat(!curRep().on));
+// 🕹 Шарик-джойстик: держишь и ведёшь — камера плавно облетает её (вбок)
+// и опускается/поднимается (вверх-вниз). Отпустил — стоит на месте.
+// Два шарика: 🕹 «облёт» — вбок облететь, вверх/вниз опустить/поднять камеру;
+// 🎯 «ближе» — вверх подлететь вплотную (к лицу), вниз отлететь; вбок — смотреть сверху/снизу.
+function makeStick(el) {
+  const st = { x: 0, y: 0, on: false, el };
+  const move = (e) => {
+    const r = el.getBoundingClientRect();
+    const R = r.width / 2;
+    let dx = e.clientX - (r.left + R);
+    let dy = e.clientY - (r.top + R);
+    const len = Math.hypot(dx, dy);
+    if (len > R) { dx *= R / len; dy *= R / len; }
+    st.x = dx / R;
+    st.y = dy / R;
+    el.querySelector('b').style.transform = `translate(${dx}px, ${dy}px)`;
+  };
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    el.setPointerCapture(e.pointerId);
+    st.on = true;
+    move(e);
+  });
+  el.addEventListener('pointermove', (e) => { if (st.on) move(e); });
+  for (const ev of ['pointerup', 'pointercancel']) {
+    el.addEventListener(ev, () => { st.on = false; st.x = 0; st.y = 0; el.querySelector('b').style.transform = ''; });
+  }
+  return st;
+}
+const stick = { x: 0, y: 0, on: false }; // розовый шарик убран (высота — двумя пальцами)
+// 🟣 Фиолетовый джойстик свободной камеры — в строке камеры: вверх — лететь вперёд
+// (куда смотришь), вниз — назад, вбок — в сторону. Двумя пальцами — как раньше.
+const stick2El = document.createElement('div');
+stick2El.id = 'cam-stick2';
+stick2El.className = 'stick zoom';
+stick2El.title = 'Свободная камера: вверх — вперёд, вниз — назад, вбок — в сторону';
+stick2El.innerHTML = '<b></b>';
+$('cam-controls').prepend(stick2El);
+const stick2 = makeStick(stick2El);
+const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v * Math.abs(v));
+function updateStick(dt) {
+  const a = stick.on && (dz(stick.x) || dz(stick.y));
+  const b = stick2.on && (dz(stick2.x) || dz(stick2.y));
+  if (!a && !b) return;
+  enterFreeCam();
+  const v = freeSpeed() * dt;
+  const fwd = freeDir();
+  const flat = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
+  const right = new THREE.Vector3(-flat.z, 0, flat.x);
+  if (b) {
+    // 🎯 Фиолетовый: вверх — лететь вперёд (куда смотришь), вниз — назад, вбок — в сторону.
+    camera.position.addScaledVector(fwd, -dz(stick2.y) * v);
+    camera.position.addScaledVector(right, dz(stick2.x) * v);
+  }
+  if (a) {
+    // 🕹 Розовый: вверх/вниз — подняться/опуститься, вбок — повернуться.
+    camera.position.y -= dz(stick.y) * v;
+    freeCam.yaw -= dz(stick.x) * 1.3 * dt;
+  }
+  applyFree();
+}
+// 🎥 внизу: одна кнопка раскрывает маленькую строку камеры (к лицу, ракурс, ±, вид по умолчанию).
+$('btn-cam').addEventListener('click', (e) => {
+  e.stopPropagation();
+  $('cam-controls').hidden = !$('cam-controls').hidden;
+  $('btn-cam').classList.toggle('active', !$('cam-controls').hidden);
+});
+document.addEventListener('pointerdown', (e) => {
+  if (!$('cam-controls').hidden && !e.target.closest('#cam-controls, #btn-cam, #scene')) {
+    $('cam-controls').hidden = true;
+    $('btn-cam').classList.remove('active');
+  }
+});
+$('cam-view')?.addEventListener('click', () => {
+  viewIdx = (viewIdx + 1) % VIEWS.length;
+  setView(VIEWS[viewIdx]);
+});
+
+// 📸 Фото: прячем интерфейс, снимаем кадр (фон — тот же, что на экране) и показываем,
+// чтобы сохранить долгим нажатием.
+let photoPending = false;
+$('cam-photo').addEventListener('click', (e) => {
+  e.stopPropagation();
+  wishEvent('photo');
+  document.body.classList.add('photo');
+  // Фон страницы в кадр не попадает (холст прозрачный) — рисуем его в сцену на время снимка.
+  const bg = getComputedStyle(document.body).backgroundColor;
+  const prev = scene.background;
+  const g = document.createElement('canvas');
+  g.width = 2; g.height = 256;
+  const ctx = g.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  const dark = document.body.classList.contains('dark');
+  grad.addColorStop(0, dark ? '#1b1238' : '#f6dcf1');
+  grad.addColorStop(1, dark ? '#3b2a6b' : '#d8c4ff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 2, 256);
+  const tex = new THREE.CanvasTexture(g);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = tex;
+  setTimeout(() => {
+    photoPending = true;
+    setTimeout(() => { scene.background = prev; tex.dispose(); }, 200);
+  }, 120);
+  void bg;
+});
+$('photo-close').addEventListener('click', () => { $('photo-view').hidden = true; });
+
+// 📍 Свои ракурсы: запомнить текущее положение камеры и возвращаться одним тапом (до 4).
+const VIEWS_KEY = 'waifu-cam-views';
+let savedViews = [];
+try { savedViews = JSON.parse(localStorage.getItem(VIEWS_KEY) || '[]'); } catch { savedViews = []; }
+function camState() {
+  return freeCam
+    ? { free: true, pos: camera.position.toArray(), yaw: freeCam.yaw, pitch: freeCam.pitch }
+    : { yaw: camYaw, pitch: camPitch, zoom: camZoom, lift: camLift, pan: camPanH.toArray(), full: fullBody };
+}
+function applyCamState(v) {
+  setFaceCam(false);
+  if (v.free) {
+    freeCam = { yaw: v.yaw, pitch: v.pitch };
+    camera.position.fromArray(v.pos);
+    applyFree();
+    return;
+  }
+  exitFreeCam();
+  camYaw = v.yaw; camPitch = v.pitch; camLift = v.lift ?? 0; camZoom = v.zoom;
+  camPanH.fromArray(v.pan ?? [0, 0, 0]);
+  if (v.full !== undefined && v.full !== fullBody) { fullBody = v.full; $('btn-zoom').classList.toggle('off', !fullBody); }
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+}
+function renderViews() {
+  const box = $('cam-views');
+  box.innerHTML = '';
+  savedViews.forEach((v, i) => {
+    const b = document.createElement('button');
+    b.className = 'cam-view-chip';
+    b.textContent = String(i + 1);
+    b.title = 'Тап — ракурс, удержание — удалить';
+    let hold = 0;
+    b.addEventListener('pointerdown', () => {
+      hold = setTimeout(() => {
+        hold = -1;
+        savedViews.splice(i, 1);
+        try { localStorage.setItem(VIEWS_KEY, JSON.stringify(savedViews)); } catch { /* ignore */ }
+        renderViews();
+        showToast('Ракурс удалён');
+      }, 650);
+    });
+    b.addEventListener('pointerup', () => { if (hold !== -1) { clearTimeout(hold); applyCamState(v); showToast(`📍 Ракурс ${i + 1}`); } });
+    b.addEventListener('pointerleave', () => { if (hold > 0) clearTimeout(hold); });
+    box.appendChild(b);
+  });
+}
+$('cam-pin').addEventListener('click', () => {
+  savedViews.push(camState());
+  if (savedViews.length > 3) savedViews.shift();
+  try { localStorage.setItem(VIEWS_KEY, JSON.stringify(savedViews)); } catch { /* ignore */ }
+  renderViews();
+  showToast(`📍 Ракурс ${savedViews.length} запомнен · тап — вернуться, удержать — удалить`);
+});
+renderViews();
+
+function resetView() {
+  exitManualCam();
+  exitFreeCam();
+  setFaceCam(false);
+  camLift = 0;
+  camPanH.set(0, 0, 0);
+  viewIdx = 0;
   camYaw = 0;
+  camPitch = 0.05;
   camZoom = 1;
   animateCamera = true;
   frameCamera();
   animateCamera = false;
+}
+$('cam-reset').addEventListener('click', resetView);
+// «Чистый вид»: весь интерфейс прячется — только она. Вернуть — кнопкой в углу.
+{
+  const cleanBtn = document.createElement('button');
+  cleanBtn.id = 'cam-clean';
+  cleanBtn.className = 'icon-btn';
+  cleanBtn.title = 'Чистый вид';
+  cleanBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/></svg>';
+  $('cam-reset').before(cleanBtn);
+  const back = document.createElement('button');
+  back.id = 'clean-exit';
+  back.title = 'Вернуть кнопки';
+  back.textContent = '◉';
+  document.body.appendChild(back);
+  const setClean = (on) => {
+    document.body.classList.toggle('clean', on);
+    if (on) showToast('Чистый вид — ◉ в углу вернёт кнопки');
+  };
+  cleanBtn.addEventListener('click', (e) => { e.stopPropagation(); setClean(true); });
+  back.addEventListener('pointerdown', (e) => e.stopPropagation());
+  back.addEventListener('click', (e) => { e.stopPropagation(); setClean(false); });
+}
+// ⌂ на главном экране: камера спереди, она лицом к тебе и сразу встаёт.
+// Нижние вкладки: ⌂ «Домой» и ✏️ «Позы».
+$('btn-tab-pose').addEventListener('click', () => { if (!poseMode) setPoseMode(true); });
+$('btn-home').addEventListener('click', () => {
+  // Из вкладки «Позы» — просто домой (поза остаётся). Уже дома — вид спереди и встать.
+  if (poseMode) { setPoseMode(false); return; }
+  resetView();
+  if (character && character.sit > 0) sitBy(-character.sit / 0.004);
 });
 canvas.addEventListener('pointercancel', endPointer);
 
+// Сидя и лёжа — свои реакции: лёжа поворачивается к тебе, спящая сонно просыпается.
+const LYING_LINES = {
+  sleep: ['Ммм… ещё пять минуточек…', 'Ты меня разбудил~', 'М?.. это ты… 😴'],
+  lie: ['Ложись рядом~', 'Мне так уютно…', 'Хи, щекотно~', 'Не мешай отдыхать… шучу ♥'],
+  sit: ['Посиди со мной~', 'Ой, не тяни так ♥', 'Хи, я тут сижу~', 'Ты такой милый…'],
+};
+const SLEEP_LINES = ['Ммм… ♥', '*сопит*', 'Хи… приятно… zzz', 'Мур… 😴', '…ещё…'];
+const SLEEP_WAKE_LINES = ['Ммм?.. ну что такое… я же сплю 😣', 'Ой… ты меня разбудил…', 'А?.. ты чего тормошишь~', 'Пять минуточек ещё… 😴'];
 function triggerReaction(zone, hit, e) {
   const r = REACTIONS[zone];
   if (!r) return;
+  wishEvent(zone);
+  // Спит: нежное касание — спит дальше и улыбается во сне; тормошишь
+  // (несколько быстрых касаний подряд) — просыпается.
+  if (character.sitS > 1.05 && character.sleep > 0.5) {
+    character.disturb = (character.disturb ?? 0) + (zone === 'spam' ? 2 : 1);
+    if (character.disturb >= 3) {
+      character.disturb = 0;
+      character.wake(6);
+      character.react({ expression: 'relaxed', motion: 'lieTurn', side: hit?.side, strength: 0.8 });
+      say(pick(SLEEP_WAKE_LINES));
+      return;
+    }
+    character.sleepJoy = 1;
+    changeAffection(0.4);
+    floatHeart(e.clientX, e.clientY);
+    const now = performance.now();
+    if (now - lastZoneLineAt > 2500) { lastZoneLineAt = now; say(pick(SLEEP_LINES)); }
+    return;
+  }
+  if (character.sitS > 0.6 && zone !== 'spam') {
+    const lying = character.sitS > 1.05;
+    const asleep = lying && character.sleep > 0.5;
+    character.react({ expression: asleep ? 'relaxed' : 'happy', motion: lying ? 'lieTurn' : 'squirm', side: hit?.side, strength: 0.8 });
+    if (asleep) character.wake(3.5);
+    if (hit) character.nudge(raycaster.ray.direction, 0.4);
+    changeAffection(0.6);
+    floatHeart(e.clientX, e.clientY);
+    const now = performance.now();
+    if (now - lastZoneLineAt > 900) {
+      lastZoneLineAt = now;
+      say(pick(LYING_LINES[asleep ? 'sleep' : lying ? 'lie' : 'sit']));
+    }
+    return;
+  }
   const t = tier();
   const expression = r.expressionByTier ? r.expressionByTier[t] : r.expression;
   const delta = r.affectionByTier ? r.affectionByTier[t] : r.affection;
   character.react({ expression, motion: r.motion, side: hit?.side });
+  // Тело чуть откачивается от касания и пружинисто возвращается.
+  if (hit) character.nudge(raycaster.ray.direction, zone === 'spam' ? 1.2 : 0.8);
   changeAffection(delta);
   if (delta > 0) floatHeart(e.clientX, e.clientY);
   const now = performance.now();
@@ -438,14 +1930,94 @@ function triggerReaction(zone, hit, e) {
   }
 }
 
-function floatHeart(x, y) {
+// Зона пока не даёт симпатию: ей «всё равно» — вместо сердечек всплывают 😐 + подсказка, когда понравится.
+const ZONE_NAMES = { face: 'Лицо', arm: 'Плечи', belly: 'Живот', legs: 'Ноги', body: 'Грудь', hand: 'Рука', hair: 'Волосы' };
+const TIER_NAMES = ['', '«Друг»', '«Близкий человек»'];
+let lockHintAt = 0;
+function lockedStroke(zone, r, e) {
+  if (stroking && stroking.ticks % 2 === 0) floatLock(e.clientX, e.clientY);
+  const ti = r.affection.findIndex((v) => v > 0);
+  const now = performance.now();
+  if (ti > 0 && now - lockHintAt > 20000) {
+    lockHintAt = now;
+    const what = { face: 'лицо понравится', arm: 'плечи понравятся', belly: 'живот понравится', legs: 'ноги понравятся', body: 'грудь понравится' }[zone] ?? 'это понравится';
+    showToast(`😐 Ей пока всё равно — ${what} на уровне ${TIER_NAMES[ti]} 💗`);
+  }
+}
+function floatLock(x, y) {
   const el = document.createElement('div');
-  el.className = 'float-heart';
-  el.textContent = '♥';
-  el.style.left = `${x + (Math.random() - 0.5) * 30}px`;
+  el.className = 'float-heart float-meh';
+  el.textContent = Math.random() < 0.7 ? '😐' : '😶';
+  el.style.left = `${x + (Math.random() - 0.5) * 24}px`;
   el.style.top = `${y - 10}px`;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 1100);
+}
+// ---------- Эффекты ----------
+const FX_COLORS = ['#ff6fa8', '#ff9ac4', '#c77dff', '#ffd1e6', '#ffffff'];
+const fxRand = (a, b) => a + Math.random() * (b - a);
+function fxParticle(x, y, glyph, { dx, dy, size, color, dur = 1.1, rot = 0 }) {
+  const el = document.createElement('div');
+  el.className = 'fx-p';
+  el.textContent = glyph;
+  el.style.cssText = `left:${x}px;top:${y}px;font-size:${size}px;color:${color};--dx:${dx}px;--dy:${dy}px;--r:${rot}deg;animation-duration:${dur}s`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), dur * 1000 + 50);
+}
+// Искорки возле пальца.
+function fxSpark(x, y, n = 2) {
+  for (let i = 0; i < n; i++) {
+    const a = fxRand(0, Math.PI * 2), d = fxRand(18, 46);
+    fxParticle(x + fxRand(-10, 10), y + fxRand(-10, 10), Math.random() < 0.5 ? '✦' : '✧',
+      { dx: Math.cos(a) * d, dy: Math.sin(a) * d - 14, size: fxRand(9, 15), color: pick(FX_COLORS), dur: fxRand(0.6, 0.95), rot: fxRand(-90, 90) });
+  }
+}
+// Россыпь сердечек и звёзд из точки.
+function fxBurst(x, y, n = 18, dist = 120) {
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + fxRand(-0.25, 0.25), d = dist * fxRand(0.45, 1);
+    fxParticle(x, y, pick(['♥', '♥', '✦', '✧']),
+      { dx: Math.cos(a) * d, dy: Math.sin(a) * d - dist * 0.25, size: fxRand(14, 28), color: pick(FX_COLORS), dur: fxRand(0.9, 1.5), rot: fxRand(-140, 140) });
+  }
+}
+// Мягкая вспышка света на весь экран.
+function fxGlow() {
+  const el = document.createElement('div');
+  el.className = 'fx-glow';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1300);
+}
+// Крупная надпись по центру (новый уровень).
+function fxBanner(text) {
+  const el = document.createElement('div');
+  el.className = 'fx-banner';
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+// Сердечко от касания: разного размера и цвета, всплывает с покачиванием, рядом искорки.
+function floatHeart(x, y) {
+  const el = document.createElement('div');
+  el.className = 'float-heart' + (Math.random() < 0.5 ? ' sway' : '');
+  el.textContent = '♥';
+  el.style.left = `${x + (Math.random() - 0.5) * 30}px`;
+  el.style.top = `${y - 10}px`;
+  el.style.fontSize = `${Math.round(fxRand(17, 29))}px`;
+  el.style.color = pick(['#ff6fa8', '#ff6fa8', '#ff8fc0', '#e879f9']);
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1250);
+  fxSpark(x, y, 2);
+}
+// Фон: плывущие огоньки (на звёздном — мерцающие звёзды). Лёгкий слой под сценой.
+{
+  const amb = document.createElement('div');
+  amb.id = 'ambient';
+  for (let i = 0; i < 18; i++) {
+    const d = document.createElement('i');
+    d.style.cssText = `left:${fxRand(2, 98).toFixed(1)}%;top:${fxRand(4, 96).toFixed(1)}%;--d:${fxRand(6, 14).toFixed(1)}s;--delay:${(-fxRand(0, 12)).toFixed(1)}s;--sz:${fxRand(2, 5).toFixed(1)}px;--drift:${fxRand(-30, 30).toFixed(0)}px`;
+    amb.appendChild(d);
+  }
+  $('scene').before(amb);
 }
 
 // ---------- Зоны касаний (отладка) ----------
@@ -476,8 +2048,14 @@ $('btn-hitbox').addEventListener('click', () => {
 // ---------- Позы ----------
 
 const POSE_LINES = {
+  dreamy: 'Ах… о чём это я?~',
+  hug: 'Хочу обнимашки…',
+  hair: 'Волосы растрепались~',
+  cheek: 'Хи~',
   stand: 'Ну, стою. И?',
+  flirty: 'Ну как я тебе? ♥',
   hips: 'Хмф! Ну и чего ты хочешь?',
+  crossed: 'Ну и? Я жду объяснений.',
   shy: 'Н-не смотри так пристально…',
   behind: 'Хе-хе, а что у меня за спиной? Не скажу~',
   think: 'Хм-м… дай подумать.',
@@ -495,21 +2073,67 @@ function setPoseListOpen(open) {
   $('pose-list').hidden = !open;
   $('poses-toggle').setAttribute('aria-expanded', String(open));
   $('poses-toggle').classList.toggle('open', open);
-  if (open) $('hint').style.opacity = 0;
+  if (open) {
+    $('hint').style.opacity = 0;
+    $('pose-list').querySelector('button.active')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }
 }
-$('poses-toggle').addEventListener('click', () => setPoseListOpen($('pose-list').hidden));
+$('poses-toggle').addEventListener('click', () => {
+  $('pose-list').classList.remove('show-std');
+  setPoseListOpen($('pose-list').hidden);
+});
+// Окошко поз: сверху твои избранные ★, ниже «Все позы ▾» — раскрывает стандартные.
+const poseMore = document.createElement('button');
+poseMore.id = 'pose-more';
+poseMore.textContent = 'Все позы ▾';
+poseMore.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = $('pose-list').classList.toggle('show-std');
+  poseMore.textContent = open ? 'Свернуть ▴' : 'Все позы ▾';
+});
+$('pose-list').appendChild(poseMore);
 
 function addPoseButton(name, def) {
   const btn = document.createElement('button');
   btn.textContent = def.label;
   btn.dataset.pose = name;
+  if (name.startsWith('saved:')) {
+    // Своя поза: крестик удаляет (второе нажатие подтверждает).
+    const del = document.createElement('span');
+    del.className = 'del';
+    del.textContent = '×';
+    btn.appendChild(del);
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!btn.classList.contains('armed')) {
+        btn.classList.add('armed');
+        setTimeout(() => btn.classList.remove('armed'), 2500);
+        showToast('Нажми × ещё раз — удалить');
+        return;
+      }
+      const n = name.slice(6);
+      delete savedPoses[n];
+      delete POSES[name];
+      try { localStorage.setItem(POSES_KEY, JSON.stringify(savedPoses)); } catch { /* ignore */ }
+      btn.remove();
+      showToast('Поза удалена');
+    });
+  }
   btn.addEventListener('click', () => {
     if (!character) return;
+    snapPose();
     if (currentAnim) stopAnim();
+    if (currentMocap) stopMocap();
     character.dancing = false;
+    character.loop = null;
+    const before = character.sit;
     character.setPose(name);
+    // Своя сохранённая поза помнит посадку (сидит/лежит); обычные позы — стоя.
+    const want = POSES[name]?.touch && typeof POSES[name].touch.sit === 'number' ? character.sit : 0;
+    character.sit = before;
+    if (Math.abs(want - before) > 0.001) sitBy((want - before) / 0.004);
     setActivePoseButton(name);
-    setPoseListOpen(false);
+    // Список не закрываем — можно быстро перебирать позы одну за другой.
     say(POSE_LINES[name] ?? pick(['Так?', 'Ну как я тебе?', 'Вот так нормально?']));
   });
   $('pose-list').appendChild(btn);
@@ -526,117 +2150,1016 @@ for (const [name, params] of Object.entries(savedPoses)) {
   addPoseButton(`saved:${name}`, POSES[`saved:${name}`]);
 }
 
-// Ползунки: показываем «человеческие» значения и пересчитываем в углы костей.
-// Правая и левая рука зеркальны, поэтому у них разные знаки.
-const direct = (key) => ({ get: (p) => p[key], set: (p, v) => { p[key] = v; } });
-const SLIDERS = [
-  { group: 'Голова', label: 'Кивок', min: -0.6, max: 0.6, ...direct('headX') },
-  { group: 'Голова', label: 'Поворот', min: -0.9, max: 0.9, ...direct('headY') },
-  { group: 'Голова', label: 'Наклон вбок', min: -0.5, max: 0.5, ...direct('headZ') },
-  { group: 'Корпус', label: 'Наклон вперёд', min: -0.4, max: 0.5, ...direct('spineX') },
-  { group: 'Корпус', label: 'Поворот', min: -0.8, max: 0.8, ...direct('spineY') },
-  { group: 'Корпус', label: 'Изгиб вбок', min: -0.4, max: 0.4, ...direct('spineZ') },
-  { group: 'Корпус', label: 'Бёдра', min: -0.2, max: 0.2, ...direct('hipsZ') },
-  ...[['l', 'Левая рука (её)', 1], ['r', 'Правая рука (её)', -1]].flatMap(([k, group, m]) => [
-    { group, label: 'Поднять', min: -0.3, max: 2.9,
-      get: (p) => m * p[`${k}UpperZ`] + 1.22, set: (p, v) => { p[`${k}UpperZ`] = m * (v - 1.22); } },
-    { group, label: 'Вперёд / назад', min: -0.8, max: 1.6,
-      get: (p) => -p[`${k}UpperX`], set: (p, v) => { p[`${k}UpperX`] = -v; } },
-    { group, label: 'Вращение плеча', min: -1.6, max: 1.6, ...direct(`${k}UpperTwist`) },
-    { group, label: 'Локоть', min: 0, max: 2.7,
-      get: (p) => -m * p[`${k}LowerY`], set: (p, v) => { p[`${k}LowerY`] = -m * v; } },
-    { group, label: 'Предплечье вверх', min: -1, max: 2,
-      get: (p) => m * p[`${k}LowerZ`], set: (p, v) => { p[`${k}LowerZ`] = m * v; } },
-  ]),
+// ---------- Поза пальцем ----------
+// Режим ✏️: тянешь за руку — рука идёт за пальцем (локоть сгибается сам);
+// за голову — поворачивает голову; за грудь — наклоняет корпус;
+// за таз/живот — сдвигает бёдра (вниз — приседает, колени сгибаются сами).
+
+let poseMode = false;
+let poseTabState = null; // поза во вкладке «Позы» (возвращается при входе)
+let poseDrag = null; // { kind: 'hand' | 'head' | 'spine' | 'hips', side, plane, lastX, lastY }
+
+function setPoseMode(on) {
+  if (on !== poseMode) interstitial(); // пауза: переход между «Главной» и «Позами» (лимит — в ads.js)
+  if (on && cameraMode) setCameraMode(false);
+  if (on && currentMocap) stopMocap(); // позу выставляем на «живом» скелете, без записи
+  // Вкладки разные: дома — обычная живая она (без выставленной позы), во вкладке «Позы» —
+  // твоя поза. Поза запоминается при выходе и возвращается, когда снова откроешь «Позы».
+  if (character) character.posing = on;
+  if (on) stopAuto(true);
+  if (character && on !== poseMode) {
+    if (!on) {
+      poseTabState = { name: character.poseName, touch: character.exportTouchPose() };
+      character.importTouchPose(null);
+      character.setPose('stand');
+      setActivePoseButton('stand');
+    } else if (poseTabState) {
+      const sit = character.sit;
+      character.setPose(poseTabState.name);
+      character.importTouchPose(poseTabState.touch);
+      character.sit = sit;
+      setActivePoseButton(poseTabState.name);
+    }
+  }
+  poseMode = on;
+  poseDrag = null;
+  renderPoseSliderBtn();
+  $('btn-editor').classList.toggle('active', on);
+  $('btn-tab-pose').classList.toggle('active', on);
+  $('btn-home').classList.toggle('active', !on);
+  $('btn-handles').hidden = !on;
+  $('pose-bar').hidden = !on;
+  document.body.classList.toggle('posing', on);
+  closePoseSaveForm();
+  setPoseListOpen(false);
+  if (on) {
+    // Позируем во весь рост — видно и руки, и ноги.
+    if (!fullBody && !faceCam) setFullBody(true);
+    $('hint').style.opacity = 0;
+    hintOnce('pose', 'Тяни за точки · по фону — камера');
+  }
+}
+$('btn-editor').addEventListener('click', () => setPoseMode(!poseMode));
+$('pose-done').addEventListener('click', () => setPoseMode(false));
+// ↶ Отмена в режиме позы: снимок до каждого действия (тянешь точку, полосу, выбираешь позу, сброс).
+const undoStack = [];
+function snapPose() {
+  if (!character || !poseMode) return;
+  const snap = { name: character.poseName, touch: character.exportTouchPose() };
+  const last = undoStack[undoStack.length - 1];
+  if (last && JSON.stringify(last) === JSON.stringify(snap)) return;
+  undoStack.push(snap);
+  if (undoStack.length > 40) undoStack.shift();
+}
+$('pose-undo').addEventListener('click', () => {
+  const snap = undoStack.pop();
+  if (!snap || !character) { showToast('Отменять нечего'); return; }
+  const sit = character.sit;
+  character.setPose(snap.name);
+  character.importTouchPose(snap.touch);
+  if (snap.touch?.sit == null) character.sit = sit;
+  setActivePoseButton(snap.name);
+  showToast('↶ Отменено');
+});
+$('pose-reset').addEventListener('click', () => {
+  snapPose();
+  character?.clearTouchPose();
+  showToast('Поза сброшена');
+});
+// Сохранение прямо в нижней панели: кнопки сменяются полем для названия.
+$('pose-save').addEventListener('click', () => {
+  $('pose-bar-buttons').hidden = true;
+  $('pose-save-form').hidden = false;
+  $('pose-save-name').focus();
+});
+function closePoseSaveForm() {
+  $('pose-save-form').hidden = true;
+  $('pose-bar-buttons').hidden = false;
+  $('pose-save-name').value = '';
+}
+$('pose-save-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (savePoseAs($('pose-save-name').value)) {
+    closePoseSaveForm();
+    showToast('Поза сохранена — она в списке «Поза»');
+  }
+});
+$('pose-save-cancel').addEventListener('click', closePoseSaveForm);
+
+// Светящиеся точки-ручки в режиме позы: показывают, за что можно тянуть.
+const HANDLE_KEYS = ['handL', 'handR', 'head', 'chest', 'belly', 'hips', 'kneeL', 'kneeR', 'footL', 'footR'];
+const handleEls = {};
+for (const k of HANDLE_KEYS) {
+  const el = document.createElement('div');
+  el.className = 'handle';
+  $('handles').appendChild(el);
+  handleEls[k] = el;
+}
+const handleV = new THREE.Vector3();
+function handleWorld(key) {
+  const c = character;
+  const zone = (z, bone) => c.zones.find((q) => q.zone === z && (!bone || q.bone === bone))?.center;
+  switch (key) {
+    case 'handL': return c.handWorld('left');
+    case 'handR': return c.handWorld('right');
+    case 'head': return zone('face');
+    case 'chest': return zone('body', 'chest');
+    case 'belly': return zone('belly');
+    case 'hips': return zone('body', 'hips');
+    case 'kneeL': return c.bones.leftLowerLeg?.getWorldPosition(new THREE.Vector3());
+    case 'kneeR': return c.bones.rightLowerLeg?.getWorldPosition(new THREE.Vector3());
+    case 'footL': return c.footWorld('left');
+    case 'footR': return c.footWorld('right');
+  }
+  return null;
+}
+// Точки-«магниты» для кистей: талия, поясница, бёдра, колени, щёки.
+// Ведёшь руку рядом — кисть притягивается и встаёт туда красиво.
+const ANCHORS = [
+  { id: 'waistL', label: 'на талию', bone: 'hips', off: [0.15, 0.09, 0.02], side: 'left', preset: 'hips' },
+  { id: 'waistR', label: 'на талию', bone: 'hips', off: [-0.15, 0.09, 0.02], side: 'right', preset: 'hips' },
+  { id: 'backL', label: 'на поясницу', bone: 'hips', off: [0.11, 0.08, -0.1], side: 'left', preset: 'behind' },
+  { id: 'backR', label: 'на поясницу', bone: 'hips', off: [-0.11, 0.08, -0.1], side: 'right', preset: 'behind' },
+  { id: 'thighL', label: 'на бедро', bone: 'leftUpperLeg', off: [0.04, -0.17, 0.06] },
+  { id: 'thighR', label: 'на бедро', bone: 'rightUpperLeg', off: [-0.04, -0.17, 0.06] },
+  { id: 'kneeL', label: 'на колено', bone: 'leftLowerLeg', off: [0, 0.02, 0.07] },
+  { id: 'kneeR', label: 'на колено', bone: 'rightLowerLeg', off: [0, 0.02, 0.07] },
+  { id: 'cheekL', label: 'к щеке', bone: 'head', off: [0.07, 0.04, 0.06] },
+  { id: 'cheekR', label: 'к щеке', bone: 'head', off: [-0.07, 0.04, 0.06] },
 ];
-
-let editorParams = null;
-
-function openEditor() {
-  if (!character) return;
-  editorParams = { ...character.getPoseParams() };
-  character.setCustomPose(editorParams);
-  setActivePoseButton('custom');
-  renderSliders();
+const anchorEls = {};
+for (const a of ANCHORS) {
+  const el = document.createElement('div');
+  el.className = 'anchor';
+  $('handles').appendChild(el);
+  anchorEls[a.id] = el;
+}
+const anchorTmp = new THREE.Vector3();
+function anchorWorld(a) {
+  const c = character;
+  const node = c.vrm.humanoid.getNormalizedBoneNode(a.bone);
+  if (!node) return null;
+  // Смещение в осях тела (вправо/вверх/вперёд модели), чтобы точка была снаружи тела.
+  node.getWorldPosition(anchorTmp);
+  const q = c.bones.hips.getWorldQuaternion(new THREE.Quaternion());
+  const flip = c.flip;
+  const off = new THREE.Vector3(a.off[0] * flip, a.off[1], a.off[2] * flip).multiplyScalar(c.scale).applyQuaternion(q);
+  return anchorTmp.clone().add(off);
+}
+window.__anchors = () => ANCHORS.map((x) => [x.id, anchorWorld(x)]);
+let snapAnchor = null;
+// Магнит доступен, только если рука до него дотягивается (стоя колени далеко — их нет).
+function anchorReachable(p, side) {
+  const sh = character.bones[`${side}UpperArm`]?.getWorldPosition(new THREE.Vector3());
+  return !sh || sh.distanceTo(p) < character.armLength(side) * 0.97;
+}
+// Ближайший магнит к пальцу на экране (~45px): притягивает, как только палец рядом.
+function nearestAnchor(e, side) {
+  let best = null;
+  let bestD = 45;
+  const v = new THREE.Vector3();
+  for (const a of ANCHORS) {
+    if (a.side && a.side !== side) continue; // талия/поясница — своей рукой
+    const p = anchorWorld(a);
+    if (a.preset && character.sitS > 0.5) continue; // лёжа/сидя — только бедро, колено, щека
+    if (!p || (!a.preset && !anchorReachable(p, side))) continue;
+    v.copy(p).project(camera);
+    const d = Math.hypot((v.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-v.y * 0.5 + 0.5) * window.innerHeight - e.clientY);
+    if (d < bestD) { bestD = d; best = { a, p }; }
+  }
+  return best;
 }
 
-function renderSliders() {
-  const box = $('editor-sliders');
-  box.innerHTML = '';
-  let group = null;
-  for (const sl of SLIDERS) {
-    if (sl.group !== group) {
-      group = sl.group;
-      const h = document.createElement('div');
-      h.className = 'editor-group';
-      h.textContent = group;
-      box.appendChild(h);
-    }
-    const row = document.createElement('label');
-    row.className = 'editor-row';
-    const name = document.createElement('span');
-    name.textContent = sl.label;
-    const input = document.createElement('input');
-    input.type = 'range';
-    input.min = sl.min;
-    input.max = sl.max;
-    input.step = 0.01;
-    input.value = sl.get(editorParams);
-    input.addEventListener('input', () => {
-      sl.set(editorParams, Number(input.value));
-      character.setCustomPose(editorParams);
-    });
-    row.append(name, input);
-    box.appendChild(row);
+let activeHandle = null; // какая точка сейчас в руке — она подсвечивается, остальные притухают
+const HANDLE_LABELS = { kneeL: 'Левое колено', kneeR: 'Правое колено', handL: 'Левая рука', handR: 'Правая рука', head: 'Голова', chest: 'Наклон корпуса', belly: 'Поворот корпуса', hips: 'Бёдра: вниз — сесть, вбок — качнуть', footL: 'Левая нога', footR: 'Правая нога' };
+// Точки поз: только когда открыты (уровень/реклама) и включены кнопкой ⁘.
+// Без точек в режиме позы её гладят и трогают, как на главной, а ведя по ней
+// пальцем вверх-вниз — сажают/поднимают. Полосы работают всегда.
+let handlesShown = false;
+try { handlesShown = localStorage.getItem('waifu-handles-on') === '1'; } catch { /* ignore */ }
+let handlesHidden = true; // итог: точки сейчас не активны
+function syncHandles() {
+  handlesHidden = !(handlesShown && unlocked('handles'));
+}
+const petInPose = () => { syncHandles(); return handlesHidden || document.body.classList.contains('clean'); };
+function renderHandlesBtn() {
+  syncHandles();
+  $('btn-handles').classList.toggle('active', !handlesHidden);
+  $('btn-handles').title = handlesHidden ? 'Показать точки' : 'Спрятать точки';
+}
+$('btn-handles').addEventListener('click', () => {
+  if (!unlocked('handles')) return; // закрыто — покажется замочек
+  handlesShown = !handlesShown;
+  try { localStorage.setItem('waifu-handles-on', handlesShown ? '1' : '0'); } catch { /* ignore */ }
+  renderHandlesBtn();
+  showToast(handlesShown ? 'Точки включены — ставь позу (движения точек тоже записываются в повтор)' : 'Точки выключены — гладь и трогай её 💗, веди по ней вверх-вниз — сесть/встать');
+});
+renderHandlesBtn();
+$('btn-handles').hidden = true;
+// Точки и повтор: 📌 «Поставить» — точки просто ставят позу и НЕ сбивают повтор
+// (он идёт дальше, а рука/нога остаётся, где поставил); 🔁 «Запись» — движение точкой
+// записывается в повтор и она его повторяет.
+let pointMode = 'pin';
+try { if (localStorage.getItem('waifu-point-mode') === 'rec') pointMode = 'rec'; } catch { /* ignore */ }
+const pointModeBtn = document.createElement('button');
+pointModeBtn.id = 'btn-pointmode';
+pointModeBtn.hidden = true;
+$('btn-handles').after(pointModeBtn);
+function renderPointMode() {
+  pointModeBtn.hidden = !poseMode || petInPose();
+  pointModeBtn.textContent = pointMode === 'pin' ? '📌' : '🔁';
+  pointModeBtn.title = pointMode === 'pin' ? 'Точки: ставить позу' : 'Точки: запись движения в повтор';
+  pointModeBtn.classList.toggle('rec', pointMode === 'rec');
+  pointModeBtn.classList.toggle('recording', pointMode === 'rec' && curRep().on && !!curRep().ptsRec);
+}
+pointModeBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+pointModeBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  pointMode = pointMode === 'pin' ? 'rec' : 'pin';
+  try { localStorage.setItem('waifu-point-mode', pointMode); } catch { /* ignore */ }
+  // Обратно в 📌: точки из повтора останавливаются там, где сейчас (их можно ставить руками).
+  if (pointMode === 'pin') for (const r of Object.values(reps)) { r.movedPts = {}; r.ptsTrack = null; r.ptsRec = null; }
+  renderPointMode();
+  showToast(pointMode === 'pin' ? '📌 Точки: ставить позу (повтор не сбивается)' : '🔁 Точки: запись движения — подвигай точку и отпусти');
+});
+// Точку взяли в режиме 📌: повтор больше не управляет этой рукой/ногой.
+function pinLimb(kind, side) {
+  const key = (kind === 'hand' ? 'h' : 'f') + (side === 'left' ? 'L' : 'R');
+  for (const r of Object.values(reps)) {
+    if (r.movedPts) r.movedPts[key] = false;
+    if (r.ptsTrack) r.ptsTrack.moved[key] = false;
+  }
+}
+const repPlaying = () => { const r = curRep(); return r.on && r.state === 'play'; };
+$('btn-home').classList.add('active');
+function updateHandles() {
+  const show = poseMode && !!character && !petInPose();
+  renderPointMode();
+  if ($('btn-handles').classList.contains('active') === handlesHidden) renderHandlesBtn();
+  $('handles').hidden = !show;
+  // Пока крутишь камеру — точки бледнеют и не мешают.
+  $('handles').classList.toggle('calm', poseDrag?.kind === 'bg' || performance.now() - lastCamMove < 450);
+  if (!show) return;
+  $('handles').classList.toggle('dragging', !!activeHandle);
+  const place = (el, p) => {
+    handleV.copy(p).project(camera);
+    el.style.left = `${(handleV.x * 0.5 + 0.5) * window.innerWidth}px`;
+    el.style.top = `${(-handleV.y * 0.5 + 0.5) * window.innerHeight}px`;
+  };
+  for (const k of HANDLE_KEYS) {
+    const p = handleWorld(k);
+    if (!p) continue;
+    place(handleEls[k], p);
+    handleEls[k].classList.toggle('active', activeHandle === k);
+  }
+  // Магниты видны, только пока ведёшь руку.
+  const handDrag = poseDrag?.kind === 'hand';
+  for (const a of ANCHORS) {
+    const el = anchorEls[a.id];
+    el.hidden = !handDrag;
+    if (!handDrag) continue;
+    const p = anchorWorld(a);
+    const ok = p && (!a.side || a.side === poseDrag.side) && !(a.preset && character.sitS > 0.5)
+      && (a.preset || anchorReachable(p, poseDrag.side));
+    el.hidden = !ok;
+    if (ok) place(el, p);
+    el.classList.toggle('hot', snapAnchor?.a === a);
   }
 }
 
-$('btn-editor').addEventListener('click', () => togglePanel('editor', openEditor));
-$('editor-reset').addEventListener('click', () => {
-  editorParams = { ...BASE_POSE };
-  character.setCustomPose(editorParams);
-  renderSliders();
-});
-$('editor-save').addEventListener('click', () => {
-  $('editor-save-row').hidden = false;
-  $('pose-name').focus();
-});
-$('editor-save-row').addEventListener('submit', (e) => {
+// Левый край экрана (обычный режим и камера): почти невидимая полоса —
+// веди вниз — присед → на колени → боком → лежит, вверх — встаёт.
+const sitSlider = $('sit-slider');
+// Лечь можно отключить (кнопка под полосой): тогда ниже «сидит боком» она не опускается.
+// Кнопка под полосой по кругу: на бок → на живот (спать) → не ложиться.
+// По умолчанию ложится на живот: стоя → корточки → колени → четвереньки → на живот.
+let lieMode = 'belly';
+try {
+  const v = localStorage.getItem('waifu-lie');
+  if (v === 'side' || v === 'belly' || v === 'back' || v === 'off') lieMode = v;
+  // Один раз переводим на новый стандарт тех, у кого был сохранён прежний (на бок); дальше выбор значком «кровать» сохраняется.
+  // (В первой версии переключались только те, у кого было «на бок»; у кого стояло «на спину», стандарт не применился.)
+  if (!localStorage.getItem('waifu-lie-std4')) { localStorage.setItem('waifu-lie-std4', '1'); localStorage.setItem('waifu-lie-std3', '1'); lieMode = 'belly'; localStorage.setItem('waifu-lie', 'belly'); localStorage.removeItem('waifu-allow-lie'); }
+  else if (localStorage.getItem('waifu-allow-lie') === '0') lieMode = 'off';
+} catch { /* ignore */ }
+if (!unlocked('lieStyles') && lieMode !== 'belly' && lieMode !== 'off') lieMode = 'belly'; // пока другие позы не открыты — на живот
+let allowLie = lieMode !== 'off';
+const sitMax = () => (character?.seat && !character.seat.lie ? 0.5 : !unlocked('floor') ? 0.8 : allowLie ? 1.3 : 1.0); // на стуле/троне ниже сиденья не садится
+const LIE_ICONS = {
+  side: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11.5" r="1.8"/>',
+  belly: '<path d="M14.5 4.5a6.5 6.5 0 1 0 5 10.5A7.5 7.5 0 0 1 14.5 4.5z"/><path d="M17 4h3l-3 3h3"/>',
+  back: '<path d="M3 17h18"/><circle cx="6" cy="13.5" r="2"/><path d="M8.5 14h6l3-3 2 3"/>',
+  off: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><path d="M4 4l16 16"/>',
+};
+function renderLieToggle() {
+  allowLie = lieMode !== 'off';
+  $('lie-toggle').classList.toggle('off', !allowLie);
+  $('lie-toggle').querySelector('svg').innerHTML = LIE_ICONS[lieMode];
+  $('lie-toggle').title = { side: 'Ложится на бок', belly: 'Ложится на живот, спать', back: 'Ложится на спину', off: 'Не ложится' }[lieMode];
+  $('lie-toggle2').querySelector('svg').innerHTML = LIE_ICONS[lieMode];
+  $('lie-toggle2').classList.toggle('off', !allowLie);
+  if (character) character.setLieStyle(allowLie ? lieMode : 'belly'); // «не ложится» — всё равно встаёт на четвереньки, а не садится боком
+  sitSlider.classList.toggle('no-lie', !allowLie);
+  // Точки-отметки: стоит, присед, на коленях, боком, лёжа — по текущему пределу.
+  renderSitMarks();
+}
+$('lie-toggle').addEventListener('pointerdown', (e) => e.stopPropagation());
+// В режиме позы полоса умеет два дела: наклон (по умолчанию) или сесть/лечь, не ломая позу.
+let poseSlider = 'bend';
+const POSE_SLIDER_ICONS = {
+  bend: '<path d="M12 4.5a1.6 1.6 0 1 1 0 .1"/><path d="M11 8l-3 5 4 2v5M8 13l-3-1"/><path d="M15 9l-4-1"/>',
+  sit: '<path d="M10 4.5a1.6 1.6 0 1 1 0 .1"/><path d="M10 8v5h5l1 6M10 13l-3 6"/>',
+};
+function renderPoseSliderBtn() {
+  const btn = $('lie-toggle');
+  if (!poseMode) { renderLieToggle(); return; }
+  btn.classList.remove('off');
+  btn.querySelector('svg').innerHTML = POSE_SLIDER_ICONS[poseSlider];
+  btn.title = poseSlider === 'bend' ? 'Полоса: наклон' : 'Полоса: сесть / лечь';
+}
+function cycleLie(e) {
+  e.stopPropagation();
+  lieMode = { side: 'belly', belly: 'back', back: 'off', off: 'side' }[lieMode];
+  try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
+  renderLieToggle();
+  if (!allowLie && character && character.sit > 1.0) sitBy((1.0 - character.sit) / 0.004);
+  showToast({ side: 'Ляжет на бок', belly: 'Ляжет на живот — спать 😴', back: 'Ляжет на спину', off: 'Не ложится: только сидит' }[lieMode]);
+}
+$('lie-toggle').addEventListener('click', (e) => { if (!poseMode) cycleLie(e); });
+$('lie-toggle2').addEventListener('pointerdown', (e) => e.stopPropagation());
+$('lie-toggle2').addEventListener('click', cycleLie);
+renderLieToggle();
+// Палец ведёт относительно (без скачка к месту касания): вся высота полосы = от «стоит» до «лежит».
+let sliderDrag = null;
+sitSlider.addEventListener('pointerdown', (e) => {
+  if (!character) return;
+  snapPose();
   e.preventDefault();
-  const name = $('pose-name').value.trim().slice(0, 20);
-  if (!name) return;
+  e.stopPropagation();
+  sitSlider.setPointerCapture(e.pointerId);
+  sliderDrag = { y: e.clientY, t: performance.now() };
+  sliderTakesOver();
+  sitSlider.classList.add('active');
+});
+sitSlider.addEventListener('pointermove', (e) => {
+  if (!sliderDrag || !character) return;
+  character.effortT = 0.35; // губы приоткрываются, пока ведёшь
+  const h = sitSlider.querySelector('.track').getBoundingClientRect().height || 200;
+  const dv = ((e.clientY - sliderDrag.y) / h) * sitMax();
+  const now = performance.now();
+  // Скорость пальца → скорость движения: быстро ведёшь — быстрее, медленно — плавно.
+  const rate = Math.abs(dv) / Math.max(0.008, (now - sliderDrag.t) / 1000);
+  character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
+  sliderDrag.y = e.clientY;
+  sliderDrag.t = now;
+  character.slideHold = 3;
+  character.dragBoostT = 0.5; // палец на полосе — тело отзывается в его темпе
+  sliderTakesOver();
+  // Повтор идёт — полоса не перезаписывает его, а сдвигает: глубже/выше, не останавливая.
+  if (loopNoteMove() === 'shift') {
+    const r = curRep();
+    repRanges(r);
+    if (poseMode) {
+      // Сдвиг не выводит движение за края — иначе оно «упирается» и залипает.
+      r.bendOff = THREE.MathUtils.clamp((r.bendOff ?? 0) + (dv / sitMax()) * BEND_RANGE, BEND_MIN - r.bendLo, BEND_MAX - r.bendHi);
+      showLabel(dv > 0 ? 'Повтор: наклон глубже' : 'Повтор: наклон выше');
+    } else {
+      r.sitOff = THREE.MathUtils.clamp((r.sitOff ?? 0) + dv, -r.sitLo, Math.max(-r.sitLo, sitMax() - r.sitHi));
+      showLabel(dv > 0 ? 'Повтор: ниже' : 'Повтор: выше');
+    }
+    return;
+  }
+  if (poseMode) {
+    // В режиме позы левая полоса не сажает: ноги стоят, тело с бёдрами идёт вперёд
+    // (наклон, таз назад) или назад (прогиб) — плавно, в темпе пальца.
+    const o = character.bodyOffset;
+    const bend = THREE.MathUtils.clamp(o.hipsRotX + (dv / sitMax()) * BEND_RANGE, BEND_MIN, BEND_MAX);
+    o.hipsRotX = bend;
+    // Назад гнётся в основном спина (S-линия), голова следует за ней.
+    o.spineX = bendSpine(bend);
+    showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
+    return;
+  }
+  sitBy(dv / 0.004);
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  sitSlider.addEventListener(ev, () => { sliderDrag = null; sitSlider.classList.remove('active'); });
+}
+// Палец отпустили где угодно (в т.ч. за краем полосы) — полоса не «залипает».
+for (const ev of ['pointerup', 'pointercancel']) {
+  window.addEventListener(ev, () => {
+    if (sliderDrag) { sliderDrag = null; sitSlider.classList.remove('active'); }
+    if (typeof slider2Drag !== 'undefined' && slider2Drag) { slider2Drag = null; $('sit-slider2')?.classList.remove('active'); }
+  });
+}
+// Правая полоса во вкладке «Позы»: присесть → на колени → сесть → лечь (поза остаётся).
+const sitSlider2 = $('sit-slider2');
+let slider2Drag = null;
+sitSlider2.addEventListener('pointerdown', (e) => {
+  if (!character || e.target.closest('#lie-toggle2')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  sitSlider2.setPointerCapture(e.pointerId);
+  slider2Drag = { y: e.clientY, t: performance.now() };
+  sliderTakesOver();
+  sitSlider2.classList.add('active');
+});
+sitSlider2.addEventListener('pointermove', (e) => {
+  if (!slider2Drag || !character) return;
+  character.effortT = 0.35;
+  const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || 200;
+  const dv = ((e.clientY - slider2Drag.y) / h) * sitMax();
+  const now = performance.now();
+  const rate = Math.abs(dv) / Math.max(0.008, (now - slider2Drag.t) / 1000);
+  character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
+  slider2Drag.y = e.clientY;
+  slider2Drag.t = now;
+  character.slideHold = 3;
+  character.dragBoostT = 0.5;
+  sliderTakesOver();
+  loopNoteMove('sit');
+  sitBy(dv / 0.004);
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  sitSlider2.addEventListener(ev, () => { slider2Drag = null; sitSlider2.classList.remove('active'); });
+}
+
+// Наклон в режиме позы: от прогиба назад (верх полосы) до глубокого наклона (низ).
+const BEND_MIN = -0.95; // прогиб назад — побольше
+const BEND_MAX = 1.9; // наклон вперёд поглубже
+const BEND_RANGE = BEND_MAX - BEND_MIN;
+// Сколько изгиба берёт спина: вперёд — мягкая дуга, назад — глубокий прогиб (S-линия).
+function bendSpine(b) { return b >= 0 ? b * 0.55 : b * 1.25; }
+// Точки-отметки: стоит, присед, на коленях, боком, лёжа — только те, что в пределах полосы
+// (пока «сесть на пол» не открыто, полоса короче — нижние отметки прячем).
+var sitMarksFor = null; // var: renderLieToggle() вызывается при запуске раньше этой строки
+function renderSitMarks() {
+  const max = sitMax();
+  if (sitMarksFor === max) return;
+  sitMarksFor = max;
+  const marks = [0, 0.5, 0.8, 1.0, 1.3];
+  for (const sl of [sitSlider, $('sit-slider2')]) {
+    sl?.querySelectorAll('.track i').forEach((el, i) => {
+      const m = marks[i];
+      el.style.display = m == null || m > max + 1e-6 ? 'none' : '';
+      if (m != null) el.style.top = `${(m / max) * 100}%`;
+    });
+  }
+}
+function updateSitSlider() {
+  if (!character) return;
+  renderSitMarks();
+  // В режиме позы стоя — наклон; если она сидит/лежит — полоса поднимает/опускает её.
+  const bendMode = poseMode;
+  sitSlider2.style.setProperty('--k', THREE.MathUtils.clamp(character.sitS / sitMax(), 0, 1).toFixed(3));
+  sitSlider.classList.toggle('pose-mode', poseMode);
+  sitSlider.classList.toggle('bend', bendMode);
+  const k = bendMode
+    ? (character.bodyOffset.hipsRotX - BEND_MIN) / BEND_RANGE
+    : (sliderDrag ? character.sit : character.sitS) / sitMax(); // пока ведёшь — кружок под пальцем
+  sitSlider.style.setProperty('--k', THREE.MathUtils.clamp(k, 0, 1).toFixed(3));
+}
+
+// Свайп вниз по пустому месту — садится на пол, вверх — встаёт.
+let sitLineAt = 0;
+function sitBy(dy) {
+  if (!character) return;
+  if (dy > 0 && character.mixer && currentMocap) stopMocap();
+  const before = character.sit;
+  character.sit = THREE.MathUtils.clamp(character.sit + dy * 0.004, 0, sitMax()); // до 1.3 — лечь на бок
+  const now = performance.now();
+  if (now - sitLineAt > 4000) {
+    if (before < 0.9 && character.sit >= 0.9) { sitLineAt = now; say(pick(['Посижу немножко~', 'Ух, устала…', 'Сядешь рядом?'])); }
+    if (before > 0.1 && character.sit <= 0.1) { sitLineAt = now; say(pick(['Ладно, встаю!', 'Опа!', 'Всё, отдохнула~'])); }
+    if (before < 1.25 && character.sit >= 1.25) {
+      sitLineAt = now;
+      say(character.lieStyle === 'belly' ? pick(['Посплю немножко… 😴', 'Спокойной ночи~', 'Ммм… zzz'])
+        : character.lieStyle === 'back' ? pick(['Смотри, облака~', 'Как хорошо полежать…', 'Ляжешь рядом?'])
+        : pick(['Полежу немножко~', 'Как уютно…', 'Ммм, хорошо~']));
+    }
+  }
+}
+
+// Ближайшая точка-ручка под пальцем (с запасом ~60px): хватать легко.
+const HANDLE_HIT = {
+  handL: { zone: 'hand', side: 'left' }, handR: { zone: 'hand', side: 'right' },
+  head: { zone: 'face' }, chest: { zone: 'body', bone: 'chest' }, belly: { zone: 'belly' },
+  hips: { zone: 'body', bone: 'hips' }, footL: { zone: 'legs', bone: 'leftFoot' }, footR: { zone: 'legs', bone: 'rightFoot' },
+  kneeL: { zone: 'knee', side: 'left' }, kneeR: { zone: 'knee', side: 'right' },
+};
+function nearestHandle(e, radius = 40, bias = null, force = false) {
+  let best = null;
+  // Только что крутили камеру — точки не хватаем (чтобы не зацепить случайно); радиус поменьше.
+  if (!force && performance.now() - lastCamMove < 450) return null; // force — взяли долгим зажимом: камера не помеха
+  let bestD = radius;
+  for (const k of HANDLE_KEYS) {
+    const p = handleWorld(k);
+    if (!p) continue;
+    handleV.copy(p).project(camera);
+    const d = Math.hypot((handleV.x * 0.5 + 0.5) * window.innerWidth - e.clientX, (-handleV.y * 0.5 + 0.5) * window.innerHeight - e.clientY) * (bias?.[k] ?? 1);
+    if (d < bestD) { bestD = d; best = { ...HANDLE_HIT[k], key: k }; }
+  }
+  return best;
+}
+function handleKeyFor(hit) {
+  if (!hit) return null;
+  if (hit.key) return hit.key;
+  if (hit.zone === 'hand' || hit.zone === 'arm') return hit.side === 'left' ? 'handL' : 'handR';
+  if (hit.zone === 'headpat' || hit.zone === 'face') return 'head';
+  if (hit.zone === 'belly') return 'belly';
+  if (hit.zone === 'knee') return hit.side === 'left' ? 'kneeL' : 'kneeR';
+  if (hit.zone === 'legs') return /left/i.test(hit.bone) ? 'footL' : 'footR';
+  if (hit.zone === 'body') return hit.bone === 'chest' ? 'chest' : 'hips';
+  return null;
+}
+// Подпись у пальца: что сейчас двигаешь.
+let labelTimer = 0;
+function showLabel(text) {
+  const el = $('pose-label');
+  el.textContent = text;
+  el.classList.add('on');
+  clearTimeout(labelTimer);
+  labelTimer = setTimeout(() => el.classList.remove('on'), 1200);
+}
+// ---------- Простой вид: долгий тап и потянуть — взять её за точку (колено, кисть, ступню, голову, корпус) ----------
+// Отпустил — она спрашивает «Так?»: ✓ оставляет позу (и запоминает её), ✕ возвращает как было.
+// Обычные жесты не меняются: без долгого тапа всё работает как раньше; долгий тап без движения — значки.
+let grabForce = null;
+let grab = null; // { snap } — что было до того, как взял
+const grabAsk = document.createElement('div');
+grabAsk.id = 'grab-ask';
+grabAsk.style.display = 'none';
+grabAsk.innerHTML = '<span>Так?</span><button data-a="yes">✓ Да</button><button data-a="rep">🔁 Повторять</button><button data-a="no">✕ Нет</button>';
+// Движения точек на повторе: каждое — свой слой (таз, корпус, голова, кисти, ступни). Слои складываются друг с
+// другом и с обычным повтором наклона/приседа. «✕ Стоп точки» или домик снимают их.
+const grabLoops = [];
+const grabStop = document.createElement('button');
+grabStop.id = 'grab-stop';
+grabStop.textContent = '✕ точки';
+// Выглядит и стоит так же, как «✕ отмена» у обычного повтора: маленькая стеклянная плашка рядом с её головой.
+grabStop.style.cssText = 'position:fixed;left:50%;top:30%;transform:translate(-50%,-50%);z-index:30;display:none;white-space:nowrap;border-radius:999px;padding:6px 12px;font:inherit;font-size:12.5px;font-weight:700;color:#fff;opacity:.8;background:var(--glass-bg, rgba(40,30,80,.6));box-shadow:var(--glass-edge, 0 0 0 1px rgba(255,255,255,.25));border:0;backdrop-filter:blur(10px);cursor:pointer';
+document.body.appendChild(grabStop);
+for (const ev of ['pointerdown', 'touchstart']) grabStop.addEventListener(ev, (e) => e.stopPropagation());
+function grabLoopsClear() { grabLoops.length = 0; grabStop.style.display = 'none'; }
+grabStop.addEventListener('click', (e) => { e.stopPropagation(); grabLoopsClear(); showToast('Точки остановлены'); });
+const GRAB_BODY = ['spineX', 'spineY', 'spineZ', 'hipsX', 'hipsY', 'hipsZ', 'hipsRotX', 'hipsFwd'];
+function grabSample() {
+  const c = character;
+  return { t: 0, body: GRAB_BODY.map((k) => c.bodyOffset[k] ?? 0), head: [c.headOffset?.x ?? 0, c.headOffset?.y ?? 0], sit: c.sit,
+    hL: c.handAnchor?.left ? null : vArr(c.handTargets.left), hR: c.handAnchor?.right ? null : vArr(c.handTargets.right), fL: vArr(c.footOffset.left), fR: vArr(c.footOffset.right) };
+}
+// Каждый кадр, пока тянешь точку, пишем позу; на повторе — проигрываем туда-обратно только то, что двигалось.
+function updateGrabLoops(dt) {
+  if (!character) return;
+  character.ledNow = !!poseDrag?.grab; // её ведут за точку — сама почти не двигается (см. leadK)
+  if (grab?.rec && poseDrag?.grab) { const smp = grabSample(); smp.t = (performance.now() - grab.rec.start) / 1000; grab.rec.S.push(smp); }
+  if (!grabLoops.length) return;
+  if (!autoMode || poseMode || autoState === 'sleep') { grabLoopsClear(); return; }
+  if (autoState === 'hold') return;
+  const c = character;
+  for (const g of grabLoops) {
+    if (poseDrag?.grab) continue; // пока тянешь новую точку — старые слои ждут
+    g.t = (g.t + dt) % (g.dur * 2);
+    const tri = g.t < g.dur ? g.t / g.dur : 2 - g.t / g.dur, u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * g.dur, S = g.S;
+    let i = 0; while (i < S.length - 2 && S[i + 1].t < u) i++;
+    const a = S[i], b = S[Math.min(i + 1, S.length - 1)], k = b.t > a.t ? THREE.MathUtils.clamp((u - a.t) / (b.t - a.t), 0, 1) : 0;
+    const m = g.moved;
+    GRAB_BODY.forEach((key, j) => { if (m.body[j] && !(key === 'hipsRotX' && reps.home.on) && !(key === 'spineX' && reps.home.on)) c.bodyOffset[key] = a.body[j] + (b.body[j] - a.body[j]) * k; });
+    if (m.head) c.headOffset = { x: a.head[0] + (b.head[0] - a.head[0]) * k, y: a.head[1] + (b.head[1] - a.head[1]) * k };
+    if (m.sit && !reps.home.on) { c.sit = a.sit + (b.sit - a.sit) * k; c.sitRate = 1.6; }
+    applyPoints({ hL: m.hL ? lerpArr(a.hL, b.hL, k) : null, hR: m.hR ? lerpArr(a.hR, b.hR, k) : null, fL: m.fL ? lerpArr(a.fL, b.fL, k) : null, fR: m.fR ? lerpArr(a.fR, b.fR, k) : null });
+  }
+  character.slideHold = 3;
+}
+function grabMakeLoop(rec) {
+  const S = rec.S;
+  if (!S || S.length < 6) return false;
+  const dur = S[S.length - 1].t;
+  if (dur < 0.35) return false;
+  const rng = (f) => { let lo = Infinity, hi = -Infinity; for (const x of S) { const v = f(x); if (v == null) return 0; lo = Math.min(lo, v); hi = Math.max(hi, v); } return hi - lo; };
+  const pt = (key) => { const f = S.find((x) => x[key])?.[key]; return !!f && S.filter((x) => x[key]).length > S.length * 0.5 && S.some((x) => x[key] && Math.hypot(x[key][0] - f[0], x[key][1] - f[1], x[key][2] - f[2]) > 0.015); };
+  const moved = { body: GRAB_BODY.map((_, j) => rng((x) => x.body[j]) > 0.012), head: rng((x) => x.head[0]) + rng((x) => x.head[1]) > 0.03, sit: rng((x) => x.sit) > 0.05, hL: pt('hL'), hR: pt('hR'), fL: pt('fL'), fR: pt('fR') };
+  if (!moved.body.some(Boolean) && !moved.head && !moved.sit && !moved.hL && !moved.hR && !moved.fL && !moved.fR) return false;
+  // Новый слой заменяет старые на тех же каналах (тот же таз, та же рука) — остальные слои идут дальше.
+  for (const g of grabLoops) { g.moved.body = g.moved.body.map((v, j) => v && !moved.body[j]); for (const key of ['head', 'sit', 'hL', 'hR', 'fL', 'fR']) if (moved[key]) g.moved[key] = false; }
+  for (let i = grabLoops.length - 1; i >= 0; i--) { const g = grabLoops[i].moved; if (!g.body.some(Boolean) && !g.head && !g.sit && !g.hL && !g.hR && !g.fL && !g.fR) grabLoops.splice(i, 1); }
+  grabLoops.push({ S, dur, t: dur, moved });
+  grabStop.style.display = 'block';
+  return true;
+}
+grabAsk.style.cssText = 'position:fixed;left:50%;top:80%;transform:translate(-50%,-50%);z-index:32;display:none;gap:8px;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
+document.body.appendChild(grabAsk);
+for (const ev of ['pointerdown', 'touchstart']) grabAsk.addEventListener(ev, (e) => e.stopPropagation());
+let grabAskTimer = 0;
+function grabDone(keep) {
+  clearTimeout(grabAskTimer);
+  grabAsk.style.display = 'none';
+  if (!grab) return;
+  if (keep === 'rep') {
+    if (grab.rec && grabMakeLoop(grab.rec)) { showToast(grabLoops.length > 1 ? '🔁 Повторяю и это' : '🔁 Повторяю'); try { character.react({ expression: 'happy' }); } catch { /* ignore */ } }
+    else showToast('Слишком коротко — потяни подольше');
+  } else if (!keep) { try { character.importTouchPose(grab.snap); } catch { /* ignore */ } showToast('Вернула как было'); }
+  else { showToast('Запомнила ♥'); try { saveLeft(); } catch { /* ignore */ } }
+  grab = null;
+}
+grabAsk.addEventListener('click', (e) => { const a = e.target?.dataset?.a; if (a) grabDone(a === 'rep' ? 'rep' : a === 'yes'); });
+for (const bEl of grabAsk.querySelectorAll('button')) bEl.style.cssText = 'border:0;border-radius:999px;padding:8px 14px;font:inherit;font-weight:800;color:#fff;background:rgba(255,255,255,.18);cursor:pointer';
+const grabGlow = document.createElement('div');
+grabGlow.id = 'grab-glow';
+document.body.appendChild(grabGlow);
+const grabGlowV = new THREE.Vector3();
+var lastGrabAt = -1e9, lastGrabKey = null; // когда и за какую точку последний раз вели её (долгий тап)
+var grabWhy = '';
+const diagEl = document.createElement('div');
+diagEl.style.cssText = 'position:fixed;left:6px;top:6px;z-index:99;font:11px sans-serif;color:#fff;background:rgba(0,0,0,.45);padding:2px 6px;border-radius:6px;pointer-events:none;display:none';
+document.body.appendChild(diagEl);
+let diagT = 0;
+function diag(t) { diagEl.textContent = t; diagEl.style.display = 'block'; clearTimeout(diagT); diagT = setTimeout(() => { diagEl.style.display = 'none'; }, 4000); }
+function grabPick(e, r) {
+  const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
+  return nearestHandle(e, r, Object.keys(bias).length ? bias : null, true);
+}
+function grabStart(e0) {
+  if (!character || !autoMode || poseMode) return false;
+  // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
+  // Только что вёл точку — та же точка берётся охотнее (продолжаешь то же движение, а не хватаешь соседнюю руку).
+  let hit = grabPick(e0, 70) ?? zoneAt(e0, true) ?? grabPick(e0, 150); // она сдвинулась из-под пальца (идёт повтор) — берём ближайшую точку
+  if (!hit) { grabWhy = 'мимо точек' + (performance.now() - lastCamMove < 450 ? ' (камера)' : ''); return false; }
+  // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
+  if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
+  if (!grab) grab = { snap: character.exportTouchPose() };
+  grab.rec = { start: performance.now(), S: [] }; // запись этого движения — для «Повторять»
+  clearTimeout(grabAskTimer); grabAsk.style.display = 'none';
+  stroking = null; petting = null; bgSwipe = null;
+  autoBendTarget = null; // свайп-наклон, начатый тем же касанием, дальше не действует: теперь ведут точку
+  stopAuto(true);
+  grabForce = hit;
+  try { poseDragStart(e0); } finally { grabForce = null; }
+  if (!poseDrag || poseDrag.kind === 'bg' || poseDrag.kind === 'sitdrag') { grabWhy = 'вид ' + (poseDrag?.kind ?? 'нет') + ' зона ' + (hit.key ?? hit.zone); poseDrag = null; return false; }
+  poseDrag.grab = true;
+  lastGrabKey = hit.key ?? null; lastGrabAt = performance.now();
+  try { navigator.vibrate?.(8); } catch { /* ignore */ }
+  return true;
+}
+function grabRelease() {
+  // Отпустил точку — спрашивает, оставить ли так. Не ответил за 8 секунд — оставляет.
+  grabAsk.style.display = 'flex';
+  clearTimeout(grabAskTimer);
+  grabAskTimer = setTimeout(() => grabDone(true), 8000);
+}
+function poseDragStart(e) {
+  snapPose();
+  const camBusy = !grabForce && performance.now() - lastCamMove < 450;
+  // Точку берём, только если палец прямо на ней (≈ размер кружка); иначе ведёшь по ней —
+  // работает как правая полоса. (grabForce — простой вид: точку уже выбрали долгим тапом.)
+  const handleHit = grabForce ?? (camBusy ? null : nearestHandle(e, 24));
+  const hit = camBusy ? null : (handleHit ?? zoneAt(e, true));
+  // Водишь по ней (мимо точек) вверх-вниз — как правая полоса: сесть/лечь/встать.
+  if (hit && !handleHit && !['hand', 'arm', 'knee'].includes(hit.zone)) {
+    poseDrag = { kind: 'sitdrag', y: e.clientY, t: performance.now() };
+    activeHandle = null;
+    showLabel('Ниже — сесть / лечь, выше — встать');
+    return;
+  }
+  activeHandle = handleKeyFor(hit);
+  snapAnchor = null;
+  if (activeHandle) showLabel(HANDLE_LABELS[activeHandle]);
+  if (!hit) {
+    // Пустое место: вбок — крутим камеру (сесть/встать — только ползунком).
+    poseDrag = { kind: 'bg', sx: e.clientX, sy: e.clientY, lastX: e.clientX, lastY: e.clientY, axis: null };
+    return;
+  }
+  if (hit.zone === 'hand' || hit.zone === 'arm') {
+    const handPos = character.handWorld(hit.side);
+    const normal = new THREE.Vector3();
+    camera.getWorldDirection(normal);
+    poseDrag = { kind: 'hand', side: hit.side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, handPos) };
+    poseDragMove(e);
+  } else if (hit.zone === 'knee') {
+    // Колено: ведёшь колено — стопа идёт следом под ним (голень свисает), бедро сгибается само.
+    const side = hit.side;
+    const kneePos = character.bones[`${side}LowerLeg`].getWorldPosition(new THREE.Vector3());
+    const footPos = character.footWorld(side);
+    const normal = new THREE.Vector3();
+    camera.getWorldDirection(normal);
+    poseDrag = { kind: 'knee', side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, kneePos), shin: footPos.clone().sub(kneePos),
+      kneeStart: kneePos.clone(), footStart: footPos.clone() };
+  } else if (hit.zone === 'headpat' || hit.zone === 'face') {
+    poseDrag = { kind: 'head', lastX: e.clientX, lastY: e.clientY };
+  } else if (hit.zone === 'legs') {
+    const side = /left/i.test(hit.bone) ? 'left' : 'right';
+    const footPos = character.footWorld(side);
+    const normal = new THREE.Vector3();
+    camera.getWorldDirection(normal);
+    poseDrag = { kind: 'foot', side, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, footPos) };
+  } else if (hit.zone === 'belly') {
+    poseDrag = { kind: 'twist', lastX: e.clientX, lastY: e.clientY };
+  } else if (hit.zone === 'body' && hit.bone === 'chest') {
+    poseDrag = { kind: 'spine', lastX: e.clientX, lastY: e.clientY };
+  } else if (hit.zone === 'body') {
+    poseDrag = { kind: 'hips', lastX: e.clientX, lastY: e.clientY };
+  }
+}
+
+const dragPoint = new THREE.Vector3();
+function poseDragMove(e) {
+  if (!poseDrag) return;
+  if (poseDrag.kind !== 'bg') userPosed = true;
+  if (poseDrag.grab) lastGrabAt = performance.now();
+  if (poseDrag.auto) {
+    autoDragAt = performance.now();
+    lastOnHerAt = autoDragAt;
+    // Сколько раз сменил направление (туда-сюда) — по этому понимаем, что её «подвигали».
+    const d = e.clientY - poseDrag.y;
+    if (Math.sign(d) && Math.sign(d) !== poseDrag.dir) {
+      if (poseDrag.dir && poseDrag.run > 24) poseDrag.turns++;
+      // Развороты считаем и между отдельными росчерками (вниз — отпустил — вверх): это то же «туда-сюда».
+      if (autoRec) { if (autoRec.gdir && autoRec.gdir !== Math.sign(d) && (!poseDrag.dir || poseDrag.run > 24)) autoRec.gturns = (autoRec.gturns ?? 0) + 1; autoRec.gdir = Math.sign(d); }
+      poseDrag.dir = Math.sign(d); poseDrag.run = 0;
+    }
+    poseDrag.run += Math.abs(d);
+    if (autoRec) autoRec.turns = Math.max(autoRec.turns ?? 0, poseDrag.turns, autoRec.gturns ?? 0);
+  }
+  if (poseDrag.shift && reps.home.on) {
+    // Повтор идёт и продолжает идти — палец только сдвигает его.
+    const r = reps.home, dy = e.clientY - poseDrag.y;
+    poseDrag.y = e.clientY;
+    if (poseDrag.kind === 'benddrag') {
+      const dv = (dy / (window.innerHeight * 0.5)) * BEND_RANGE;
+      if (autoLayer?.kind === 'bend') autoLayer.off = THREE.MathUtils.clamp((autoLayer.off ?? 0) + dv, -1.6, 1.6);
+      else { repRanges(r); r.bendOff = THREE.MathUtils.clamp((r.bendOff ?? 0) + dv, BEND_MIN - r.bendLo, BEND_MAX - r.bendHi); }
+      showLabel(dy > 0 ? 'Повтор: наклон глубже' : 'Повтор: наклон выше');
+    } else {
+      const dv = (dy / (window.innerHeight * 0.38)) * sitMax();
+      if (autoLayer?.kind === 'sit') autoLayer.off = THREE.MathUtils.clamp((autoLayer.off ?? 0) + dv, -1.3, 1.3);
+      else { repRanges(r); r.sitOff = THREE.MathUtils.clamp((r.sitOff ?? 0) + dv, -r.sitLo, Math.max(-r.sitLo, sitMax() - r.sitHi)); }
+      showLabel(dy > 0 ? 'Повтор: ниже' : 'Повтор: выше');
+    }
+    return;
+  }
+  if (poseDrag.kind === 'benddrag') {
+    // Полная амплитуда наклона и прогиба, как у левой полосы во вкладке «Позы».
+    lastOnHerAt = performance.now();
+    character.effortT = 0.35;
+    character.dragBoostT = 0.5;
+    // Палец задаёт цель, тело плавно догоняет её каждый кадр (без рывков от неровных касаний).
+    const bend = THREE.MathUtils.clamp((autoBendTarget ?? character.bodyOffset.hipsRotX) + ((e.clientY - poseDrag.y) / (window.innerHeight * 0.5)) * BEND_RANGE, BEND_MIN, BEND_MAX);
+    poseDrag.y = e.clientY;
+    autoBendTarget = bend;
+    showLabel(bend > 0.05 ? 'Наклон вперёд' : bend < -0.05 ? 'Прогиб назад' : 'Прямо');
+    return;
+  }
+  if (poseDrag.kind === 'sitdrag') {
+    lastOnHerAt = performance.now();
+    character.effortT = 0.35;
+    const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || window.innerHeight * 0.5;
+    const dv = ((e.clientY - poseDrag.y) / h) * sitMax();
+    const now = performance.now();
+    const rate = Math.abs(dv) / Math.max(0.008, (now - poseDrag.t) / 1000);
+    character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
+    poseDrag.y = e.clientY;
+    poseDrag.t = now;
+    character.slideHold = 3;
+    character.dragBoostT = 0.5;
+    loopNoteMove('sit');
+    sitBy(dv / 0.004);
+    return;
+  }
+  if (poseDrag.kind === 'hand' || poseDrag.kind === 'foot' || poseDrag.kind === 'knee') {
+    // В простом виде движение рук и ног само в повтор НЕ записывается (кнопки этого режима там нет, и выключить было
+    // нечем): повтор точки — только по «🔁 Повторять» в вопросе «Так?».
+    if (pointMode === 'rec' && !autoMode) ptsNoteMove(); // 🔁 движение точек — отдельный слой повтора
+    else pinLimb(poseDrag.kind, poseDrag.side); // 📌 повтор идёт дальше, точка — где поставил
+    character.slideHold = 3; // ведёшь руку/ногу — она не перебивает своими движениями (не болтает ножками)
+    toNdc(e);
+    raycaster.setFromCamera(pointer, camera);
+    if (raycaster.ray.intersectPlane(poseDrag.plane, dragPoint)) {
+      // Точка идёт ЗА пальцем, а не прыгает ПОД палец: палец почти никогда не попадает точно в сустав, и раньше
+      // в первый же момент ступня/колено/кисть рывком перескакивали к нему. Теперь запоминаем, где был палец
+      // и где была точка в начале жеста, и дальше ведём точку на столько же, на сколько сдвинулся палец.
+      if (!poseDrag.p0) {
+        poseDrag.p0 = dragPoint.clone();
+        poseDrag.start0 = poseDrag.kind === 'hand' ? character.bones[`${poseDrag.side}Hand`]?.getWorldPosition(new THREE.Vector3())
+          : poseDrag.kind === 'foot' ? character.footWorld(poseDrag.side)
+          : character.bones[`${poseDrag.side}LowerLeg`]?.getWorldPosition(new THREE.Vector3());
+      }
+      if (poseDrag.start0) dragPoint.sub(poseDrag.p0).add(poseDrag.start0);
+      // Лёжа (на животе, на спине) ногу ведут вбок — прямая нога идёт по полу вокруг бедра (раздвигается), а не
+      // сгибается коленом вверх. Потянул заметно вверх от пола — тогда свободно (согнуть, поднять голень).
+      if ((poseDrag.kind === 'knee' || poseDrag.kind === 'foot') && character.sitS > 1.1) {
+        const ph = character.sitPhases(), sd = poseDrag.side, S = character.scale;
+        const base = character.footBase?.[sd], hip = character.bones[`${sd}UpperLeg`]?.getWorldPosition(new THREE.Vector3());
+        const pt = poseDrag.kind === 'knee' ? poseDrag.kneeStart.clone().add(dragPoint.clone().sub(poseDrag.kneeStart)) : dragPoint;
+        const y0 = poseDrag.start0?.y ?? pt.y;
+        if (Math.max(ph.b4, ph.c4) > 0.6 && base && hip && pt.y < y0 + 0.12 * S) {
+          // Длина ноги — по костям (а не по тому, где ступня сейчас: она могла быть поднята, когда болтает ножками).
+          const kn = character.bones[`${sd}LowerLeg`].getWorldPosition(new THREE.Vector3()), ft = character.bones[`${sd}Foot`].getWorldPosition(new THREE.Vector3());
+          const L = (hip.distanceTo(kn) + kn.distanceTo(ft)) * 0.97, dx = pt.x - hip.x, dz = pt.z - hip.z, dl = Math.hypot(dx, dz);
+          if (L > 0.05 * S && dl > 0.05 * S) {
+            character.setFootTarget(sd, new THREE.Vector3(hip.x + dx / dl * L, 0.07 * S, hip.z + dz / dl * L));
+            return;
+          }
+        }
+      }
+      if (poseDrag.kind === 'knee' && character.sitS > 0.3) {
+        // На коленях и четвереньках колено стоит на полу: ведём саму точку опоры — ноги раздвигаются по полу.
+        const kp = character.kneePin, sd = poseDrag.side;
+        if (kp?.[sd] && kp.w > 0.5 && (character.kneelK ?? 0) > 0.5 && !character.footOffset[sd]) {
+          poseDrag.pin0 ??= kp[sd].clone(); poseDrag.foot0 ??= kp.foot?.[sd]?.clone() ?? null;
+          character.moveKnee(sd, poseDrag.pin0, poseDrag.foot0, dragPoint.clone().sub(poseDrag.kneeStart));
+          return;
+        }
+        // На полу колено ведёт всю ногу: стопа сдвигается вместе с коленом.
+        character.setFootTarget(poseDrag.side, poseDrag.footStart.clone().add(dragPoint.clone().sub(poseDrag.kneeStart)));
+      } else if (poseDrag.kind === 'knee') {
+        // Голень свисает почти вертикально под коленом (чуть назад).
+        const len = poseDrag.shin.length();
+        character.setFootTarget(poseDrag.side, dragPoint.clone().add(new THREE.Vector3(0, -len * 0.97, -0.05 * character.scale)));
+      } else if (poseDrag.kind === 'hand') {
+        const near = nearestAnchor(e, poseDrag.side);
+        if (near && snapAnchor?.a !== near.a) showLabel(`${HANDLE_LABELS[activeHandle] ?? 'Рука'} ${near.a.label}`);
+        snapAnchor = near;
+        if (near?.a.preset) character.setArmPreset(poseDrag.side, near.a.preset);
+        else {
+          character.setHandTarget(poseDrag.side, near ? near.p : dragPoint);
+          // Магнит на теле — рука держится за эту часть тела и едет вместе с ней.
+          if (near) character.setHandAnchor(poseDrag.side, near.a);
+        }
+      }
+      else character.setFootTarget(poseDrag.side, dragPoint);
+    }
+    return;
+  }
+  if (poseDrag.kind === 'bg') {
+    // Пустое место в режиме позы — камера вращается во все стороны.
+    rotateBy(-(e.clientX - poseDrag.lastX) * 0.01, (e.clientY - poseDrag.lastY) * 0.005);
+    poseDrag.lastX = e.clientX;
+    poseDrag.lastY = e.clientY;
+    return;
+  }
+  let dx = e.clientX - poseDrag.lastX;
+  let dy = e.clientY - poseDrag.lastY;
+  poseDrag.lastX = e.clientX;
+  poseDrag.lastY = e.clientY;
+  const facing = Math.cos(camYaw) >= 0 ? 1 : -1; // если смотрим сзади — влево/вправо наоборот
+  const clamp = THREE.MathUtils.clamp;
+  if (poseDrag.kind === 'head') {
+    const o = character.headOffset;
+    // Голову можно вести далеко: сверх поворота шеи за ней идут плечи и грудь (см. character.js) — размах большой и живой.
+    o.y = clamp(o.y + dx * 0.007 * facing, -1.5, 1.5);
+    o.x = clamp(o.x + dy * 0.006, -0.85, 1.0);
+  } else if (poseDrag.kind === 'spine') {
+    // Вниз — наклон вперёд как у человека: в основном в тазобедренных (таз уходит
+    // назад для баланса, ноги на полу) и немного в спине; вверх — прогиб назад.
+    const o = character.bodyOffset;
+    if (!repPlaying()) { // наклон ведёт повтор — не спорим с ним
+      // Размах как у свайпа по груди (глубокий наклон и прогиб назад), и за пальцем корпус идёт живее: раньше за точку
+      // груди наклон был до 1.0, прогиб всего до −0.2 — в приседе и на коленях корпусом почти не подвигать.
+      o.hipsRotX = clamp(o.hipsRotX + dy * 0.006, BEND_MIN, 1.7);
+      o.spineX = bendSpine(o.hipsRotX);
+    }
+    o.spineZ = clamp(o.spineZ - dx * 0.006 * facing, -0.95, 0.95); // вбок корпусом — шире
+  } else if (poseDrag.kind === 'twist') {
+    // Живот: вбок — поворот корпуса, вверх/вниз — наклон.
+    const o = character.bodyOffset;
+    o.spineY = clamp(o.spineY + dx * 0.007 * facing, -1.3, 1.3); // поворот корпуса — шире
+    if (!repPlaying()) o.spineX = clamp(o.spineX + dy * 0.004, -0.5, 1.1);
+  } else {
+    // Таз: тянешь вниз — опускается (присед → на колени → сидит → лежит), вверх — встаёт;
+    // вбок — бёдра в сторону (стоя), с противовесом плеч и головы.
+    const o = character.bodyOffset;
+    const S = character.scale;
+    // Только вбок (бёдра в сторону) — вертикаль не трогаем, чтобы она не приседала случайно.
+    // На полу таз двигается свободнее: вбок шире, и вверх-вниз (приподнять/опустить бёдра).
+    // Взял за таз долгим тапом: режим (стоя/присед или пол) берём один раз в начале жеста — приседая с тазом по кругу,
+    // она не «переключается» на полпути в движение по полу.
+    const floor = poseDrag.grab ? (poseDrag.floor0 ??= character.sitS > 0.55) : character.sitS > 0.3;
+    if (!(poseDrag.grab && !floor) && (character.hipsSetSit == null || Math.abs(character.hipsSetSit - character.sitS) > 0.05)) {
+      // Новое положение — прошлые сдвиги таза (от другого положения) не тащим.
+      o.hipsX = 0; o.hipsZ = 0; o.hipsY = 0; o.hipsFwd = 0;
+    }
+    character.hipsSetSit = character.sitS;
+    // Размах шире (сборка 187): бёдра уходят вбок дальше, таз наклоняется сильнее — движение читается красивее.
+    // За таз долгим тапом стоя/в приседе: чем глубже присед, тем шире таз ходит вбок (в приседе ему есть куда).
+    // На коленях и четвереньках таз вбок — в пределах, которые ноги держат без переступания (иначе колени и голени
+    // перебирают на каждом качании); лёжа и сидя на полу — шире.
+    const knL = (() => { const ph = character.sitPhases(); return ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); })();
+    const lim = floor ? 0.43 - 0.09 * knL : poseDrag.grab ? 0.32 + 0.08 * THREE.MathUtils.smoothstep(character.sitS, 0.05, 0.4) + 0.08 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.4, 1.2) : 0.17; // шире (сборка 271): больше свободы крутить тазом // в наклоне таз тоже ходит шире
+    // Взял за таз долгим тапом: жест идёт по одной оси — вбок ИЛИ вверх-вниз (иначе, двигая таз вбок, случайно
+    // поднимал или усаживал её). На полу вверх-вниз — приподнять/опустить бёдра, а не встать.
+    if (poseDrag.grab) {
+      character.slideHold = 3; // ведёшь за таз — она не болтает ножками и не перебивает движение своими
+      poseDrag.ax ??= 0; poseDrag.ay ??= 0; poseDrag.ax += Math.abs(dx); poseDrag.ay += Math.abs(dy);
+      if (!poseDrag.axis && poseDrag.ax + poseDrag.ay > 14) poseDrag.axis = poseDrag.ax >= poseDrag.ay ? 'x' : 'y';
+      if (!poseDrag.axis) return;
+      // Жест начинается по одной оси (чтобы случайно не усадить, двигая вбок), но стоит заметно повести и в другую
+      // сторону — оси отпираются: тазом можно водить свободно, по кругу, приседая и качаясь одновременно.
+      if (!poseDrag.free && (poseDrag.axis === 'y' ? poseDrag.ax : poseDrag.ay) > 34) { poseDrag.free = true; try { navigator.vibrate?.(6); } catch { /* ignore */ } }
+      if (!poseDrag.free) { if (poseDrag.axis === 'y') dx = 0; else dy = 0; }
+      if (floor) {
+        // Вверх-вниз за таз на полу: бёдра поднимаются/опускаются и таз наклоняется вперёд-назад — с хорошим размахом.
+        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ { const ph0 = character.sitPhases(), kn0 = ph0.p2 * (1 - ph0.p3) * (1 - ph0.b4) * (1 - ph0.c3); /* лёжа на спине и животе таз поднимается высоко (мостик, «домик»); на коленях можно сесть ниже */ o.hipsY = clamp((o.hipsY ?? 0) - dy * (0.0015 + 0.001 * Math.max(back, ph0.b4)) * S, /* лёжа таз идёт за пальцем живее — полный подъём за короткий жест */ -(0.03 + 0.07 * kn0) * S, (0.2 + 0.14 * Math.max(back, ph0.b4)) * S * (1 - ph0.p4)); } /* на боку таз не поднимаем: иначе всё тело повисает над полом */ { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0045 * (1 - back) * (1 - tall), -0.8, 0.9); } }
+        // На коленях и четвереньках тот же жест перекатывает таз вперёд за колени (на руки) и назад на пятки.
+        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0022 * S * kn, -0.24 * S, 0.38 * S) * (kn > 0.5 ? 1 : 0); }
+        dy = 0;
+      }
+    }
+    // Жест за таз — отзывчивее: таз идёт вбок почти вдвое быстрее за пальцем (полный размах — за половину экрана).
+    o.hipsX = clamp(o.hipsX + dx * (poseDrag.grab ? 0.0019 : 0.001) * facing * S, -lim * S, lim * S);
+    // На полу таз заваливается вбок вдвое слабее: иначе бедру приходится выворачиваться внутрь дальше, чем может сустав.
+    o.hipsZ = clamp(o.hipsX / S * (floor ? 0.7 : 1.6), -0.27, 0.27);
+    // Вращение, а не сдвиг: корпус скручивается и наклоняется навстречу тазу (плечи остаются примерно на месте),
+    // а при движении вниз-вверх таз подаётся назад-вперёд. Только для жеста за таз стоя и в приседе.
+    if (poseDrag.grab && !floor) {
+      const k = clamp(o.hipsX / (lim * S), -1, 1);
+      o.hipsZ = clamp(o.hipsX / S * 1.6, -0.36, 0.36);
+      poseDrag.sp0 ??= { y: o.spineY + clamp(o.hipsX / (lim * S), -1, 1) * 0.42, z: o.spineZ - clamp(o.hipsX / (lim * S), -1, 1) * 0.16 }; // от уже выставленного скручивания
+      o.spineY = clamp(poseDrag.sp0.y - k * 0.42, -1.3, 1.3);
+      o.spineZ = clamp(poseDrag.sp0.z + k * 0.16, -0.95, 0.95);
+      // Наклон таза — от того положения, в котором её взяли (в глубоком наклоне позу не сбрасываем), и не трогаем,
+      // пока наклон ведёт повтор.
+      poseDrag.rot0 ??= o.hipsRotX;
+      if (dy && !reps.home.on) o.hipsRotX = clamp(o.hipsRotX + dy * 0.0032, Math.max(BEND_MIN, poseDrag.rot0 - 0.8), Math.min(BEND_MAX, poseDrag.rot0 + 0.9)); // размах наклона за один захват — шире (274)
+    }
+    if (poseDrag.grab && !dy) return; // только вбок — посадку не трогаем
+    // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
+    // В 📌 при играющем повторе присед ведёт повтор — точкой бёдер только вбок.
+    {
+      const dyPx = dy;
+      const h = sitSlider2.querySelector('.track').getBoundingClientRect().height || window.innerHeight * 0.5;
+      const dv = (dyPx / h) * sitMax();
+      const now = performance.now();
+      const rate = Math.abs(dv) / Math.max(0.008, (now - (poseDrag.t ?? now - 16)) / 1000);
+      poseDrag.t = now;
+      character.sitRate = Math.max(character.sitRate * 0.8, Math.min(rate, 3));
+      character.slideHold = 3;
+      character.dragBoostT = 0.5;
+      if (pointMode === 'rec' && !autoMode) loopNoteMove('sit');
+      sitBy(dv / 0.004);
+      // За таз стоя — приседает (глубоко, но на колени сама не падает): можно качать и крутить тазом в приседе.
+      if (poseDrag.grab && !floor) character.sit = Math.min(character.sit, 0.5);
+    }
+  }
+}
+
+function savePoseAs(rawName) {
+  const name = rawName.trim().slice(0, 20);
+  if (!name || !character) return false;
   const key = `saved:${name}`;
   const isNew = !POSES[key];
-  savedPoses[name] = { ...editorParams };
-  POSES[key] = { label: `★ ${name}`, ...editorParams };
+  const params = { ...character.getPoseParams() };
+  const touch = character.exportTouchPose();
+  savedPoses[name] = { ...params, touch };
+  POSES[key] = { label: `★ ${name}`, ...params, touch };
   try { localStorage.setItem(POSES_KEY, JSON.stringify(savedPoses)); } catch { /* ignore */ }
   if (isNew) addPoseButton(key, POSES[key]);
   character.setPose(key);
   setActivePoseButton(key);
-  $('pose-name').value = '';
-  $('editor-save-row').hidden = true;
   say('Запомнила эту позу~');
-});
+  return true;
+}
 
-// Удаление в два нажатия: первое спрашивает, второе удаляет.
-let clearArmed = false;
-$('editor-clear').addEventListener('click', () => {
-  if (!clearArmed) {
-    clearArmed = true;
-    $('editor-clear').textContent = 'Точно удалить?';
-    setTimeout(() => { clearArmed = false; $('editor-clear').textContent = 'Удалить сохранённые'; }, 3000);
-    return;
-  }
-  clearArmed = false;
-  $('editor-clear').textContent = 'Удалить сохранённые';
-  for (const name of Object.keys(savedPoses)) {
-    delete POSES[`saved:${name}`];
-    document.querySelector(`#pose-list button[data-pose="saved:${CSS.escape(name)}"]`)?.remove();
-  }
-  savedPoses = {};
-  try { localStorage.removeItem(POSES_KEY); } catch { /* ignore */ }
-});
+// ---------- Режим камеры ----------
 
+let cameraMode = false;
+let camHintAt = 0;
+function setCameraMode(on) {
+  if (on && poseMode) setPoseMode(false);
+  cameraMode = on;
+  $('btn-camera').classList.toggle('active', on);
+  canvas.classList.toggle('camera', on);
+  petting = null;
+  stroking = null;
+  orbitDrag = null;
+  if (on) hintOnce('cam', 'Крути пальцем · два пальца — зум');
+}
+$('btn-camera').addEventListener('click', () => setCameraMode(!cameraMode));
+
+// Подсказка режима — только в первый раз, чтобы не мешала.
+const hintsShown = new Set();
+function hintOnce(key, text) {
+  if (hintsShown.has(key)) return;
+  hintsShown.add(key);
+  showToast(text);
+}
+
+let toastTimer = 0;
+function showToast(text) {
+  const t = $('toast');
+  t.textContent = text;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 2200);
+}
+
+function setFullBody(on) {
+  fullBody = on;
+  camZoom = 1;
+  $('btn-zoom').classList.toggle('off', !fullBody);
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+}
 $('btn-zoom').addEventListener('click', () => {
   fullBody = !fullBody;
   camZoom = 1;
@@ -647,19 +3170,55 @@ $('btn-zoom').addEventListener('click', () => {
 });
 $('btn-zoom').classList.add('off');
 
+// ---------- Кнопки прячутся сами ----------
+// Через 4 с без касаний кнопки плавно исчезают — остаётся только она.
+// Любое касание возвращает их. Полосы слева/справа работают и невидимыми.
+let uiIdleTimer = 0;
+function wakeUi() {
+  document.body.classList.remove('ui-hidden');
+  clearTimeout(uiIdleTimer);
+  // Во вкладке «Позы» кнопок больше — прячем быстрее.
+  uiIdleTimer = setTimeout(() => {
+    if (document.querySelector('.panel:not(.hidden)') || (!$('pose-list').hidden && !poseMode) || poseDrag || $('pose-save-form').hidden === false || !$('love-menu').hidden) { wakeUi(); return; }
+    document.body.classList.add('ui-hidden');
+  }, poseMode ? 2500 : 4000);
+}
+// Кнопки возвращаются от короткого касания (тап), а не от перетаскивания:
+// крутишь камеру, тянешь её за руку или ведёшь полосу — экран остаётся чистым.
+let tapStart = null;
+window.addEventListener('pointerdown', (e) => {
+  tapStart = { x: e.clientX, y: e.clientY, t: performance.now() };
+  if (!document.body.classList.contains('ui-hidden')) wakeUi(); // кнопки видны — продлеваем
+}, { capture: true, passive: true });
+window.addEventListener('pointerup', (e) => {
+  if (!tapStart) return;
+  const quick = performance.now() - tapStart.t < 300 && Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y) < 12;
+  tapStart = null;
+  if (quick || !document.body.classList.contains('ui-hidden')) wakeUi();
+}, { capture: true, passive: true });
+window.addEventListener('keydown', wakeUi, { capture: true });
+wakeUi();
+
 // ---------- Панели ----------
 
 function togglePanel(id, onOpen) {
   const panel = $(id);
   const willOpen = panel.classList.contains('hidden');
-  for (const p of document.querySelectorAll('.panel')) p.classList.add('hidden');
+  for (const p of document.querySelectorAll('.panel')) { if (p !== panel) { p.classList.remove('closing'); p.classList.add('hidden'); } }
   if (willOpen) {
     onOpen?.();
+    panel.classList.remove('closing');
     panel.classList.remove('hidden');
-  }
+  } else closePanel(panel);
+}
+// Панель закрывается плавно: уезжает вниз и гаснет, потом прячется.
+function closePanel(panel) {
+  if (panel.classList.contains('hidden') || panel.classList.contains('closing')) return;
+  panel.classList.add('closing');
+  setTimeout(() => { if (panel.classList.contains('closing')) { panel.classList.remove('closing'); panel.classList.add('hidden'); } }, 170);
 }
 for (const btn of document.querySelectorAll('.panel-close')) {
-  btn.addEventListener('click', () => btn.closest('.panel').classList.add('hidden'));
+  btn.addEventListener('click', () => closePanel(btn.closest('.panel')));
 }
 
 // ---------- Гардероб ----------
@@ -678,13 +3237,13 @@ const CLOTH_COLORS = [
   { id: 'sky', name: 'Небо', color: 0x8fc4ee },
   { id: 'white', name: 'Белый', color: 0xf4f1f6 },
 ];
-let clothColor = 'original';
-try { clothColor = localStorage.getItem('waifu-cloth-color') || 'original'; } catch { /* ignore */ }
+let clothColor = 'original'; // хранится в образе модели (см. loadLookFor)
 
 // Перекрашивает материалы одежды (в моделях VRoid в их имени есть «CLOTH»).
 function applyClothColor() {
   if (!character) return;
-  const def = CLOTH_COLORS.find((c) => c.id === clothColor) ?? CLOTH_COLORS[0];
+  // Общая перекраска одежды убрана — цвет теперь у каждой вещи свой (повторный тап в шкафу).
+  const def = CLOTH_COLORS[0];
   character.vrm.scene.traverse((o) => {
     if (!o.isMesh) return;
     for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
@@ -715,8 +3274,17 @@ const HAIR_COLORS = [
   { id: 'red', name: 'Алые', color: 0x8c1c30 },
 ];
 const look = { hair: 'original', stockings: 'off', dark: false };
-try { Object.assign(look, JSON.parse(localStorage.getItem('waifu-look') || '{}')); } catch { /* ignore */ }
-const saveLook = () => { try { localStorage.setItem('waifu-look', JSON.stringify(look)); } catch { /* ignore */ } };
+// Образ запоминается отдельно для каждой модели: у одной чёрные волосы и чулки,
+// у другой — свои цвета.
+function loadLookFor(id) {
+  Object.assign(look, { hair: 'original', stockings: 'off', dark: false, cloth: 'original' });
+  try { Object.assign(look, JSON.parse(localStorage.getItem(girlKey(`waifu-look:${id}`)) || '{}')); } catch { /* ignore */ }
+  clothColor = look.cloth;
+}
+const saveLook = () => {
+  look.cloth = clothColor;
+  try { localStorage.setItem(girlKey(`waifu-look:${currentOutfit}`), JSON.stringify(look)); } catch { /* ignore */ }
+};
 
 function tintMaterials(test, colorHex, shadeK) {
   character.vrm.scene.traverse((o) => {
@@ -737,12 +3305,466 @@ function tintMaterials(test, colorHex, shadeK) {
   });
 }
 
+// ---------- Одежда по частям ----------
+// Источники — та же девушка в других нарядах (.vrm из VRoid). В артефакте список задаёт страница
+// (window.WAIFU_OUTFITS), модели лежат только там. cats — какие вещи есть; dress — верх это платье.
+const PIECE_SOURCES = [
+  ...(window.WAIFU_OUTFITS ?? []),
+  // Базовые наряды остальных девушек — тоже вещи в шкафу.
+  ...(GIRLS ?? []).filter((g) => g !== GIRL).map((g) => ({
+    id: `g_${g.id}`, name: g.name, url: g.url, cats: g.cats ?? ['tops', 'bottoms', 'shoes', 'legs'], names: g.baseNames ?? {}, legsKind: g.baseLegs ?? 'stockings',
+  })),
+  // Облегающий комплект: ткань нарисована по телу (без своей модели) — сидит точно по фигуре.
+  { id: 'p_fit', name: 'Облегающее', paint: { tops: 'top', leggings: 'leggings' }, cats: ['tops', 'leggings'], names: { tops: 'Облегающая кофточка', leggings: 'Лосины' }, colors: { leggings: 0x1b1a22 } },
+  { id: 'p_sport', name: 'Спорт', paint: { tops: 'crop', leggings: 'shorts' }, cats: ['tops', 'leggings'], names: { tops: 'Короткий топ', leggings: 'Шорты-велосипедки' }, colors: { tops: 0xf2a7c3 } },
+  { id: 'p_tank', name: 'Лето', paint: { tops: 'tank', leggings: 'minishorts' }, cats: ['tops', 'leggings'], names: { tops: 'Майка без рукавов', leggings: 'Короткие лосины' }, colors: { tops: 0x24222c, leggings: 0x3d5a8a } },
+  { id: 'p_capri', name: 'Капри', paint: { leggings: 'capri' }, cats: ['leggings'], names: { leggings: 'Лосины-капри' }, colors: { leggings: 0x55525f } },
+  { id: 'p_long', name: 'Топ', paint: { tops: 'longcrop' }, cats: ['tops'], names: { tops: 'Топ с длинным рукавом' }, colors: { tops: 0xc9b3f5 } },
+  { id: 'p_tee', name: 'Футболка', paint: { tops: 'tee' }, cats: ['tops'], names: { tops: 'Облегающая футболка' }, colors: { tops: 0x8fc4ee } },
+  { id: 'p_polo', name: 'Поло', paint: { tops: 'polo' }, cats: ['tops'], names: { tops: 'Облегающее поло' }, colors: { tops: 0x34508c } },
+  { id: 'p_skirt', name: 'Юбка', paint: { gen: 'skirt' }, cats: ['bottoms'], names: { bottoms: 'Облегающая юбка' }, colors: { bottoms: 0x24222c } },
+  { id: 'p_mini', name: 'Мини', paint: { gen: 'mini' }, cats: ['bottoms'], names: { bottoms: 'Облегающая мини-юбка' }, colors: { bottoms: 0x7a2238 } },
+  { id: 'p_minihigh', name: 'Мини высокая', paint: { gen: 'minihigh' }, cats: ['bottoms'], names: { bottoms: 'Мини с высокой талией' }, colors: { bottoms: 0x2b2530 } },
+  // «Без чулок»: голые ноги (под лосины, шорты и юбки).
+  { id: 'p_bare', name: 'Без чулок', paint: { legs: 'bare' }, cats: ['legs'], names: { legs: 'Без чулок' }, legsKind: 'bare' },
+  // Чёрные туфли на высокой шпильке: туфля нарисована по стопе, каблук — отдельная деталь; она стоит на них выше.
+  // Длинные капроновые чулки: нарисованы поверх голой ноги, кожа просвечивает.
+  { id: 'p_nylon', name: 'Капрон', paint: { legs: 'nylon' }, cats: ['legs'], names: { legs: 'Капроновые чулки' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
+  { id: 'p_nylon2', name: 'Капрон короче', paint: { legs: 'nylonmid' }, cats: ['legs'], names: { legs: 'Капроновые чулки покороче' }, legsKind: 'stockings', colors: { legs: 0x1b171d } },
+  { id: 'p_nylon3', name: 'Капрон колготки', paint: { legs: 'nylontights' }, cats: ['legs'], names: { legs: 'Капроновые колготки' }, legsKind: 'tights', colors: { legs: 0x1b171d } },
+// Большое платье убрано из шкафа (туфли и чулки от него остались).
+].map((x) => (x.dress ? { ...x, dress: false, cats: x.cats.filter((c) => c !== 'tops') } : x))
+  // Чёрная плиссе из отдельных полосок («дырявая» при наклонах) тоже убрана.
+  .map((x) => (x.id === 'o2' ? { ...x, cats: x.cats.filter((c) => c !== 'bottoms') } : x));
+const pieceWardrobe = new PieceWardrobe(scene);
+for (const x of PIECE_SOURCES) if (x.paint) pieceWardrobe.paints.set(x.id, x.paint);
+const isPaint = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.paint;
+window.__pw = pieceWardrobe; // для отладки
+const WEAR_KEY = girlKey('waifu-wear');
+let wear = {};
+try { wear = JSON.parse(localStorage.getItem(WEAR_KEY) || '{}'); } catch { wear = {}; }
+// Лосины и шорты переехали из «низа» в свой раздел (чтобы носить их и под юбкой).
+if (['p_fit', 'p_sport', 'p_tank', 'p_capri'].includes(wear.bottoms)) { wear.leggings = wear.bottoms; wear.bottoms = 'none'; }
+// Надета вещь, которой больше нет в шкафу (убранное платье) — возвращаем своё.
+for (const c of Object.keys(wear)) {
+  const src = PIECE_SOURCES.find((x) => x.id === wear[c]);
+  if (wear[c] !== 'base' && wear[c] !== 'none' && (!src || !src.cats.includes(c))) { wear[c] = 'base'; if (c === 'tops' && wear.bottoms === 'none') wear.bottoms = 'base'; }
+}
+// Чулки из другого наряда — это только рисунок на коже: грузим одну картинку (≈0,7 МБ), а не всю модель (≈7 МБ).
+const legSkinLoading = new Map();
+function legSkinUrl(id) {
+  const src = PIECE_SOURCES.find((x) => x.id === id);
+  if (!src?.url || !src.cats.includes('legs')) return null;
+  const name = src.url.split('/').pop().replace(/\.(glb|json|vrm)$/, '');
+  return `models/skin-${name}.png`;
+}
+function loadLegSkin(id) {
+  if (pieceWardrobe.hasSource(id) || pieceWardrobe.legSkins.has(id)) return Promise.resolve(true);
+  const url = legSkinUrl(id);
+  if (!url) return Promise.resolve(false);
+  if (!legSkinLoading.has(id)) legSkinLoading.set(id, new Promise((res) => {
+    const img = new Image();
+    img.onload = () => { pieceWardrobe.addLegSkin(id, img); res(true); };
+    img.onerror = () => res(false);
+    img.src = url;
+  }));
+  return legSkinLoading.get(id);
+}
+// Картинки настоящей кожи (ноги — из модели без чулок, руки и плечи — из наряда с открытыми руками).
+let skinDonorsP = null;
+function loadSkinDonors() {
+  skinDonorsP ??= Promise.all((window.WAIFU_SKINS ?? ['models/skin-o6.png', 'models/skin-o3.png']).map((url) => new Promise((res) => {
+    const img = new Image();
+    img.onload = () => { pieceWardrobe.skinDonors.set(url, { skinMap: { image: img } }); res(); };
+    img.onerror = () => res();
+    img.src = url;
+  })));
+  return skinDonorsP;
+}
+setTimeout(() => loadSkinDonors().then(() => { applyWear(); pieceWardrobe.warm(() => pointerActive || performance.now() - lastOnHerAt < 1500); }), 3000); // подгружаем заранее, в фоне, и готовим заготовки вещей
+const pieceLoading = new Map();
+function loadPieceSource(id) {
+  if (pieceWardrobe.hasSource(id)) return Promise.resolve();
+  if (pieceLoading.has(id)) return pieceLoading.get(id);
+  const def = PIECE_SOURCES.find((x) => x.id === id);
+  if (!def) return Promise.reject(new Error('нет такого наряда'));
+  const pr = parseModel({ url: def.url }).then((gltf) => {
+    const vrm = gltf.userData.vrm;
+    if (!vrm) throw new Error('Это не VRM');
+    pieceWardrobe.addSource(id, vrm);
+  }).finally(() => pieceLoading.delete(id));
+  pieceLoading.set(id, pr);
+  return pr;
+}
+function applyWear() {
+  if (!character) return;
+  // Без загруженного источника — показываем своё, пока грузится.
+  const w = {};
+  for (const c of PIECE_CATS) {
+    const v = wear[c.id] ?? 'base';
+    w[c.id] = v === 'base' || v === 'none' || pieceWardrobe.hasSource(v) || (c.id === 'legs' && pieceWardrobe.legSkins.has(v)) ? v : 'base';
+    if (c.id === 'leggings' && w[c.id] === 'base') w[c.id] = 'none'; // своих лосин у модели нет
+  }
+  // Чулки/колготки «чёрные» — ноги темнее, полупрозрачно.
+  const lt = TINTS[wearTint[`legs:${w.legs}`] ?? 0];
+  const defHex = (id, cat) => PIECE_SOURCES.find((x) => x.id === id)?.colors?.[cat];
+  // Чулки и гольфы остаются поверх лосин; колготки под лосинами не видны.
+  w.keepStockings = !isPaint(w.legs) && legwear() !== 'tights';
+  if (isPaint(w.legs)) { w.legsHex = TINTS[wearTint[`legs:${w.legs}`] ?? 0]?.hex ?? defHex(w.legs, 'legs'); } // «без чулок» — красить нечего; капрон — свой цвет
+  else if (lt?.name === 'Глубокий чёрный') w.legsTint = 0x0b090d; // настоящий чёрный на любых чулках, и на белых тоже
+  else if (lt?.hex != null) w.legsTint = lt.hex;
+  if (isPaint(w.shoes)) w.shoesHex = TINTS[wearTint[`shoes:${w.shoes}`] ?? 0]?.hex ?? defHex(w.shoes, 'shoes');
+  if (isPaint(w.tops)) w.topHex = TINTS[wearTint[`tops:${w.tops}`] ?? 0]?.hex ?? defHex(w.tops, 'tops');
+  if (isPaint(w.bottoms)) w.bottomHex = TINTS[wearTint[`bottoms:${w.bottoms}`] ?? 0]?.hex ?? defHex(w.bottoms, 'bottoms');
+  if (isPaint(w.leggings)) w.leggingsHex = TINTS[wearTint[`leggings:${w.leggings}`] ?? 0]?.hex ?? defHex(w.leggings, 'leggings');
+  pieceWardrobe.apply(w, (map) => {
+    stockings?.setBase(map);
+    stockings?.apply(look.stockings);
+  });
+  // Цвет каждой надетой вещи.
+  for (const c of PIECE_CATS) {
+    if (c.skin) continue;
+    const t = TINTS[wearTint[`${c.id}:${w[c.id]}`] ?? 0];
+    pieceWardrobe.tint(c.id, w[c.id], t.hex);
+  }
+}
+function preloadWornSources() {
+  const ids = new Set(Object.values(wear).filter((v) => v !== 'base' && v !== 'none'));
+  if (isPaint(wear.tops) || wear.legs === 'p_bare') loadSkinDonors().then(applyWear);
+  // Надетые чулки из другого наряда — только картинка кожи; остальное — модель.
+  const legId = wear.legs;
+  const legOnly = legId && legId !== 'base' && legId !== 'none' && !isPaint(legId) && !Object.entries(wear).some(([c, v]) => c !== 'legs' && v === legId);
+  if (legOnly && legSkinUrl(legId)) { ids.delete(legId); loadLegSkin(legId).then((ok) => (ok ? applyWear() : loadPieceSource(legId).then(applyWear).catch(() => {}))); }
+  for (const id of ids) loadPieceSource(id).then(applyWear).catch(() => {});
+}
+// Цвета вещей: тап по уже надетой вещи — следующий цвет.
+const TINTS = [
+  { name: 'Оригинал', hex: null },
+  { name: 'Чёрный', hex: 0x2b2530 },
+  { name: 'Бордо', hex: 0x7a2238 },
+  { name: 'Алый', hex: 0xc8283c },
+  { name: 'Роза', hex: 0xf2a7c3 },
+  { name: 'Фиалка', hex: 0x6b45a0 },
+  { name: 'Небо', hex: 0x8fc4ee },
+  { name: 'Мята', hex: 0x9fdcc4 },
+  { name: 'Глубокий чёрный', hex: 0x0b090d },
+  { name: 'Лаванда', hex: 0xc9b3f5 },
+  { name: 'Персик', hex: 0xffc2a8 },
+  { name: 'Изумруд', hex: 0x2f9e7a },
+  { name: 'Шоколад', hex: 0x6b4434 },
+];
+const TINT_KEY = girlKey('waifu-wear-tint');
+let wearTint = {};
+try { wearTint = JSON.parse(localStorage.getItem(TINT_KEY) || '{}'); } catch { wearTint = {}; }
+function cycleTint(cat, id) {
+  const key = `${cat}:${id}`;
+  wearTint[key] = ((wearTint[key] ?? 0) + 1) % TINTS.length;
+  try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
+  applyWear();
+  renderPieces();
+  wishEvent('tint');
+  showToast(`🎨 ${TINTS[wearTint[key]].name}`);
+}
+const isDress = (id) => !!PIECE_SOURCES.find((x) => x.id === id)?.dress;
+async function pickPiece(cat, id, quiet = false) {
+  if (cat === 'tops') {
+    // Платье — низ не нужен; обычный верх — вернуть низ, если его не было.
+    if (isDress(id)) wear.bottoms = 'none';
+    else if (isDress(wear.tops)) wear.bottoms = 'base'; // сняли платье — юбка возвращается; «без юбки» сам не сбрасывается
+  }
+  if (cat === 'bottoms' && id !== 'none' && isDress(wear.tops)) wear.tops = 'base';
+  wear[cat] = id;
+  try { localStorage.setItem(WEAR_KEY, JSON.stringify(wear)); } catch { /* ignore */ }
+  renderPieces();
+  // Нарисованный верх открывает руки и плечи, «без чулок» — ноги: нужна настоящая кожа из других нарядов.
+  // Это две лёгкие картинки (а не целые модели) — грузятся заранее, здесь обычно уже готовы.
+  if ((cat === 'tops' && isPaint(id)) || (cat === 'legs' && id === 'p_bare')) await loadSkinDonors();
+  // Чулки: хватает картинки кожи того наряда (быстро); не вышло — грузим модель, как раньше.
+  const legsFast = cat === 'legs' && id !== 'base' && id !== 'none' && !pieceWardrobe.hasSource(id) && await loadLegSkin(id);
+  if (id !== 'base' && id !== 'none' && !legsFast && !pieceWardrobe.hasSource(id)) {
+    showToast('⏳ Загружаю вещь…'); // без вспышки на весь экран — она «залипала», пока грузится
+    try { await loadPieceSource(id); } catch (e) { console.error(e); say('Не получилось загрузить вещь…', 'sad'); }
+  }
+  applyWear();
+  if (quiet) return;
+  wishEvent('wear');
+  character?.react({ expression: 'happy', motion: 'sway' });
+  if (cat === 'legs' && legwear() !== 'tights') say(pick(LEGS_LINES[legwear()]));
+  else if (cat === 'legs') say(pick(['Колготки — классика~', 'Так уютнее ♥', 'Нравятся мои колготки?']));
+  else if (Math.random() < 0.6) say(pick(['Мне идёт? ♥', 'Хи, примерим~', 'Так лучше?', 'Нравится?']));
+}
+// Гардероб-шкаф: вкладки по частям (верх, низ, обувь, аксессуары, ноги) и карточки вещей с названиями.
+const PIECE_ICONS = { tops: '👚', bottoms: '👗', leggings: '🩳', shoes: '👠', acc: '🎀', legs: '🧦' };
+const BASE_NAMES = GIRL?.baseNames ?? window.WAIFU_BASE_NAMES ?? {};
+let closetOld = false; // раздел «Прежняя одежда» раскрыт?
+let closetTab = 'tops';
+function pieceName(srcId, cat) {
+  if (srcId === 'none') return { shoes: 'Босиком', acc: 'Без аксессуара', bottoms: 'Без юбки', leggings: 'Без лосин' }[cat] ?? 'Без';
+  if (srcId === 'base') return BASE_NAMES[cat] ?? (cat === 'legs' ? 'Свои' : 'Своё');
+  const src = PIECE_SOURCES.find((x) => x.id === srcId);
+  return src?.names?.[cat] ?? src?.name ?? srcId;
+}
+// ---------- Иногда сама предлагает переодеться ----------
+// Раз в 5–9 минут (когда ты её не трогаешь и шкаф закрыт) предлагает надеть
+// какую-нибудь вещь. «Надень» — надевает, «Не сейчас» — отложит надолго.
+const SUGGEST_LINES = [
+  (n) => `Слушай… может, надену «${n}»? ♥`,
+  (n) => `Хочу примерить «${n}». Можно?~`,
+  (n) => `Мне кажется, «${n}» мне пойдёт… Надеть?`,
+  (n) => `Скучно в одном и том же… «${n}»?`,
+];
+let suggestTimer = 300 + Math.random() * 240;
+let suggestion = null;
+window.__suggestNow = () => { suggestTimer = 0; };
+// ---------- Сама переодевается (иногда): одну вещь или целый наряд ----------
+let selfDressTimer = 600 + Math.random() * 480;
+let selfDressing = false;
+const SELF_DRESS_LINES = {
+  legs: ['Решила сменить чулочки~ Как тебе?', 'Новые на ножках ♥ Заметил?', 'Захотелось других чулок~'],
+  shoes: ['Переобулась~ Идёт?', 'Новые туфельки ♥ Нравятся?', 'Захотелось сменить обувь~'],
+  tops: ['Сменила верх~ Как тебе?', 'Решила примерить другое ♥', 'Так мне больше нравится~ А тебе?'],
+  bottoms: ['Сменила юбочку~ Нравится?', 'Решила переодеться ♥', 'Как тебе так?'],
+  acc: ['Добавила украшение~', 'Маленькая деталь ♥ Заметил?'],
+  outfit: ['Я решила сменить наряд~ Специально для тебя ♥', 'Переоделась для тебя~ Как тебе?', 'Новый образ! Нравится? ♥', 'Хи, сюрприз — новый прикид~'],
+  base: ['Вернула свой любимый образ~', 'Снова в своём ♥ Скучал по нему?'],
+};
+// 🎲 Случайный облегающий наряд: верх + лосины/шорты или облегающая юбка — из нарисованных вещей.
+let dicing = false;
+async function diceOutfit() {
+  if (dicing || selfDressing || !character) return;
+  dicing = true;
+  try {
+    const P = PIECE_SOURCES.filter((x) => x.paint);
+    const of = (cat, cur) => { const a = P.filter((x) => x.cats.includes(cat) && x.id !== cur); return a.length ? a[Math.floor(Math.random() * a.length)].id : null; };
+    const top = of('tops', wear.tops);
+    if (top) await pickPiece('tops', top, true);
+    if (Math.random() < 0.65) {
+      const l = of('leggings', wear.leggings);
+      if (l) { await pickPiece('bottoms', 'none', true); await pickPiece('leggings', l, true); }
+    } else {
+      const sk = of('bottoms', wear.bottoms);
+      if (sk) { await pickPiece('bottoms', sk, true); await pickPiece('leggings', 'none', true); }
+    }
+    character.react({ expression: 'happy', motion: 'sway' });
+  } catch (e) { console.warn('dice', e); } finally { dicing = false; }
+}
+async function updateSelfDress(dt) {
+  if (!character || !PIECE_SOURCES.length || selfDressing || suggestion) return;
+  if (!unlocked('wardrobe') || pointerActive || poseMode || character.sleep > 0.3 || !$('wardrobe').classList.contains('hidden')) return;
+  selfDressTimer -= dt;
+  if (selfDressTimer > 0) return;
+  selfDressTimer = 600 + Math.random() * 480; // раз в 10–18 минут
+  suggestTimer = Math.max(suggestTimer, 180); // не вместе с предложением
+  selfDressing = true;
+  try {
+    // Весь образ вразнобой: верх, низ, чулки и обувь — каждое из случайного комплекта.
+    const kind = 'outfit';
+    const rnd = (cat) => {
+      const cur = wear[cat] ?? 'base';
+      const opts = ['base', ...PIECE_SOURCES.filter((x) => x.cats.includes(cat)).map((x) => x.id)].filter((id) => id !== cur);
+      return opts.length ? opts[Math.floor(Math.random() * opts.length)] : cur;
+    };
+    const top = rnd('tops');
+    await pickPiece('tops', top, true);
+    if (!isDress(top)) await pickPiece('bottoms', rnd('bottoms'), true);
+    // Иногда — лосины или шорты (под юбку или вместо неё); чаще без них.
+    { const L = PIECE_SOURCES.filter((x) => x.cats.includes('leggings')); await pickPiece('leggings', L.length && Math.random() < 0.3 ? L[Math.floor(Math.random() * L.length)].id : 'none', true); }
+    await pickPiece('legs', rnd('legs'), true);
+    await pickPiece('shoes', rnd('shoes'), true);
+    character.react({ expression: 'happy', motion: 'sway' });
+    say(pick(SELF_DRESS_LINES[kind] ?? SELF_DRESS_LINES.outfit), 'happy');
+  } finally {
+    selfDressing = false;
+  }
+}
+window.__selfDressNow = () => { selfDressTimer = 0; };
+function updateSuggest(dt) {
+  if (!character || !PIECE_SOURCES.length) return;
+  if (suggestion) return;
+  if (pointerActive || poseMode || character.sleep > 0.3 || !$('wardrobe').classList.contains('hidden')) return;
+  suggestTimer -= dt;
+  if (suggestTimer > 0) return;
+  suggestTimer = 300 + Math.random() * 240;
+  // Случайная вещь, которая сейчас не надета.
+  const opts = [];
+  for (const c of PIECE_CATS) {
+    if (c.id === 'acc') continue;
+    for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && (wear[c.id] ?? 'base') !== src.id) opts.push({ cat: c.id, id: src.id });
+  }
+  if (!opts.length) return;
+  const o = opts[Math.floor(Math.random() * opts.length)];
+  const name = pieceName(o.id, o.cat);
+  suggestion = o;
+  say(pick(SUGGEST_LINES)(name), 'happy');
+  $('suggest').hidden = false;
+  setTimeout(() => { if (suggestion === o) closeSuggest(); }, 15000);
+}
+function closeSuggest() {
+  suggestion = null;
+  $('suggest').hidden = true;
+}
+$('suggest-yes').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const o = suggestion;
+  closeSuggest();
+  if (o) pickPiece(o.cat, o.id);
+});
+$('suggest-no').addEventListener('click', (e) => {
+  e.stopPropagation();
+  closeSuggest();
+  suggestTimer = 600 + Math.random() * 300;
+  say(pick(['Ладно, в другой раз~', 'Хорошо-хорошо…', 'Эх, ну ладно ♥']));
+});
+
+function renderPieces() {
+  const box = $('piece-list');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!PIECE_SOURCES.length) { box.innerHTML = '<p class="panel-note">Пришли наряды (.vrm из VRoid) — вещи появятся здесь.</p>'; return; }
+  const tabs = document.createElement('div');
+  tabs.className = 'closet-tabs';
+  for (const c of PIECE_CATS) {
+    const t = document.createElement('button');
+    t.className = 'closet-tab' + (c.id === closetTab ? ' active' : '');
+    t.innerHTML = `<span>${PIECE_ICONS[c.id]}</span>${c.name}`;
+    t.addEventListener('click', () => { closetTab = c.id; renderPieces(); });
+    tabs.appendChild(t);
+  }
+  box.appendChild(tabs);
+  const c = PIECE_CATS.find((x) => x.id === closetTab);
+  tabs.dataset.title = c.name; // название выбранного раздела — строкой под вкладками
+  const opts = c.id === 'leggings' ? ['none'] : ['base'];
+  for (const src of PIECE_SOURCES) if (src.cats.includes(c.id) && src.id !== 'p_bare') opts.push(src.id); // «без чулок» — отдельной кнопкой сверху
+  if (c.id === 'shoes' || c.id === 'acc' || c.id === 'bottoms') opts.push('none');
+  const cur = c.id === 'leggings' ? (!wear.leggings || wear.leggings === 'base' ? 'none' : wear.leggings) : (wear[c.id] ?? 'base');
+  if (c.id === 'legs') {
+    // Одна кнопка: снять чулки / надеть обратно (те, что были).
+    const off = cur === 'p_bare';
+    const tg = document.createElement('button');
+    tg.className = 'panel-big' + (off ? ' active' : '');
+    tg.textContent = off ? '🦵 Чулки сняты — надеть обратно' : '🧦 Снять чулки';
+    tg.addEventListener('click', () => {
+      if (off) { let last = 'base'; try { last = localStorage.getItem(girlKey('waifu-lastlegs')) || 'base'; } catch { /* ignore */ } pickPiece('legs', last === 'p_bare' ? 'base' : last); }
+      else { try { localStorage.setItem(girlKey('waifu-lastlegs'), cur); } catch { /* ignore */ } pickPiece('legs', 'p_bare'); }
+    });
+    box.appendChild(tg);
+    // Блеск чулок — отдельно от остальной ткани (общий выключатель бликов — в меню ☰).
+    if (!off) {
+      const sh = document.createElement('button');
+      sh.className = 'panel-big' + (stockSheen ? ' active' : '');
+      sh.textContent = stockSheen ? '✨ Блеск чулок: вкл' : '✨ Блеск чулок: выкл';
+      sh.addEventListener('click', () => {
+        stockSheen = !stockSheen;
+        try { localStorage.setItem('waifu-sheen-legs', stockSheen ? '1' : '0'); } catch { /* ignore */ }
+        setStockSheen(stockSheen);
+        applyWear();
+        renderPieces();
+        if (stockSheen && !sheenOn) showToast('Блики выключены в меню ☰ — включи их там');
+      });
+      box.appendChild(sh);
+    }
+  }
+  // Верх и низ: сначала нарисованные вещи; прежняя одежда (модели из VRoid) убрана в сворачиваемый раздел внизу.
+  const split = c.id === 'tops' || c.id === 'bottoms';
+  const isOld = (id) => split && id !== 'none' && !isPaint(id);
+  const oldIds = opts.filter(isOld);
+  const showOld = closetOld === true;
+  const shown = split ? [...opts.filter((id) => !isOld(id)), ...(showOld ? oldIds : [])] : opts;
+  const grid = document.createElement('div');
+  grid.className = 'closet-grid';
+  for (const id of shown) {
+    const b = document.createElement('button');
+    b.className = 'closet-item' + (id === cur ? ' active' : '');
+    b.innerHTML = `<span class="ci-icon">${id === 'none' ? '✕' : PIECE_ICONS[c.id]}</span><span class="ci-name">${pieceName(id, c.id)}</span>`;
+    const tint = TINTS[wearTint[`${c.id}:${id}`] ?? 0];
+    if (id !== 'none') {
+      const dot = document.createElement('span');
+      dot.className = 'ci-tint';
+      const own = PIECE_SOURCES.find((x) => x.id === id)?.colors?.[c.id]; // у нарисованных вещей есть свой цвет
+      const hx = tint.hex ?? own;
+      dot.style.background = hx == null ? 'conic-gradient(#f2a7c3, #8fc4ee, #9fdcc4, #c8283c, #f2a7c3)' : `#${hx.toString(16).padStart(6, '0')}`;
+      b.appendChild(dot);
+    }
+    // Тап по надетой вещи — сменить её цвет.
+    b.addEventListener('click', () => (id === cur && id !== 'none' ? cycleTint(c.id, id) : pickPiece(c.id, id)));
+    grid.appendChild(b);
+  }
+  box.appendChild(grid);
+  if (split && oldIds.length) {
+    const ob = document.createElement('button');
+    ob.className = 'panel-big' + (showOld ? ' active' : '');
+    const worn = oldIds.includes(cur) ? ` · надето: ${pieceName(cur, c.id)}` : '';
+    ob.textContent = showOld ? '📦 Прежняя одежда — свернуть' : `📦 Прежняя одежда (${oldIds.length})${worn}`;
+    ob.addEventListener('click', () => { closetOld = !closetOld; renderPieces(); });
+    box.appendChild(ob);
+  }
+  // Палитра для надетой вещи: тапнул цвет — сразу перекрасилась (не нужно листать по кругу).
+  if (cur !== 'none') {
+    const pal = document.createElement('div');
+    pal.className = 'closet-palette';
+    const now = wearTint[`${c.id}:${cur}`] ?? 0;
+    TINTS.forEach((t, i) => {
+      const sw = document.createElement('button');
+      sw.className = 'ci-tint pal' + (i === now ? ' on' : '');
+      sw.title = t.name;
+      sw.style.background = t.hex == null ? 'conic-gradient(#f2a7c3, #8fc4ee, #9fdcc4, #c8283c, #f2a7c3)' : `#${t.hex.toString(16).padStart(6, '0')}`;
+      sw.addEventListener('click', () => {
+        wearTint[`${c.id}:${cur}`] = i;
+        try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
+        applyWear(); renderPieces(); wishEvent('tint');
+      });
+      pal.appendChild(sw);
+    });
+    box.appendChild(pal);
+  }
+}
+
 function applyLook() {
   if (!character) return;
+  look.stockings = 'off'; // старые нарисованные чулки убраны — чулки берутся из нарядов
   applyClothColor();
   tintMaterials(/HAIR/i, HAIR_COLORS.find((c) => c.id === look.hair)?.color ?? null, 0.6);
   stockings?.apply(look.stockings);
-  document.body.classList.toggle('dark', look.dark);
+  const bg = look.bg ?? 'stars';
+  document.body.classList.toggle('dark', BG_DARK.has(bg));
+  for (const b of BACKGROUNDS) document.body.classList.toggle(`bg-${b.id}`, b.id === bg);
+  applyLight(bg);
+}
+
+// Фоны и свет под каждый: мягкий розовый день, закат, готика, звёздная ночь, уютная комната.
+const BACKGROUNDS = [
+  { id: 'day', name: '🌸 Нежный', key: 0xffffff, rim: 0xffd2ec, amb: 0.6, keyI: Math.PI },
+  { id: 'sunset', name: '🌅 Закат', key: 0xffc79a, rim: 0xff7fae, amb: 0.5, keyI: Math.PI * 0.95 },
+  { id: 'night', name: '🖤 Готика', key: 0xe6d8ff, rim: 0xc77dff, amb: 0.45, keyI: Math.PI * 0.85 },
+  { id: 'stars', name: '✨ Звёзды', key: 0xcfd8ff, rim: 0x8fb4ff, amb: 0.4, keyI: Math.PI * 0.8 },
+  { id: 'room', name: '🛋 Комната', key: 0xffe2c4, rim: 0xffb3d1, amb: 0.55, keyI: Math.PI * 0.9 },
+];
+const BG_DARK = new Set(['night', 'stars']);
+function applyLight(bg) {
+  const d = BACKGROUNDS.find((b) => b.id === bg) ?? BACKGROUNDS[0];
+  light.color.setHex(d.key);
+  light.intensity = d.keyI;
+  rim.color.setHex(d.rim);
+  ambient.intensity = d.amb;
+}
+function renderBackgrounds() {
+  const box = $('bg-list');
+  if (!box) return;
+  box.innerHTML = '';
+  const cur = look.bg ?? 'stars';
+  for (const b of BACKGROUNDS) {
+    const el = document.createElement('button');
+    el.className = 'chip' + (b.id === cur ? ' active' : '');
+    el.textContent = b.name;
+    el.addEventListener('click', () => {
+      look.bg = b.id;
+      look.dark = BG_DARK.has(b.id);
+      saveLook();
+      applyLook();
+      renderWardrobe();
+    });
+    box.appendChild(el);
+  }
 }
 
 function renderSwatches(boxId, items, current, onPick) {
@@ -760,7 +3782,38 @@ function renderSwatches(boxId, items, current, onPick) {
   }
 }
 
+// Выбор девушки — вверху гардероба. Смена — перезапуск сцены с другой моделью.
+function renderGirls() {
+  if (!GIRLS || GIRLS.length < 2) return;
+  let box = $('girl-pick');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'girl-pick';
+    const head = document.createElement('div');
+    head.className = 'editor-group';
+    head.textContent = 'Девушка';
+    $('goth-preset').before(head, box);
+  }
+  box.innerHTML = '';
+  for (const g of GIRLS) {
+    const open = !g.lvl || unlocked(`girl_${g.id}`);
+    const b = document.createElement('button');
+    b.className = 'girl-chip' + (g === GIRL ? ' active' : '') + (open ? '' : ' closed');
+    b.innerHTML = `<span class="gc-ico">${g.icon ?? '💗'}</span><span class="gc-name">${g.name}</span>${open ? '' : '<span class="gc-lock">🔒</span>'}`;
+    b.addEventListener('click', () => {
+      if (g === GIRL) return;
+      if (!open) { showLock(FEATURES.find((f) => f.id === `girl_${g.id}`)); return; }
+      try { localStorage.setItem('waifu-girl', g.id); } catch { /* ignore */ }
+      $('flash')?.classList.add('on');
+      showToast(`💗 ${g.name} уже идёт…`);
+      setTimeout(() => location.reload(), 350);
+    });
+    box.appendChild(b);
+  }
+}
 function renderWardrobe() {
+  renderGirls();
+  renderPieces();
   const list = $('outfit-list');
   list.innerHTML = '';
   for (const o of outfits) {
@@ -797,7 +3850,7 @@ function renderWardrobe() {
     b.innerHTML = `<span></span>${c.name}`;
     b.addEventListener('click', () => {
       clothColor = c.id;
-      try { localStorage.setItem('waifu-cloth-color', clothColor); } catch { /* ignore */ }
+      saveLook();
       applyClothColor();
       renderWardrobe();
       if (character) {
@@ -817,44 +3870,24 @@ function renderWardrobe() {
     say(pick(['Новый цвет волос! Ну как?', 'Мне идёт?', 'Хе-хе, перекрасилась~']));
   });
 
-  const st = $('stocking-list');
-  st.innerHTML = '';
-  if (stockings && !stockings.available) {
-    st.innerHTML = '<p class="panel-note">У этой модели чулки нарисовать не получится (нужна модель из VRoid).</p>';
-  } else {
-    for (const c of STOCKING_STYLES) {
-      const b = document.createElement('button');
-      b.className = 'chip' + (c.id === look.stockings ? ' active' : '');
-      b.textContent = c.name;
-      b.addEventListener('click', () => {
-        look.stockings = c.id;
-        saveLook();
-        applyLook();
-        renderWardrobe();
-        character?.react({ expression: 'happy', motion: 'sway' });
-        say(c.id === 'off' ? 'Так удобнее~' : pick(['Чулочки — моя слабость ♥', 'Красивые, правда?', 'Хи, нравятся?']));
-      });
-      st.appendChild(b);
-    }
-  }
-
-  $('dark-toggle').classList.toggle('active', look.dark);
-  $('dark-toggle').textContent = look.dark ? '🌙 Готичная атмосфера: вкл' : '🌙 Готичная атмосфера: выкл';
+  renderBackgrounds();
 }
 
-$('dark-toggle').addEventListener('click', () => {
-  look.dark = !look.dark;
-  saveLook();
-  applyLook();
-  renderWardrobe();
-});
 
-$('goth-preset').addEventListener('click', () => {
-  clothColor = 'black';
-  try { localStorage.setItem('waifu-cloth-color', clothColor); } catch { /* ignore */ }
-  Object.assign(look, { hair: 'black', stockings: 'black', dark: true });
-  saveLook();
-  applyLook();
+$('goth-preset').addEventListener('click', async () => {
+  // Готик-образ: чёрный свитер-кроп, тёмная юбка с сакурой, чёрные колготки, чёрные платформы.
+  const src = PIECE_SOURCES.find((s) => s.id === 'o5' && s.cats.includes('bottoms'));
+  const deep = TINTS.findIndex((t) => t.name === 'Глубокий чёрный');
+  wearTint['bottoms:o5'] = deep;
+  wearTint['tops:base'] = deep;
+  wearTint['acc:base'] = deep;
+  wearTint['legs:base'] = deep; // колготки — полупрозрачные чёрные
+  try { localStorage.setItem(TINT_KEY, JSON.stringify(wearTint)); } catch { /* ignore */ }
+  await pickPiece('tops', 'base', true);
+  await pickPiece('bottoms', src ? 'o5' : 'base', true);
+  await pickPiece('shoes', 'base', true);
+  await pickPiece('legs', 'base', true);
+  await pickPiece('acc', 'base', true);
   renderWardrobe();
   character?.react({ expression: 'relaxed', motion: 'tiltHead' });
   say('Тьма мне к лицу, не находишь? ♥');
@@ -877,7 +3910,36 @@ async function addOutfit(file) {
   await wearOutfit(record.id);
 }
 
-$('btn-wardrobe').addEventListener('click', () => togglePanel('wardrobe', renderWardrobe));
+// Шкаф: камера отъезжает — она видна целиком над панелью, сразу видно, что надето.
+// Закрыл шкаф — камера возвращается как была.
+let wardrobeCam = null;
+function wardrobeView() {
+  wardrobeCam = camState();
+  exitManualCam();
+  exitFreeCam();
+  setFaceCam(false);
+  camPanH.set(0, 0, 0);
+  camYaw = 0;
+  camPitch = 0.08;
+  camZoom = 2.9;
+  camLift = -1.2 * camBase.S;
+  animateCamera = true;
+  frameCamera();
+  animateCamera = false;
+}
+function updateWardrobeCam() {
+  if (wardrobeCam && $('wardrobe').classList.contains('hidden')) {
+    const v = wardrobeCam;
+    wardrobeCam = null;
+    applyCamState(v);
+  }
+}
+$('btn-wardrobe').addEventListener('click', () => {
+  const opening = $('wardrobe').classList.contains('hidden');
+  if (opening) interstitial();
+  togglePanel('wardrobe', renderWardrobe);
+  // Камеру при входе в гардероб не трогаем: как поставил (вблизи, под углом) — так и остаётся. Отдалить можно щипком.
+});
 $('outfit-input').addEventListener('change', (e) => {
   if (e.target.files[0]) addOutfit(e.target.files[0]);
   e.target.value = '';
@@ -888,6 +3950,20 @@ $('outfit-input').addEventListener('change', (e) => {
 let anims = [];
 let currentAnim = null; // { id, name, animation }
 
+const isFbx = (a) => a.format === 'fbx' || /\.fbx$/i.test(a.file ?? '');
+
+// Клип для конкретной модели: .vrma переносится библиотекой three-vrm,
+// .fbx из Mixamo — нашим переносом скелета (src/mixamo.js).
+function clipFor(a, vrm) {
+  if (isFbx(a)) return mixamoClip(a.asset, vrm);
+  return createVRMAnimationClip(a.animation, vrm);
+}
+
+async function prepareAnim(a) {
+  if (isFbx(a)) a.asset ??= parseMixamo(a.data.slice(0));
+  else a.animation ??= await parseAnimation(a.data);
+}
+
 async function parseAnimation(buffer) {
   const gltf = await loader.parseAsync(buffer.slice(0), '');
   const animation = gltf.userData.vrmAnimations?.[0];
@@ -895,15 +3971,130 @@ async function parseAnimation(buffer) {
   return animation;
 }
 
+// ---------- База движений (mocap CMU) ----------
+
+let currentMocap = null;
+let liveIdle = false;
+let mocapOnceTimer = 0;
+
+async function playMocap(id) {
+  if (!character) return;
+  const entry = MOCAP.find((m) => m.id === id);
+  if (!entry) return;
+  if (!entry.idle) wishEvent('dance');
+  try {
+    const data = await loadMocap(id);
+    if (currentAnim) { currentAnim = null; }
+    character.dancing = false;
+    character.loop = null;
+    if (entry.idle) {
+      // Живое ожидание: только верх тела из записи, ноги свои — не ходит и не скользит.
+      if (character.mixer) character.stopClip();
+      character.playUpperIdle(mocapUpperClip(data, character.vrm));
+      currentMocap = id;
+      clearTimeout(mocapOnceTimer);
+      renderAnims();
+      return;
+    }
+    character.stopUpperIdle();
+    character.sit = 0;
+    const loop = entry.idle || /Танец|Сальса|Чарльстон|походка/.test(entry.name);
+    character.playClip(mocapClip(data, character.vrm), { loop });
+    currentMocap = id;
+    clearTimeout(mocapOnceTimer);
+    // Жест играет один раз, потом — обратно в живое ожидание или обычный покой.
+    if (!loop) {
+      mocapOnceTimer = setTimeout(() => {
+        if (currentMocap !== id) return;
+        if (liveIdle) playMocap(nextIdle());
+        else stopMocap();
+      }, (data.frames / data.fps - 0.5) * 1000);
+    }
+  } catch (err) {
+    console.error(err);
+    say('Не получилось загрузить движение…', 'sad');
+  }
+  renderAnims();
+}
+
+function stopMocap() {
+  clearTimeout(mocapOnceTimer);
+  currentMocap = null;
+  liveIdle = false;
+  character?.stopClip();
+  character?.stopUpperIdle();
+  renderAnims();
+}
+
+function nextIdle() {
+  const idles = MOCAP.filter((m) => m.idle && m.id !== currentMocap);
+  return idles[Math.floor(Math.random() * idles.length)].id;
+}
+
+// Живое ожидание: сама сменяет записи ожидания перед их концом.
+function updateLiveIdle() {
+  if (!liveIdle || !character || !currentMocap) return;
+  if (MOCAP.find((m) => m.id === currentMocap)?.idle && character.clipTimeLeft() < 1.8) playMocap(nextIdle());
+}
+
+function renderMocap() {
+  const box = $('mocap-list');
+  box.innerHTML = '';
+  for (const m of MOCAP) {
+    if (m.idle) continue; // записи ожидания — через «✨ Живое ожидание»
+    const b = document.createElement('button');
+    b.className = 'chip' + (currentMocap === m.id ? ' active' : '');
+    b.textContent = m.name;
+    b.addEventListener('click', () => (currentMocap === m.id ? stopMocap() : playMocap(m.id)));
+    box.appendChild(b);
+  }
+  $('btn-live-idle').classList.toggle('active', liveIdle);
+  $('btn-live-idle').textContent = liveIdle ? '✨ Живое ожидание — выключить' : '✨ Живое ожидание';
+}
+
+$('btn-live-idle').addEventListener('click', () => {
+  if (liveIdle) { stopMocap(); return; }
+  liveIdle = true;
+  playMocap(nextIdle());
+});
+
+function setLoop(id) {
+  if (!character) return;
+  if (currentMocap) stopMocap();
+  if (currentAnim) stopAnim();
+  character.dancing = false;
+  character.loop = character.loop === id ? null : id;
+  if (character.loop) {
+    const lines = {
+      cute: 'Хи-хи, я тут~', flirty: 'Ну что, нравлюсь? ♥', shy: 'Н-не смотри так…',
+      happy: 'Ура-а! ♥', dance2: 'Ля-ля-ля~',
+    };
+    say(lines[id]);
+  }
+  renderAnims();
+}
+
 function renderAnims() {
+  renderMocap();
   $('btn-dance').classList.toggle('active', !!character?.dancing && !currentAnim);
   $('btn-dance').textContent = character?.dancing && !currentAnim ? '💃 Танцует — остановить' : '💃 Танцевать';
+  flowBtn.classList.toggle('active', flowDance);
+  flowBtn.textContent = flowDance ? '🌊 Плавный танец — остановить' : '🌊 Плавный танец';
+  const loops = $('loop-list');
+  loops.innerHTML = '';
+  for (const l of LOOPS) {
+    const b = document.createElement('button');
+    b.className = 'chip' + (character?.loop === l.id ? ' active' : '');
+    b.textContent = l.label;
+    b.addEventListener('click', () => setLoop(l.id));
+    loops.appendChild(b);
+  }
   const list = $('anim-list');
   list.innerHTML = '';
   if (!anims.length) {
     const empty = document.createElement('p');
     empty.className = 'panel-note';
-    empty.textContent = 'Пока пусто. Добавь mocap-анимацию в формате .vrma — она заменит позы.';
+    empty.textContent = 'Пока пусто. Добавь анимацию: .vrma (VRoid / Booth) или .fbx из Mixamo («Without Skin»).';
     list.appendChild(empty);
   }
   for (const a of anims) {
@@ -931,13 +4122,19 @@ function renderAnims() {
 async function playAnim(a) {
   if (!character) return;
   try {
-    a.animation ??= await parseAnimation(a.data);
-    currentAnim = a;
+    await prepareAnim(a);
+    clearTimeout(mocapOnceTimer);
+    currentMocap = null;
+    liveIdle = false;
+    character.stopUpperIdle();
     character.dancing = false;
-    character.playClip(createVRMAnimationClip(a.animation, character.vrm));
+    character.loop = null;
+    character.playClip(clipFor(a, character.vrm));
+    currentAnim = a;
+    wishEvent('dance');
   } catch (err) {
     console.error(err);
-    say('Не получается так двигаться… файл точно .vrma?', 'sad');
+    say('Не получается так двигаться… нужен .vrma или .fbx из Mixamo', 'sad');
   }
   renderAnims();
 }
@@ -950,16 +4147,25 @@ function stopAnim() {
 
 async function addAnim(file) {
   const data = await file.arrayBuffer();
-  const record = { id: `anim-${Date.now()}`, kind: 'anim', name: file.name.replace(/\.vrma$/i, '').slice(0, 24), data, created: Date.now() };
+  const format = /\.fbx$/i.test(file.name) ? 'fbx' : 'vrma';
+  const record = { id: `anim-${Date.now()}`, kind: 'anim', format, name: file.name.replace(/\.(vrma|fbx)$/i, '').slice(0, 24), data, created: Date.now() };
   await saveFile(record);
   anims.push(record);
   await playAnim(record);
 }
 
 $('btn-anims').addEventListener('click', () => togglePanel('anims', renderAnims));
+const flowBtn = document.createElement('button');
+flowBtn.id = 'btn-flow';
+flowBtn.className = 'panel-big';
+$('btn-dance').after(flowBtn);
+flowBtn.addEventListener('click', () => setFlowDance(!flowDance));
 $('btn-dance').addEventListener('click', () => {
   if (!character) return;
+  flowDance = false;
   if (currentAnim) stopAnim();
+  if (currentMocap) stopMocap();
+  character.loop = null;
   character.dancing = !character.dancing;
   if (character.dancing) say(pick(['Смотри, как я умею~', 'Музыку погромче!', 'Танцуем! ♥']), 'happy');
   renderAnims();
@@ -979,7 +4185,7 @@ window.addEventListener('drop', (e) => {
   const file = e.dataTransfer.files[0];
   if (!file) return;
   const name = file.name.toLowerCase();
-  if (name.endsWith('.vrma')) addAnim(file);
+  if (name.endsWith('.vrma') || name.endsWith('.fbx')) addAnim(file);
   else if (name.endsWith('.vrm')) addOutfit(file);
 });
 
@@ -999,28 +4205,1883 @@ async function restoreLibrary() {
 const clock = new THREE.Clock();
 const anchor = new THREE.Vector3();
 const lookPoint = new THREE.Vector3();
+// Взгляд (кнопка у ⌂): 'follow' — следит за пальцем, 'me' — смотрит на тебя, 'closed' — глаза закрыты.
+let gazeMode = 'follow';
+try { const g = localStorage.getItem('waifu-gaze'); if (g === 'me' || g === 'closed') gazeMode = g; } catch { /* ignore */ }
+const GAZE_ICONS = {
+  follow: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  me: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="0.9" fill="currentColor"/><path d="M12 1.5v2M12 20.5v2"/>',
+  closed: '<path d="M3 11c2.5 3.5 5.5 5 9 5s6.5-1.5 9-5"/><path d="M6 14.5l-1.5 2M12 16v2.5M18 14.5l1.5 2"/>',
+};
+function renderGaze() {
+  const b = $('btn-gaze');
+  b.querySelector('svg').innerHTML = GAZE_ICONS[gazeMode];
+  b.classList.toggle('active', gazeMode !== 'follow');
+  b.title = { follow: 'Взгляд: за пальцем', me: 'Взгляд: на тебя', closed: 'Глаза закрыты' }[gazeMode];
+}
+let gazeSwitchAt = 0;
+$('btn-gaze').addEventListener('click', () => {
+  gazeSwitchAt = performance.now();
+  gazeMode = { follow: 'me', me: 'closed', closed: 'follow' }[gazeMode];
+  try { localStorage.setItem('waifu-gaze', gazeMode); } catch { /* ignore */ }
+  renderGaze();
+  showToast({ follow: '👀 Смотрит за пальцем', me: '💗 Смотрит на тебя', closed: '😌 Глаза закрыты' }[gazeMode]);
+});
+renderGaze();
 const lookNdc = new THREE.Vector2();
+const pleasureV = new THREE.Vector3();
 let idleTime = 0;
 
+let saccadeT = 1;
+const saccade = new THREE.Vector3();
+// ---------- Настроение по времени суток и «скучала» ----------
+const VISIT_KEY = 'waifu-last-visit';
+function greetOnLoad() {
+  let last = 0;
+  try { last = Number(localStorage.getItem(VISIT_KEY)) || 0; localStorage.setItem(VISIT_KEY, String(Date.now())); } catch { /* ignore */ }
+  const away = last ? (Date.now() - last) / 3600000 : 0;
+  const h = new Date().getHours();
+  let line;
+  if (away > 24) line = pick(['Я так скучала… где ты был? 🥺', 'Наконец-то! Я ждала тебя ♥', 'Долго тебя не было…']);
+  else if (h >= 5 && h < 11) { line = pick(['Доброе утро~ *зевает*', 'Ммм… утро уже? Привет ♥', 'Утречко~']); character.playMotion('archStretch'); }
+  else if (h >= 22 || h < 5) { line = pick(['Уже поздно… а ты всё со мной? ♥', 'Не спится? Мне тоже~', 'Ночь… так тихо~']); character.sleepy = 1; }
+  else if (h >= 17) line = pick(['Добрый вечер~', 'Как прошёл день?', 'Вечер — моё любимое время ♥']);
+  else line = pick(['Привет! ♥', 'Ты пришёл~', 'О, привет!']);
+  setTimeout(() => say(line, 'happy'), 1200);
+}
+
+// ---------- Сама двигается (только на главном экране) ----------
+// Когда её не трогают, иногда сама плавно исполняет красивые гибкие движения:
+// наклон, прогиб, волна телом, покачивание бёдрами, присесть, на колени и потянуться.
+// Любое касание — плавно возвращается.
+const AUTO_ROUTINES = [
+  { name: 'наклон', keys: [[0, {}], [3, { bend: 1.0 }], [4.2, { bend: 1.05 }], [7.5, {}]] },
+  { name: 'прогиб', keys: [[0, {}], [2.6, { bend: -0.38 }], [3.8, { bend: -0.42 }], [6.5, {}]] },
+  { name: 'волна', keys: [[0, {}], [2, { bend: 0.45 }], [4.2, { bend: -0.3 }], [6.2, { bend: 0.25 }], [8.4, {}]] },
+  { name: 'бёдра', keys: [[0, {}], [1.6, { sway: 1 }], [3.2, { sway: -1 }], [4.8, { sway: 1 }], [6.4, { sway: -0.6 }], [8, {}]] },
+  { name: 'присесть', keys: [[0, {}], [3, { sit: 0.42, bend: 0.25 }], [5, { sit: 0.45, bend: 0.35 }], [8.5, {}]] },
+  { name: 'колени', keys: [[0, {}], [4, { sit: 0.8 }], [5.5, { sit: 0.8, bend: -0.35 }], [7.5, { sit: 0.8, bend: 0.5 }], [9, { sit: 0.8 }], [13, {}]] },
+  { name: 'наклон-бёдра', keys: [[0, {}], [2.5, { bend: 0.6 }], [4, { bend: 0.6, sway: 1 }], [5.5, { bend: 0.6, sway: -1 }], [7, { bend: 0.5 }], [9.5, {}]] },
+  // Плавные «живые» связки: бёдра и корпус текут вместе, без остановок.
+  { name: 'покачивание', keys: [[0, {}], [1.4, { sway: 0.8, bend: 0.15 }], [2.8, { sway: -0.8, bend: 0.15 }], [4.2, { sway: 0.9, bend: 0.3 }], [5.6, { sway: -0.9, bend: 0.3 }], [7, { sway: 0.5 }], [8.4, {}]] },
+  { name: 'потянулась', keys: [[0, {}], [2, { bend: -0.5 }], [3.2, { bend: -0.55, sway: 0.5 }], [4.4, { bend: -0.5, sway: -0.5 }], [6.5, {}]] },
+  { name: 'присела-покачалась', keys: [[0, {}], [2.5, { sit: 0.45, bend: 0.2 }], [3.8, { sit: 0.45, sway: 0.8, bend: 0.2 }], [5.1, { sit: 0.45, sway: -0.8, bend: 0.2 }], [6.4, { sit: 0.3, bend: 0.4 }], [9, {}]] },
+  { name: 'поклон-волна', keys: [[0, {}], [1.8, { bend: 0.8 }], [3, { bend: 0.3, sway: 0.7 }], [4.2, { bend: 0.7, sway: -0.7 }], [5.4, { bend: 0.1 }], [6.6, { bend: -0.3 }], [8.5, {}]] },
+  { name: 'восьмёрка', keys: [[0, {}], [1.2, { sway: 0.7, bend: 0.25 }], [2.4, { sway: 0, bend: -0.2 }], [3.6, { sway: -0.7, bend: 0.25 }], [4.8, { sway: 0, bend: -0.2 }], [6, { sway: 0.7, bend: 0.25 }], [7.2, { sway: 0, bend: -0.15 }], [8.6, {}]] },
+];
+// К движению корпуса — жест руками и выражение лица: так она выглядит живой, а не «качается».
+const AUTO_GESTURES = ['touchHair', 'handOnHip', 'tiltHead', 'sway', 'clasp', 'bounce'];
+let autoMoves = true;
+try { autoMoves = localStorage.getItem('waifu-auto') !== '0'; } catch { /* ignore */ }
+let auto = null; // { keys, t, last }
+let autoIdle = 0;
+let autoCooldown = 6;
+let autoLastName = '';
+const AUTO_VALS = ['bend', 'sway', 'sit'];
+function autoValuesAt(keys, t) {
+  const out = { bend: 0, sway: 0, sit: 0 };
+  let i = 0;
+  while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
+  const [t0, a] = keys[i];
+  const [t1, b] = keys[Math.min(i + 1, keys.length - 1)];
+  if (!(t1 > t0)) { for (const v of AUTO_VALS) out[v] = b[v] ?? 0; return out; }
+  // Сплайн через ключи (Catmull-Rom): движение течёт, не замирая в каждой точке;
+  // в начале и в конце — мягкий старт и остановка.
+  const u = THREE.MathUtils.clamp((t - t0) / (t1 - t0), 0, 1);
+  const h00 = 2 * u ** 3 - 3 * u * u + 1, h10 = u ** 3 - 2 * u * u + u, h01 = -2 * u ** 3 + 3 * u * u, h11 = u ** 3 - u * u;
+  const prev = keys[i - 1];
+  const next = keys[i + 2];
+  for (const v of AUTO_VALS) {
+    const p0 = a[v] ?? 0, p1 = b[v] ?? 0;
+    const m0 = prev ? ((p1 - (prev[1][v] ?? 0)) / (t1 - prev[0])) * (t1 - t0) : 0;
+    const m1 = next ? (((next[1][v] ?? 0) - p0) / (next[0] - t0)) * (t1 - t0) : 0;
+    out[v] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
+    // Посадка — без «перелёта» (иначе на коленях она чуть начинала садиться на пол).
+    if (v === 'sit') out[v] = THREE.MathUtils.clamp(out[v], Math.min(p0, p1), Math.max(p0, p1));
+  }
+  return out;
+}
+function applyAuto(v) {
+  const o = character.bodyOffset;
+  const S = character.scale;
+  o.hipsRotX = v.bend;
+  o.spineX = bendSpine(v.bend);
+  o.hipsX = v.sway * 0.08 * S;
+  o.hipsZ = THREE.MathUtils.clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+  o.spineZ = -v.sway * 0.16;
+  character.sit = v.sit;
+  character.sitRate = 0.5;
+}
+// Плавно вернуться из текущего положения (касание или переход во вкладку «Позы»).
+function stopAuto(instant = false) {
+  if (!auto || !character) return;
+  if (auto.pose) {
+    // Позу, которую она приняла сама, не сбиваем касанием — дослушает и вернётся сама.
+    if (instant && character.poseName === auto.pose) character.setPose('stand');
+    if (instant) auto = null;
+    return;
+  }
+  if (instant) { applyAuto({ bend: 0, sway: 0, sit: 0 }); auto = null; return; }
+  const cur = auto.last ?? { bend: 0, sway: 0, sit: 0 };
+  auto = { keys: [[0, cur], [1.2, { sit: cur.sit }]], t: 0, returning: true };
+}
+// Палец на полосе — её собственное движение плавно останавливается и не мешает
+// (иначе оно каждый кадр перезаписывает посадку и полоса «залипает»). Посадку не сбрасываем.
+function sliderTakesOver() {
+  autoIdle = 0;
+  if (auto && !auto.pose && !auto.returning) stopAuto();
+}
+// ---------- «Плавный танец»: одна длинная текучая связка в тех же амплитудах, что и её движения ----------
+// Бёдра, наклон, прогиб и присед перетекают друг в друга без остановок; идёт по кругу, пока не выключишь.
+const FLOW_DANCE = [
+  [0, {}], [1.5, { sway: 0.8 }], [3, { sway: -0.8, bend: 0.2 }], [4.5, { sway: 0.9, bend: 0.45 }], [6, { sway: -0.9, bend: 0.7 }],
+  [7.5, { sway: 0.5, bend: 0.95 }], [9, { sway: -0.4, bend: 0.3 }], [10.5, { sway: 0.3, bend: -0.45 }], [12, { sway: -0.6, bend: -0.55 }],
+  [13.5, { sway: 0.7, bend: -0.2 }], [15, { sit: 0.35, bend: 0.25, sway: -0.7 }], [16.5, { sit: 0.45, bend: 0.3, sway: 0.8 }],
+  [18, { sit: 0.45, bend: 0.5, sway: -0.8 }], [19.5, { sit: 0.3, bend: 0.1, sway: 0.6 }], [21, { bend: -0.35, sway: -0.5 }],
+  [22.5, { bend: 0.5, sway: 0.8 }], [24, { bend: 1.0, sway: -0.5 }], [25.5, { bend: 1.05, sway: 0.6 }], [27, { bend: 0.5, sway: -0.8 }],
+  [28.5, { sway: 0.8 }], [30, { bend: -0.3, sway: -0.7 }], [31.5, { bend: 0.15, sway: 0.5 }], [33, { sway: -0.3 }], [34.5, {}],
+];
+let flowDance = false;
+let flowGestureT = 0;
+function setFlowDance(on) {
+  if (!character) return;
+  flowDance = on;
+  if (on) {
+    if (currentAnim) stopAnim();
+    if (currentMocap) stopMocap();
+    character.loop = null;
+    character.dancing = false;
+    if (reps.home.on) { setRepeat(false, true); renderAutoRep?.(); }
+    if (typeof autoState !== 'undefined' && autoState !== 'live') setAutoState('live');
+    if (character.sit > 0.05) sitBy(-character.sit / 0.004);
+    auto = null;
+    say(pick(['Смотри, как плавно~', 'Этот танец — для тебя ♥', 'Потанцуем медленно~']), 'happy');
+    wishEvent('dance');
+  } else if (auto?.dance) stopAuto();
+  renderAnims();
+}
+function updateAuto(dt) {
+  if (!character) return;
+  autoIdle += dt;
+  if (flowDance) {
+    // Тронул её — танец на миг уступает и сам продолжается; сел/лёг, включил повтор или позы — выключается.
+    if (poseMode || reps.home.on || character.dancing || character.mixer || character.sitS > 0.75 || (typeof autoState !== 'undefined' && autoState !== 'live')) { flowDance = false; renderAnims(); }
+    else if (!auto && !pointerActive) auto = { keys: FLOW_DANCE, t: 0, dance: true };
+    if (auto?.dance) {
+      flowGestureT -= dt;
+      if (flowGestureT <= 0) {
+        flowGestureT = 4.5 + Math.random() * 3;
+        character.setExpression(Math.random() < 0.7 ? 'happy' : 'relaxed', 0.35 + Math.random() * 0.3, 4);
+        if (character.sitS < 0.25) character.playMotion(pick(['touchHair', 'sway', 'handOnHip', 'stretch', 'tiltHead', 'clasp']));
+      }
+    }
+  }
+  if (auto) {
+    auto.t += dt;
+    const end = auto.keys[auto.keys.length - 1][0];
+    auto.last = autoValuesAt(auto.keys, Math.min(auto.t, end));
+    if (auto.returning) {
+      // При возврате посадку не трогаем — ей может управлять полоса.
+      const o = character.bodyOffset;
+      const S = character.scale;
+      o.hipsRotX = auto.last.bend;
+      o.spineX = bendSpine(auto.last.bend);
+      o.hipsX = auto.last.sway * 0.06 * S;
+      o.hipsZ = THREE.MathUtils.clamp(o.hipsX / S * 1.6, -0.14, 0.14);
+      o.spineZ = -auto.last.sway * 0.12;
+    } else applyAuto(auto.last);
+    if (auto.t >= end) {
+      if (auto.pose && character.poseName === auto.pose) character.setPose('stand');
+      auto = null;
+      autoCooldown = autoMode ? 2 + Math.random() * 4 : 6 + Math.random() * 7; // в «Авто» двигается сама чаще
+    }
+    return;
+  }
+  autoCooldown -= dt;
+  const calm = (autoMoves || autoMode) && !(autoMode && autoState !== 'live') && !poseMode && autoIdle > (autoMode ? 2.5 : 5) && !sliderDrag && !slider2Drag && autoCooldown <= 0 && !reps.home.on
+    && character.sit < 0.02 && character.sitS < 0.02 && !character.mixer && !character.dancing
+    && !(currentMocap && !MOCAP.find((m) => m.id === currentMocap)?.idle)
+    && Math.abs(character.bodyOffset.hipsRotX) < 0.01 && document.querySelector('.panel:not(.hidden)') === null;
+  if (!calm) return;
+  // Иногда вместо движения — красивая поза на несколько секунд.
+  // Готовые «стандартные» позы убраны: сама она только двигается (жесты, покачивания, эмоции).
+  if (false && character.poseName === 'stand') {
+    const poses = ['flirty', 'hips', 'shy', 'think', 'hair', 'cheek', 'dreamy', 'hug'].filter((n) => n !== autoLastName);
+    const n = poses[Math.floor(Math.random() * poses.length)];
+    autoLastName = n;
+    character.setPose(n);
+    auto = { keys: [[0, {}], [7 + Math.random() * 5, {}]], t: 0, pose: n };
+    return;
+  }
+  const choices = AUTO_ROUTINES.filter((r) => r.name !== autoLastName);
+  const r = choices[Math.floor(Math.random() * choices.length)];
+  autoLastName = r.name;
+  auto = { keys: r.keys, t: 0 };
+  if (Math.random() < 0.6) {
+    const stretchy = /прогиб|потянулась/.test(r.name);
+    setTimeout(() => { if (auto && !pointerActive && character.sleep < 0.3) character.playMotion(stretchy ? 'stretch' : pick(AUTO_GESTURES)); }, 500 + Math.random() * 1500);
+    character.setExpression(Math.random() < 0.6 ? 'happy' : 'relaxed', 0.3 + Math.random() * 0.3, 3.5);
+  }
+}
+// Камеру крутишь — авто не мешаем; трогаешь её саму — авто плавно останавливается.
+window.addEventListener('pointerdown', (e) => {
+  if (e.target !== canvas) return;
+  if (!zoneAt(e)) return;
+  autoIdle = 0;
+  stopAuto();
+  // Повтор касанием не выключаем: её можно трогать и гладить, пока она двигается.
+}, { capture: true, passive: true });
+// ---------- «Повтор»: она повторяет твоё движение ползунком по кругу ----------
+// Нажал кнопку над ползунком → двигаешь (наклон, прогиб, присесть, лечь) → отпустил —
+// она повторяет это движение туда-обратно, плавно. Подвигал по-новому — подхватит на ходу.
+// На главной и во вкладке «Позы» повторы РАЗНЫЕ и не мешают друг другу:
+// перешёл во вкладку — повтор главной на паузе, вернулся — продолжает.
+// Избранное: ＋ сохраняет движение, номерок — включить, удержание номерка — удалить.
+const newRep = (tab) => ({ tab, on: false, state: 'off', samples: [], t: 0, lastMove: 0, recStart: 0, faceT: 2, life: 0 });
+const reps = { home: newRep('home'), pose: newRep('pose') };
+const curRep = () => (poseMode ? reps.pose : reps.home);
+const repKey = (r) => (r.tab === 'pose' ? 'waifu-repeat-move-pose' : 'waifu-repeat-move');
+const favKey = (r) => (r.tab === 'pose' ? 'waifu-repeat-favs-pose' : 'waifu-repeat-favs');
+const repBtns = () => [$('cam-auto'), $('rep-btn')].filter(Boolean);
+function loadFavs(r) { try { return JSON.parse(localStorage.getItem(favKey(r)) || '[]'); } catch { return []; } }
+function saveFavs(r, list) { try { localStorage.setItem(favKey(r), JSON.stringify(list)); } catch { /* ignore */ } }
+// Снимок того, что повторяем: наклон, посадка и точки рук/ног (во вкладке «Позы»).
+const vArr = (v) => (v ? [v.x, v.y, v.z] : null);
+function nowPose() {
+  const c = character;
+  return {
+    bend: c.bodyOffset.hipsRotX, spine: c.bodyOffset.spineX, sit: c.sitS ?? c.sit, // пишем то, что тело реально сделало, а не куда тянул палец
+    hL: c.handAnchor?.left ? null : vArr(c.handTargets.left), hR: c.handAnchor?.right ? null : vArr(c.handTargets.right),
+    fL: vArr(c.footOffset.left), fR: vArr(c.footOffset.right),
+  };
+}
+// Точки: плавно между двумя снимками (если точка есть в обоих).
+const lerpArr = (a, b, k) => (a && b ? [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k] : (b ?? a));
+function applyPoints(p) {
+  const c = character;
+  const set = (obj, side, arr) => {
+    if (!arr) return;
+    if (obj[side]) obj[side].set(arr[0], arr[1], arr[2]);
+    else obj[side] = new THREE.Vector3(arr[0], arr[1], arr[2]);
+  };
+  if (!c.handAnchor?.left) set(c.handTargets, 'left', p.hL);
+  if (!c.handAnchor?.right) set(c.handTargets, 'right', p.hR);
+  set(c.footOffset, 'left', p.fL);
+  set(c.footOffset, 'right', p.fR);
+  if (p.hL) c.armPreset.left = null;
+  if (p.hR) c.armPreset.right = null;
+}
+// Включить конкретное движение (из памяти или избранного) — плавно перетекая в него.
+function movedPoints(samples) {
+  const out = {};
+  for (const key of ['hL', 'hR', 'fL', 'fR']) {
+    const vals = samples.map((x) => x[key]).filter(Boolean);
+    if (vals.length < 2) continue;
+    const f = vals[0];
+    out[key] = vals.some((v) => Math.hypot(v[0] - f[0], v[1] - f[1], v[2] - f[2]) > 0.01);
+  }
+  return out;
+}
+// Края записанного движения: до куда его можно сдвигать полосой.
+function repRanges(r) {
+  if (r.rangeFor === r.samples) return;
+  r.rangeFor = r.samples;
+  const S = r.samples ?? [];
+  const sit = S.map((x) => x.sit), bend = S.map((x) => x.bend);
+  r.sitLo = sit.length ? Math.min(...sit) : 0;
+  r.sitHi = sit.length ? Math.max(...sit) : 0;
+  r.bendLo = bend.length ? Math.min(...bend) : 0;
+  r.bendHi = bend.length ? Math.max(...bend) : 0;
+}
+const sitMovedIn = (S) => { const v = S.map((x) => x.sit); return Math.max(...v) - Math.min(...v) > 0.02; };
+function playMove(r, mv) {
+  r.movedPts = movedPoints(mv.samples);
+  r.sitMoved = sitMovedIn(mv.samples);
+  r.sitFree = false;
+  r.bendOff = 0;
+  r.sitOff = 0;
+  r.samples = mv.samples;
+  r.dur = mv.dur;
+  r.t = 0;
+  r.blendFrom = nowPose();
+  r.blendK = 0;
+  r.state = 'play';
+  r.midFor = null;
+}
+function setRepeat(on, quiet = false) {
+  if (!character) return;
+  const r = curRep();
+  r.on = on;
+  r.state = on ? 'wait' : 'off';
+  r.samples = [];
+  r.ptsTrack = null;
+  r.ptsRec = null;
+  r.sitFree = false;
+  r.bendOff = 0;
+  r.sitOff = 0;
+  if (on) stopAuto(true);
+  renderRep();
+  // Включил — всегда с чистого листа: ждёт твоё новое движение.
+  // Сохранённые движения — только из избранного (номерки рядом с кнопкой).
+  if (!quiet) showToast(on ? 'Подвигай ползунком — я повторю 💗' : 'Стоп');
+}
+// Кнопка повтора — над левым ползунком; рядом — избранные движения.
+const repFavsEl = document.createElement('div');
+repFavsEl.id = 'rep-favs';
+repFavsEl.hidden = true;
+$('sit-slider').appendChild(repFavsEl);
+for (const ev of ['pointerdown', 'touchstart']) repFavsEl.addEventListener(ev, (e) => e.stopPropagation());
+function renderRep() {
+  const r = curRep();
+  for (const b of repBtns()) {
+    b.classList.toggle('active', r.on);
+    b.classList.toggle('rec', r.on && r.state === 'rec');
+  }
+  repFavsEl.hidden = !r.on;
+  if (!r.on) return;
+  const favs = loadFavs(r);
+  repFavsEl.innerHTML = '';
+  const add = document.createElement('button');
+  add.className = 'rf-add';
+  add.textContent = '＋';
+  add.title = 'Сохранить это движение';
+  add.disabled = r.state !== 'play' || favs.length >= 6;
+  add.addEventListener('click', () => {
+    if (r.state !== 'play' || !r.samples.length) return;
+    const list = loadFavs(r);
+    list.push({ dur: r.dur, samples: r.samples.filter((_, i) => i % 2 === 0 || i === r.samples.length - 1) });
+    saveFavs(r, list.slice(-6));
+    showToast(`★ Движение ${list.length} сохранено`);
+    renderRep();
+  });
+  repFavsEl.appendChild(add);
+  favs.forEach((mv, i) => {
+    const c = document.createElement('button');
+    c.className = 'rf-chip';
+    c.textContent = String(i + 1);
+    c.title = 'Тап — повторять · удержать — удалить';
+    let hold = null;
+    let held = false;
+    c.addEventListener('pointerdown', () => {
+      held = false;
+      hold = setTimeout(() => {
+        held = true;
+        const list = loadFavs(r);
+        list.splice(i, 1);
+        saveFavs(r, list);
+        showToast(`Движение ${i + 1} удалено`);
+        renderRep();
+      }, 600);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) c.addEventListener(ev, () => clearTimeout(hold));
+    c.addEventListener('click', () => {
+      if (held) return;
+      playMove(r, mv);
+      showToast(`Повторяю движение ${i + 1} ♥`);
+      renderRep();
+    });
+    repFavsEl.appendChild(c);
+  });
+}
+{
+  const b = document.createElement('button');
+  b.id = 'rep-btn';
+  b.title = 'Повтор движения';
+  b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a6 6 0 0 1 10.5-4M20 12a6 6 0 0 1-10.5 4"/><path d="M14 4.5l.8 3.6-3.6.6M10 19.5l-.8-3.6 3.6-.6"/></svg>';
+  $('sit-slider').prepend(b);
+  b.addEventListener('pointerdown', (e) => e.stopPropagation());
+  b.addEventListener('click', (e) => { e.stopPropagation(); setRepeat(!curRep().on); });
+  const f = FEATURES.find((x) => x.id === 'flow');
+  if (f && !f.ids.includes('rep-btn')) f.ids.push('rep-btn');
+  renderLocks();
+}
+// Ползунок двинули: в режиме повтора этой вкладки — начинаем (или продолжаем) запись.
+// Слой точек (🔁): своя запись и свой повтор, наклон/посадку не останавливает.
+function ptsNoteMove() {
+  const r = curRep();
+  if (!r.on) return;
+  const now = performance.now();
+  if (!r.ptsRec) {
+    r.ptsRec = { samples: [], start: now };
+    r.ptsTrack = null; // новое движение точек заменяет старое
+    r.movedPts = {}; // точками теперь управляет слой точек
+  }
+  r.ptsLast = now;
+}
+function updatePtsLayer(dt) {
+  if (!character) return;
+  const r = curRep();
+  if (!r.on) return;
+  const now = performance.now();
+  if (r.ptsRec) {
+    const P = nowPose();
+    r.ptsRec.samples.push({ t: (now - r.ptsRec.start) / 1000, hL: P.hL, hR: P.hR, fL: P.fL, fR: P.fR });
+    const dragging = !!(poseDrag && /hand|foot|knee/.test(poseDrag.kind));
+    if (!dragging && now - r.ptsLast > 250) {
+      const endT = (r.ptsLast - r.ptsRec.start) / 1000;
+      const S = r.ptsRec.samples.filter((x) => x.t <= endT + 0.05);
+      r.ptsRec = null;
+      if (endT >= 0.4 && S.length >= 4) {
+        r.ptsTrack = { samples: S, dur: endT, t: endT, moved: movedPoints(S) };
+        showToast('🔁 Повторяю движение точек — и наклон тоже ♥');
+      }
+    }
+    return;
+  }
+  const T = r.ptsTrack;
+  if (!T) return;
+  T.t = (T.t + dt) % (T.dur * 2);
+  const tri = T.t < T.dur ? T.t / T.dur : 2 - T.t / T.dur;
+  const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * T.dur;
+  const S = T.samples;
+  let i = 0;
+  while (i < S.length - 2 && S[i + 1].t < u) i++;
+  const a = S[i];
+  const b = S[Math.min(i + 1, S.length - 1)];
+  const k = b.t > a.t ? THREE.MathUtils.clamp((u - a.t) / (b.t - a.t), 0, 1) : 0;
+  const m = T.moved;
+  applyPoints({ hL: m.hL ? lerpArr(a.hL, b.hL, k) : null, hR: m.hR ? lerpArr(a.hR, b.hR, k) : null,
+    fL: m.fL ? lerpArr(a.fL, b.fL, k) : null, fR: m.fR ? lerpArr(a.fR, b.fR, k) : null });
+}
+function loopNoteMove(kind = 'main') {
+  const r = curRep();
+  if (!r.on) return;
+  // Положение (сесть/встать) меняешь, пока идёт повтор, — повтор не останавливается:
+  // посадка просто становится ручной, а наклон и дальше качается.
+  if (kind === 'sit' && r.state === 'play') { r.sitFree = true; return 'free'; }
+  // Идёт повтор — останавливает его только кнопка повтора; движения его лишь сдвигают.
+  if (r.state === 'play') return 'shift';
+  const now = performance.now();
+  if (r.state !== 'rec') {
+    r.state = 'rec';
+    r.samples = [];
+    r.recStart = now;
+    r.blendFrom = null;
+    renderRep();
+  }
+  r.lastMove = now;
+}
+// Сменили вкладку: повтор другой вкладки на паузе, этой — плавно продолжает.
+let repTabSeen = null;
+function updateLoop(dt) {
+  if (!character) return;
+  const r = curRep();
+  if (repTabSeen !== r.tab) {
+    repTabSeen = r.tab;
+    if (r.on && r.state === 'play') { r.blendFrom = nowPose(); r.blendK = 0; }
+    if (r.on && r.state === 'rec') r.state = 'wait';
+    r.ptsRec = null;
+    renderRep();
+  }
+  if (!r.on) return;
+  const now = performance.now();
+  if (r.state === 'rec') {
+    r.samples.push({ t: (now - r.recStart) / 1000, ...nowPose() });
+    const dragging = !!(sliderDrag || slider2Drag || (poseDrag && /sitdrag|hand|foot|knee/.test(poseDrag.kind)));
+    if (!dragging && now - r.lastMove > 250) {
+      const endT = (r.lastMove - r.recStart) / 1000;
+      r.samples = r.samples.filter((x) => x.t <= endT + 0.05);
+      if (endT < 0.4 || r.samples.length < 4) { r.state = 'wait'; renderRep(); return; }
+      r.dur = endT;
+      // С того места, где отпустил (конец записи), и обратно — без скачка и паузы.
+      r.t = r.dur;
+      r.blendFrom = null;
+      r.state = 'play';
+      // Какие точки реально двигались в записи — только их и повторяем
+      // (остальные точки остаются как поставил, их можно править на ходу).
+      r.movedPts = movedPoints(r.samples);
+      // Точки, которые ведёт слой точек, основной повтор не трогает.
+      if (r.ptsTrack) for (const key of Object.keys(r.ptsTrack.moved)) if (r.ptsTrack.moved[key]) r.movedPts[key] = false;
+      r.sitMoved = sitMovedIn(r.samples);
+      r.sitFree = false;
+      r.bendOff = 0;
+      r.sitOff = 0;
+      r.midFor = null;
+      try { localStorage.setItem(repKey(r), JSON.stringify({ dur: r.dur, samples: r.samples.filter((_, i) => i % 2 === 0 || i === r.samples.length - 1) })); } catch { /* ignore */ }
+      if (!r.toldOnce) { r.toldOnce = true; showToast('Повторяю~ ♥ ＋ — в избранное, подвигай — запомню новое'); }
+      renderRep();
+    }
+    return;
+  }
+  if (r.state !== 'play') return;
+  if (r.hold) { character.slideHold = 3; return; } // «Замри» второй раз: повтор на паузе, поза держится
+  // Живее: темп и размах чуть «дышат» — каждый повтор немного другой.
+  r.life += dt;
+  const tempo = 1 + 0.08 * Math.sin(r.life * 0.23) + 0.04 * Math.sin(r.life * 0.61 + 1);
+  const amp = 1 + 0.1 * Math.sin(r.life * 0.17 + 2) + 0.05 * Math.sin(r.life * 0.47);
+  r.t = (r.t + dt * tempo) % (r.dur * 2);
+  const tri = r.t < r.dur ? r.t / r.dur : 2 - r.t / r.dur;
+  const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * r.dur;
+  const S = r.samples;
+  let i = 0;
+  while (i < S.length - 2 && S[i + 1].t < u) i++;
+  const a = S[i];
+  const b = S[Math.min(i + 1, S.length - 1)];
+  const k = b.t > a.t ? THREE.MathUtils.clamp((u - a.t) / (b.t - a.t), 0, 1) : 0;
+  const L = (x, y) => x + (y - x) * k;
+  if (r.midFor !== r.samples) {
+    r.midFor = r.samples;
+    r.midBend = S.reduce((m, x) => m + x.bend, 0) / S.length;
+  }
+  let bend = THREE.MathUtils.clamp(r.midBend + (L(a.bend, b.bend) - r.midBend) * amp + (r.bendOff ?? 0), BEND_MIN, BEND_MAX);
+  let spine = bendSpine(bend);
+  let sit = THREE.MathUtils.clamp(L(a.sit, b.sit) + (r.sitOff ?? 0), 0, sitMax());
+  let pts = { hL: lerpArr(a.hL, b.hL, k), hR: lerpArr(a.hR, b.hR, k), fL: lerpArr(a.fL, b.fL, k), fR: lerpArr(a.fR, b.fR, k) };
+  if (r.blendFrom) {
+    r.blendK = Math.min(1, r.blendK + dt / 1.2);
+    const e = r.blendK * r.blendK * (3 - 2 * r.blendK);
+    bend = r.blendFrom.bend + (bend - r.blendFrom.bend) * e;
+    spine = r.blendFrom.spine + (spine - r.blendFrom.spine) * e;
+    sit = r.blendFrom.sit + (sit - r.blendFrom.sit) * e;
+    const bf = r.blendFrom;
+    pts = { hL: lerpArr(bf.hL, pts.hL, e), hR: lerpArr(bf.hR, pts.hR, e), fL: lerpArr(bf.fL, pts.fL, e), fR: lerpArr(bf.fR, pts.fR, e) };
+    if (r.blendK >= 1) r.blendFrom = null;
+  }
+  {
+    const m = r.movedPts ?? {};
+    applyPoints({ hL: m.hL ? pts.hL : null, hR: m.hR ? pts.hR : null, fL: m.fL ? pts.fL : null, fR: m.fR ? pts.fR : null });
+  }
+  const o = character.bodyOffset;
+  // Наклон может вести второй слой (простой вид: наклон и приседание записаны отдельно и идут вместе).
+  o.hipsRotX = r.layerBend ?? bend;
+  o.spineX = r.layerBend != null ? bendSpine(r.layerBend) : spine;
+  // Посадку ведёт повтор, только если она менялась в записи и ты не взял её в руки.
+  const sitByRep = r.sitMoved !== false && !r.sitFree;
+  if (sitByRep) character.sit = sit;
+  // Темп посадки из записи: быстро записал — быстро и на всю глубину, медленно — плавно.
+  if (sitByRep) {
+    const span = Math.max(0.03, b.t - a.t);
+    const du = (Math.PI / 2) * Math.abs(Math.sin(Math.PI * tri)) * tempo;
+    const sp = Math.abs(b.sit - a.sit) / span * Math.max(0.4, du);
+    character.sitRate = THREE.MathUtils.clamp(sp * 1.5, 1.1, 3);
+    character.dragBoostT = Math.max(character.dragBoostT ?? 0, 0.2); // идёт за записью так же плотно, как шла за пальцем — глубина не срезается
+  }
+  character.slideHold = 3; // ножками не болтает
+  character.hipsSetSit = character.sitS;
+  // Лицо живёт: улыбается, подмигивает, смущается.
+  r.faceT -= dt;
+  if (r.faceT <= 0 && character.sleep < 0.3) {
+    r.faceT = 3.5 + Math.random() * 3;
+    const f = FLOW_FACES[Math.floor(Math.random() * FLOW_FACES.length)];
+    if (f === 'smile') character.setExpression('happy', 0.55 + Math.random() * 0.25, 1.6);
+    else if (f === 'wink') { character.setExpression('happy', 0.35, 1.0); character.wink(); }
+    else if (f === 'shy') { character.setExpression('relaxed', 0.55, 2.0); character.playMotion('tiltHead'); }
+    else if (f === 'surprised') character.setExpression('surprised', 0.35, 0.8);
+  }
+}
+const FLOW_FACES = ['smile', 'smile', 'wink', 'shy', 'smile', 'wink', 'surprised'];
+// ---------- Встроенная музыка (генерируется в браузере, без файлов) ----------
+// Спокойный бит ~96 BPM: бочка, хлопок, хэт, мягкие аккорды Am–F–C–G и бас.
+const music = { ctx: null, on: false, bpm: 96, start: 0, step: 0, timer: null, out: null };
+function musicBeat() {
+  if (!music.on || !music.ctx) return null;
+  return Math.max(0, (music.ctx.currentTime - music.start) * music.bpm / 60);
+}
+function noiseBuf(ctx) {
+  const b = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return b;
+}
+function playMusic(on) {
+  if (on && !music.ctx) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) { showToast('Музыка не поддерживается в этом браузере'); return; }
+    music.ctx = new Ctx();
+    window.__waifuAudio = music.ctx;
+    music.out = music.ctx.createGain();
+    music.out.gain.value = 0.32;
+    music.out.connect(music.ctx.destination);
+    music.noise = noiseBuf(music.ctx);
+  }
+  if (!music.ctx) return;
+  if (on) {
+    music.ctx.resume();
+    music.on = true;
+    music.start = music.ctx.currentTime + 0.1;
+    music.step = 0;
+    clearInterval(music.timer);
+    music.timer = setInterval(scheduleMusic, 25);
+  } else {
+    music.on = false;
+    clearInterval(music.timer);
+    music.timer = null;
+  }
+  $('btn-music-toggle')?.classList.toggle('active', music.on);
+  if ($('btn-music-toggle')) $('btn-music-toggle').textContent = music.on ? '🎶 Музыка: вкл' : '🎶 Музыка';
+}
+const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
+const hz = (m) => 440 * 2 ** ((m - 69) / 12);
+function tone(t, freq, dur, type, gain, attack = 0.01) {
+  const c = music.ctx;
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(gain, t + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(music.out);
+  o.start(t);
+  o.stop(t + dur + 0.05);
+}
+function hit(t, dur, gain, filter, freq) {
+  const c = music.ctx;
+  const src = c.createBufferSource();
+  src.buffer = music.noise;
+  const f = c.createBiquadFilter();
+  f.type = filter;
+  f.frequency.value = freq;
+  const g = c.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(f).connect(g).connect(music.out);
+  src.start(t);
+  src.stop(t + dur + 0.05);
+}
+function scheduleMusic() {
+  const c = music.ctx;
+  const eighth = 30 / music.bpm;
+  while (music.start + music.step * eighth < c.currentTime + 0.15) {
+    const t = music.start + music.step * eighth;
+    const st = music.step % 8;
+    const bar = Math.floor(music.step / 8) % 4;
+    if (st === 0 || st === 4) { // бочка
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.frequency.setValueAtTime(120, t);
+      o.frequency.exponentialRampToValueAtTime(45, t + 0.18);
+      g.gain.setValueAtTime(0.9, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(g).connect(music.out);
+      o.start(t); o.stop(t + 0.35);
+    }
+    if (st === 2 || st === 6) hit(t, 0.18, 0.35, 'bandpass', 1800); // хлопок
+    if (st % 2 === 1) hit(t, 0.05, 0.12, 'highpass', 7000); // хэт
+    if (st === 0) for (const n of CHORDS[bar]) tone(t, hz(n), eighth * 8, 'triangle', 0.05, 0.25); // аккорд
+    if (st === 0 || st === 3 || st === 4) tone(t, hz(CHORDS[bar][0] - 12), eighth * 1.6, 'sine', 0.22); // бас
+    if (st === 5 && Math.random() < 0.5) tone(t, hz(CHORDS[bar][2] + 12), eighth, 'sine', 0.05); // искорка
+    music.step++;
+  }
+}
+
+// Музыка — в панели танцев (🎵): кнопка «Музыка».
+{
+  const mb = document.createElement('button');
+  mb.id = 'btn-music-toggle';
+  mb.className = 'panel-big';
+  mb.textContent = '🎶 Музыка';
+  $('btn-dance').after(mb);
+  mb.addEventListener('click', () => playMusic(!music.on));
+}
+function renderAutoBtn() {
+  $('btn-auto').textContent = autoMoves ? '🌸 Сама двигается: вкл' : '🌸 Сама двигается: выкл';
+  $('btn-auto').classList.toggle('active', autoMoves);
+}
+$('btn-auto').addEventListener('click', () => {
+  autoMoves = !autoMoves;
+  try { localStorage.setItem('waifu-auto', autoMoves ? '1' : '0'); } catch { /* ignore */ }
+  renderAutoBtn();
+});
+renderAutoBtn();
+
+// Пауза на время рекламы: картинка и звук стоят.
+let adPaused = false;
+let playGain = 0;
+onAdPause((on) => {
+  adPaused = on;
+  try { if (on) window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+  for (const a of document.querySelectorAll('audio')) { if (on) a.pause(); }
+  try { if (on) window.__waifuAudio?.suspend?.(); else window.__waifuAudio?.resume?.(); } catch { /* ignore */ }
+});
+// ---------- Режим «Авто» ----------
+// Она на весь экран, кнопок нет. Всё жестами: гладишь и тапаешь — как обычно; ведёшь по ней
+// вверх-вниз — садится/встаёт/ложится; по фону — камера, два пальца — ближе/дальше.
+// Она сама двигается, просит и реагирует; камера еле заметно «дышит» вокруг неё.
+let autoMode = false;
+let autoPhase = 0;
+let autoTouchAt = 0;
+const autoBtn = document.createElement('button');
+autoBtn.id = 'btn-automode';
+autoBtn.title = 'Простой вид: только она, управление жестами, всё остальное — в меню ☰';
+autoBtn.innerHTML = '<span>✨</span>';
+$('poses').appendChild(autoBtn);
+const autoExit = document.createElement('button');
+autoExit.id = 'auto-exit';
+autoExit.title = 'Меню';
+autoExit.textContent = '☰';
+document.body.appendChild(autoExit);
+function setAutoMode(on) {
+  if (on && poseMode) setPoseMode(false);
+  autoMode = on;
+  try { renderFurnPager(); } catch { /* ещё не создан при запуске */ }
+  autoSmoothCam = on;
+  if (!on) autoHint.hidden = true;
+  autoMenu.hidden = true;
+  if (!on) { camOnly = false; setAutoState('live'); document.body.classList.remove('cleanscreen'); }
+  renderAutoStates();
+  try { localStorage.setItem('waifu-ui', on ? 'min' : 'classic'); } catch { /* ignore */ }
+  autoRec = null; autoRepOffer = null; renderAutoRep();
+  if (character) character.autoSleep = on;
+  if (!on && character && !poseMode) {
+    // Вышел из «Авто» — наклон/прогиб плавно возвращается в ровное положение.
+    const o = character.bodyOffset;
+    autoBendTarget = null;
+    const iv = setInterval(() => {
+      o.hipsRotX *= 0.82; o.spineX = bendSpine(o.hipsRotX);
+      if (Math.abs(o.hipsRotX) < 0.01 || autoMode || poseMode) { if (!autoMode && !poseMode) { o.hipsRotX = 0; o.spineX = 0; } clearInterval(iv); }
+    }, 33);
+  }
+  document.body.classList.toggle('automode', on);
+  for (const p of document.querySelectorAll('.panel')) p.classList.add('hidden');
+  $('love-menu').hidden = true;
+  if (lockPop) lockPop.hidden = true;
+  if (on) {
+    autoIdle = 0;
+    autoCooldown = 3;
+    autoTouchAt = performance.now();
+    wishTimer = Math.min(wishTimer, 25);
+    showAutoHint();
+  } else {
+    stopAuto();
+    wakeUi();
+    showToast('Ручное управление · ☰ → «Простой вид» — вернуться');
+  }
+}
+// Шпаргалка по жестам — при входе в режим (первые несколько раз подольше).
+const autoHint = document.createElement('div');
+autoHint.id = 'auto-hint';
+autoHint.hidden = true;
+autoHint.innerHTML = '<b>✨ Авто — всё пальцем</b>'
+  + '<span>👆 Водишь по ней вбок — гладишь</span>'
+  + '<span>↕️ Ведёшь вверх-вниз по ногам и животу — сесть / лечь / встать</span>'
+  + '<span>🙇 Ведёшь вверх-вниз по груди и лицу — наклон / прогиб</span>'
+  + '<span>🔁 Подвигал туда-сюда — предложит повторить</span>'
+  + '<span>🎥 По фону — камера вокруг неё; двумя пальцами — ближе/дальше и сдвиг</span>'
+  + '<span>🎯 Двойной тап по фону — камера по центру; ещё раз — она встаёт как была</span>'
+  + '<span>😴🤫🎥 Долгий тап по ней — спит / замри / только камера</span>'
+  + '<span>✌️ Двойной тап двумя пальцами — чистый экран</span>';
+document.body.appendChild(autoHint);
+let autoHintTimer = 0;
+// Подсказка сама показывается только в самый первый раз; дальше — по кнопке «?» рядом с крестиком.
+function showAutoHint() {
+  let n = 0;
+  try { n = Number(localStorage.getItem('waifu-autohint')) || 0; localStorage.setItem('waifu-autohint', String(n + 1)); } catch { /* ignore */ }
+  if (n > 0) return;
+  autoHint.hidden = false;
+  clearTimeout(autoHintTimer);
+  autoHintTimer = setTimeout(() => { autoHint.hidden = true; }, 7000);
+}
+const autoHelp = document.createElement('button');
+autoHelp.id = 'auto-help';
+autoHelp.title = 'Как управлять';
+autoHelp.textContent = '?';
+document.body.appendChild(autoHelp);
+for (const ev of ['pointerdown', 'touchstart']) autoHelp.addEventListener(ev, (e) => e.stopPropagation());
+autoHelp.addEventListener('click', (e) => { e.stopPropagation(); clearTimeout(autoHintTimer); autoHint.hidden = !autoHint.hidden; });
+window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !autoHint.hidden && performance.now() - autoTouchAt > 900) autoHint.hidden = true; }, { capture: true, passive: true });
+autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
+autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
+const WAIFU_BUILD = 275;
+// ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
+// 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
+// сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
+var autoState = 'live';
+var camOnly = false;
+var userPosed = false; // двигал ли её сам с последнего сброса (для домика: сначала поза, потом камера)
+// Стойка стоя: расстояние между ступнями (доля роста) и вынос одной ноги вперёд. Фигура не меняется.
+const STANCES = [
+  { icon: '🧍', name: 'Стойка: обычная', w: 0, f: 0 },
+  { icon: '🚶', name: 'Стойка: ступни шире', w: 0.035, f: 0 },
+  { icon: '🤸', name: 'Стойка: широко', w: 0.075, f: 0 },
+  { icon: '💃', name: 'Стойка: нога вперёд', w: 0.015, f: 0.05 },
+];
+// Мебель: стул и трон. Она садится на сиденье (вместо глубокого приседа): таз на высоте сиденья, бёдра горизонтально,
+// ступни на полу. Значок 🪑 в меню — по кругу: без мебели → стул → трон.
+const FURN = [
+  { id: 'none', icon: '🪑', name: 'Без мебели' },
+  { id: 'pouf', icon: '🟣', name: 'Пуф', h: 0.42, back: 0.3 },
+  { id: 'chair', icon: '🔮', name: 'Стеклянное кресло-шар', h: 0.44, back: 0.32, lean: 0.45 },
+  { id: 'table', icon: '🔷', name: 'Стеклянный стол', h: 0.66, back: 0.2, lie: true }, // на стол можно забраться и лечь
+  { id: 'throne', icon: '👑', name: 'Трон', h: 0.48, back: 0.34, lean: 0.12 },
+];
+var furnIdx = 0;
+const TABLE_R = 0.9, TABLE_CZ = TABLE_R - 0.16; // радиус столешницы и сдвиг её центра назад от края, где она сидит
+const furnGroup = new THREE.Group();
+furnGroup.visible = false;
+scene.add(furnGroup);
+function buildFurn(f, S) {
+  furnGroup.clear();
+  const mat = (color, rough = 0.7) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0.05 });
+  // Стекло: прозрачное, с бликами; кромки подсвечены тонкими светлыми ободками, чтобы форма читалась.
+  const glass = () => new THREE.MeshPhysicalMaterial({ color: 0xcfeaff, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.3, clearcoat: 1, clearcoatRoughness: 0.04, side: THREE.DoubleSide, depthWrite: false });
+  const edge = () => new THREE.MeshBasicMaterial({ color: 0xeaf7ff, transparent: true, opacity: 0.75 });
+  const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x * S, y * S, z * S); furnGroup.add(o); return o; };
+  const box = (w, h, d, x, y, z, m) => add(new THREE.BoxGeometry(w * S, h * S, d * S), m, x, y, z);
+  const rod = (r, h, x, y, z, m) => add(new THREE.CylinderGeometry(r * S, r * S, h * S, 12), m, x, y, z);
+  const ring = (r, tube, x, y, z, m) => { const o = add(new THREE.TorusGeometry(r * S, tube * S, 8, 40), m, x, y, z); o.rotation.x = Math.PI / 2; return o; };
+  // Тело вращения по профилю [радиус, высота] — мягкие округлые формы (пуф, подушка).
+  const lathe = (pts, m, x = 0, z = 0) => add(new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r * S, y * S)), 28), m, x, 0, z);
+  const top = f.h; // верх сиденья
+  if (f.id === 'pouf') {
+    // Маленький мягкий пуф: округлые бока, чуть вдавленный верх, тонкая кайма.
+    const velvet = mat(0x8e5bb5, 0.95), trim = mat(0xe3c98a, 0.4);
+    lathe([[0, 0], [0.17, 0], [0.2, 0.03], [0.215, top * 0.5], [0.2, top - 0.05], [0.16, top - 0.008], [0, top - 0.015]], velvet);
+    lathe([[0.2, 0.035], [0.222, 0.045], [0.2, 0.06]], trim);
+  } else if (f.id === 'chair') {
+    // Прозрачное кресло-шар: стеклянная сфера с открытым передом, внутри мягкая подушка, снизу тонкая ножка на диске.
+    const g = glass(), e = edge(), cushion = mat(0xf2c6da, 0.95), steel = mat(0xdfe6f2, 0.25);
+    const R = 0.43, cy = top + 0.24, cz = -0.1;
+    const shell = add(new THREE.SphereGeometry(R * S, 40, 28, Math.PI * 5 / 6, Math.PI * 4 / 3), g, 0, cy, cz);
+    shell.renderOrder = 2;
+    // Кромка проёма — два светлых обода по краям выреза.
+    for (const phi of [Math.PI * 5 / 6, Math.PI * 5 / 6 + Math.PI * 4 / 3]) { const rim = add(new THREE.TorusGeometry(R * S, 0.006 * S, 8, 64), e, 0, cy, cz); rim.rotation.y = phi - Math.PI; }
+    // Подушка-сиденье внутри шара.
+    lathe([[0, top - 0.09], [0.26, top - 0.09], [0.3, top - 0.05], [0.28, top - 0.008], [0, top - 0.015]], cushion, 0, cz + 0.02);
+    // Ножка и диск-основание.
+    rod(0.022, cy - R + 0.02, 0, (cy - R + 0.02) / 2, cz, steel);
+    lathe([[0, 0], [0.24, 0], [0.24, 0.012], [0.05, 0.03], [0, 0.03]], steel, 0, cz);
+    ring(0.24, 0.005, 0, 0.012, cz, e);
+  } else if (f.id === 'table') {
+    // Стеклянный стол: большая круглая столешница на одной ножке; она присаживается на край, а ниже — забирается
+    // на стол целиком (колени, четвереньки, лёжа).
+    const g = glass(), e = edge(), R = TABLE_R, cz = -TABLE_CZ;
+    lathe([[0, top - 0.025], [R - 0.01, top - 0.025], [R, top - 0.012], [R - 0.01, top], [0, top]], g, 0, cz);
+    ring(R - 0.002, 0.006, 0, top - 0.012, cz, e);
+    lathe([[0, 0], [0.34, 0], [0.34, 0.014], [0.1, 0.04], [0.04, 0.16], [0.032, top - 0.14], [0.16, top - 0.025], [0, top - 0.025]], g, 0, cz);
+    ring(0.34, 0.005, 0, 0.01, cz, e);
+  } else {
+    // Трон — массивный, как в первой версии (он понравился больше): основание, бархатная подушка, высокая спинка
+    // с бархатной вставкой, широкие подлокотники, золотая кайма; углы спинки — с золотыми шарами.
+    const gold = mat(0xd9b45a, 0.35), velvet = mat(0x7a1f4d, 0.9), body = mat(0x3a2147, 0.6);
+    box(0.6, top - 0.06, 0.52, 0, (top - 0.06) / 2, 0, body); // основание
+    box(0.5, 0.06, 0.46, 0, top - 0.03, 0.02, velvet); // подушка
+    box(0.6, 1.0, 0.07, 0, top + 0.44, -0.3, body); box(0.46, 0.8, 0.03, 0, top + 0.42, -0.255, velvet); // спинка
+    box(0.64, 0.05, 0.09, 0, top + 0.96, -0.3, gold); // верх спинки
+    for (const sx of [-1, 1]) { box(0.07, 0.24, 0.5, sx * 0.3, top + 0.1, 0, body); box(0.09, 0.03, 0.52, sx * 0.3, top + 0.235, 0, gold); add(new THREE.SphereGeometry(0.04 * S, 14, 10), gold, sx * 0.3, top + 1.0, -0.3); } // подлокотники и шары
+    box(0.64, 0.03, 0.56, 0, 0.015, 0, gold); // кайма у пола
+  }
+}
+const furnBase = new THREE.Vector3();
+function applyFurn(sitNow = false) {
+  if (!character) return;
+  character.furnApplied = true;
+  const f = FURN[furnIdx];
+  renderFurnPager();
+  if (f.id === 'none') { character.seat = null; furnGroup.visible = false; return; }
+  character.seat = { h: f.h, back: f.back, lean: f.lean ?? 1, lie: !!f.lie }; // lean — насколько можно откинуться назад (спинка мешает)
+  const S = character.scale;
+  buildFurn(f, S);
+  // Ставим под неё: за ступнями на длину бедра, сиденьем к ней.
+  const hips = character.bones.hips, pq = hips.parent.getWorldQuaternion(new THREE.Quaternion());
+  const backDir = new THREE.Vector3(0, 0, -character.flip).applyQuaternion(pq).setY(0).normalize();
+  const rest = character.restHips;
+  furnBase.set(rest.x + backDir.x * (f.back - 0.1) * S, 0, rest.z + backDir.z * (f.back - 0.1) * S);
+  furnGroup.position.copy(furnBase);
+  furnGroup.rotation.y = Math.atan2(-backDir.x, -backDir.z);
+  furnGroup.visible = true;
+  if (sitNow) { const d = 0.5 - character.sit; if (Math.abs(d) > 0.01) sitBy(d / 0.004); }
+}
+// Смена мебели — как перелистывание экранов: прежняя уезжает в сторону свайпа, новая въезжает с другой стороны.
+let furnSlide = null; // { phase: 'out' | 'in', t, dir, next }
+function switchFurn(step) {
+  if (!character || furnSlide) return;
+  const next = (furnIdx + step + FURN.length) % FURN.length, dir = step > 0 ? -1 : 1; // свайп влево (следующая) — уезжает влево
+  furnSlide = { phase: furnGroup.visible ? 'out' : 'swap', t: 0, dir, next };
+  try { navigator.vibrate?.(8); } catch { /* ignore */ }
+}
+function updateFurnSlide(dt) {
+  const a = furnSlide;
+  if (!a || !character) return;
+  const S = character.scale, ease = (x) => x * x * (3 - 2 * x);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).setY(0);
+  if (right.lengthSq() < 1e-6) right.set(1, 0, 0); right.normalize();
+  if (a.phase === 'out') {
+    a.t = Math.min(1, a.t + dt / 0.2);
+    furnGroup.position.copy(furnBase).addScaledVector(right, a.dir * 1.6 * S * ease(a.t));
+    if (a.t >= 1) a.phase = 'swap';
+  }
+  if (a.phase === 'swap') {
+    furnIdx = a.next;
+    const f = FURN[furnIdx];
+    if (f.id === 'none') { applyFurn(); if (character.sit > 0.01) sitBy(-character.sit / 0.004); showToast('Мебель убрана'); furnSlide = null; renderAutoStates(); return; }
+    if (character.sit > 0.5) { character.sit = 0.5; character.sitRate = Math.max(character.sitRate ?? 0, 1.2); }
+    applyFurn(true);
+    showToast(`${f.icon} ${f.name}`);
+    renderAutoStates();
+    a.phase = 'in'; a.t = 0;
+  }
+  if (a.phase === 'in') {
+    a.t = Math.min(1, a.t + dt / 0.28);
+    furnGroup.position.copy(furnBase).addScaledVector(right, -a.dir * 1.6 * S * (1 - ease(a.t)));
+    if (a.t >= 1) { furnGroup.position.copy(furnBase); furnSlide = null; }
+  }
+}
+// «Сцена опускается»: когда она забирается на стол (ниже сидения), столешница становится её полом. Сама она считает
+// всё как на обычном полу (ничего в позах не меняется), а настоящий пол, стол и тени уезжают вниз на высоту стола,
+// и стол подъезжает под неё целиком.
+let stageK = 0;
+const stageC = new THREE.Vector3(), stageTmp = new THREE.Vector3();
+function updateStage(dt) {
+  if (!character) return;
+  const S = character.scale, f = FURN[furnIdx];
+  const want = f.lie && character.seat ? THREE.MathUtils.smoothstep(character.sitS, 0.52, 0.78) : 0;
+  stageK += (want - stageK) * (1 - Math.exp(-dt * 10));
+  if (stageK < 0.001 && !want) stageK = 0;
+  const drop = -(f.h ?? 0) * S * stageK;
+  floor.position.y = drop; floorDisc.position.y = 0.001 + drop;
+  if (!furnSlide && furnGroup.visible) furnGroup.position.copy(furnBase);
+  furnGroup.position.y = drop;
+  if (stageK > 0) {
+    // Центр стола — под серединой тела (между головой и ступнями), плавно.
+    const B = character.bones, a = B.head.getWorldPosition(stageTmp), hx = a.x, hz = a.z;
+    const l = B.leftFoot.getWorldPosition(stageTmp), lx = l.x, lz = l.z, r = B.rightFoot.getWorldPosition(stageTmp);
+    const cx = (hx + (lx + r.x) / 2) / 2, cz = (hz + (lz + r.z) / 2) / 2;
+    if (stageC.y === 0) { stageC.set(cx, 1, cz); } else { const k = 1 - Math.exp(-dt * 2.5); stageC.x += (cx - stageC.x) * k; stageC.z += (cz - stageC.z) * k; }
+    // где сейчас центр столешницы (в группе он сдвинут назад на TABLE_CZ)
+    const ry = furnGroup.rotation.y, ox = -Math.sin(ry) * TABLE_CZ * S, oz = -Math.cos(ry) * TABLE_CZ * S;
+    furnGroup.position.x += (stageC.x - (furnBase.x + ox)) * stageK;
+    furnGroup.position.z += (stageC.z - (furnBase.z + oz)) * stageK;
+  } else stageC.y = 0;
+}
+// Точки-указатель внизу: какая мебель выбрана. Там же её и листают — свайпом влево-вправо по нижней полоске экрана
+// (именно по ней, чтобы случайно не сменить, когда гладишь её или крутишь камеру).
+const furnPager = document.createElement('div');
+furnPager.id = 'furn-pager';
+furnPager.style.cssText = 'position:fixed;left:50%;bottom:10px;transform:translateX(-50%);z-index:20;display:flex;gap:7px;align-items:center;padding:5px 10px;border-radius:999px;background:rgba(30,22,60,.35);pointer-events:none;opacity:.55;transition:opacity .3s;font:11px sans-serif;color:#fff';
+document.body.appendChild(furnPager);
+function renderFurnPager() {
+  furnPager.innerHTML = '<span style="opacity:.7">‹</span>' + FURN.map((f, i) => `<span style="width:${i === furnIdx ? 9 : 6}px;height:${i === furnIdx ? 9 : 6}px;border-radius:50%;background:${i === furnIdx ? '#fff' : 'rgba(255,255,255,.45)'}"></span>`).join('') + '<span style="opacity:.7">›</span>';
+  furnPager.style.display = autoMode ? 'flex' : 'none';
+}
+{
+  let sw = null;
+  const inStrip = (e) => e.clientY > window.innerHeight * 0.87;
+  window.addEventListener('pointerdown', (e) => {
+    if (!autoMode || poseMode || e.target !== canvas || !e.isPrimary || !inStrip(e)) return;
+    sw = { x: e.clientX, y: e.clientY, id: e.pointerId, done: false };
+    furnPager.style.opacity = '1';
+    e.stopPropagation();
+  }, { capture: true });
+  window.addEventListener('pointermove', (e) => {
+    if (!sw || e.pointerId !== sw.id) return;
+    e.stopPropagation();
+    const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+    if (!sw.done && Math.abs(dx) > 56 && Math.abs(dx) > 2 * Math.abs(dy)) { sw.done = true; switchFurn(dx < 0 ? 1 : -1); }
+  }, { capture: true });
+  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, (e) => {
+    if (!sw || e.pointerId !== sw.id) return;
+    sw = null; furnPager.style.opacity = '.55';
+    e.stopPropagation();
+  }, { capture: true });
+}
+var stanceIdx = 0;
+try { stanceIdx = Math.min(STANCES.length - 1, Math.max(0, +(localStorage.getItem('waifu-stance') ?? 0) || 0)); } catch { /* ignore */ }
+function applyStance() { if (character) { character.stanceW = STANCES[stanceIdx].w; character.stanceF = STANCES[stanceIdx].f; } }
+// 🔁 Предлагать «Повторить» после того, как её подвигал. Выключил — она просто слушается пальца, без записи.
+var repOffer = true;
+// Один раз включаем предложение повтора всем, у кого оно оказалось выключено (значком 🔁): запись амплитуд без него
+// не появляется, а выключалось оно незаметно. Дальше выбор значком сохраняется.
+try { if (!localStorage.getItem('waifu-repoffer-on1')) { localStorage.setItem('waifu-repoffer-on1', '1'); localStorage.removeItem('waifu-repoffer'); } repOffer = localStorage.getItem('waifu-repoffer') !== '0'; } catch { /* ignore */ }
+const autoStates = document.createElement('div');
+autoStates.id = 'auto-states';
+document.body.appendChild(autoStates);
+for (const ev of ['pointerdown', 'touchstart']) autoStates.addEventListener(ev, (e) => e.stopPropagation());
+// Есть ли выставленные руками точки (или их повторы) — тогда в значках появляется «↺ сбросить точки».
+function hasPoints() {
+  const c = character;
+  if (!c) return false;
+  if (grabLoops.length) return true;
+  if (c.handTargets?.left || c.handTargets?.right || c.armPreset?.left || c.armPreset?.right) return true;
+  const S = c.scale ?? 1, o = c.bodyOffset, f = c.footOffset;
+  if ((f?.left?.lengthSq?.() ?? 0) > 1e-5 || (f?.right?.lengthSq?.() ?? 0) > 1e-5) return true;
+  if (Math.abs(o.hipsX) + Math.abs(o.hipsY ?? 0) + Math.abs(o.hipsFwd ?? 0) > 0.01 * S) return true;
+  if (Math.abs(o.spineY) + Math.abs(o.spineZ) + Math.abs(o.hipsZ) > 0.05) return true;
+  return Math.abs(c.headOffset?.x ?? 0) + Math.abs(c.headOffset?.y ?? 0) > 0.05;
+}
+function renderAutoStates() {
+  autoStates.innerHTML = '';
+  const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
+  // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна всегда; «↺» — только когда есть выставленные точки.
+  for (const [id, icon, name] of [['home', '🏠', ''], ...(hasPoints() ? [['pts', '↺', 'Сбросить точки']] : []), ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
+    if (id === 'cam') { const brk = document.createElement('span'); brk.className = 'brk'; autoStates.appendChild(brk); } // второй ряд — инструменты
+    const b = document.createElement('button');
+    const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : id === 'furn' ? FURN[furnIdx].id !== 'none' : autoState === id || (id === 'freeze' && autoState === 'hold');
+    b.className = (on ? 'active' : '') + (id === 'cam' ? ' sep' : '');
+    // Без подписей: что включено, видно по самому значку (он меняется) и подсветке.
+    b.innerHTML = id === 'lie' ? `<svg viewBox="0 0 24 24" aria-hidden="true">${LIE_ICONS[lieMode] ?? LIE_ICONS.side}</svg>` : `<i>${icon}</i>`;
+    b.title = name;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (id === 'gaze') {
+        // Взгляд по кругу: за пальцем → на тебя → глаза закрыты (та же кнопка, что в ручном виде).
+        $('btn-gaze').click();
+        showAutoStates(3500);
+        return;
+      }
+      if (id === 'dice') { diceOutfit(); showAutoStates(3500); return; }
+      if (id === 'furn') {
+        // Мебель по кругу: без мебели → пуф → стеклянный стул → стеклянный стол → трон. То же — свайпом по нижней полоске.
+        switchFurn(1);
+        showAutoStates(3500);
+        return;
+      }
+      if (id === 'stance') {
+        // Стойка по кругу: как сейчас → ступни шире → широко → одна нога вперёд.
+        stanceIdx = (stanceIdx + 1) % STANCES.length;
+        try { localStorage.setItem('waifu-stance', String(stanceIdx)); } catch { /* ignore */ }
+        applyStance();
+        showToast(STANCES[stanceIdx].name);
+        showAutoStates(3500);
+        return;
+      }
+      if (id === 'pts') {
+        // Сброс выставленных точек (руки, ноги, таз, корпус, голова) и их повторов. Посадка, наклон и камера остаются.
+        const o = character.bodyOffset, keep = { hipsRotX: o.hipsRotX, spineX: o.spineX };
+        grabDone(true); grabLoopsClear();
+        try { character.importTouchPose(null); } catch { /* ignore */ }
+        Object.assign(character.bodyOffset, keep);
+        showToast('↺ Точки сброшены');
+        renderAutoStates(); showAutoStates(1500);
+        return;
+      }
+      if (id === 'home') {
+        // Домик, как в ручном виде: камера спереди, она встаёт ровно; сон, «замри» и повтор снимаются.
+        // Первый тап — сбрасывает её (позу, точки, повторы), камера остаётся как стоит. Второй — возвращает камеру.
+        // «Трогал» — значит сам её двигал, усаживал, выставлял точки, включал повтор или состояние (а не она сама качнулась).
+        const dirty = userPosed || reps.home.on || grabLoops.length || autoState !== 'live' || camOnly;
+        userPosed = false;
+        camOnly = false; setAutoState('live');
+        if (dirty) { autoReturn(true); showToast('🏠 Сбросила позу. Ещё тап — вернуть камеру'); showAutoStates(3500); }
+        else { autoReturn(); autoCentered = false; showAutoStates(900); }
+        return;
+      }
+      if (id === 'lie') {
+        // Поза сна по кругу: на бок → на живот → на спину. Если уже лежит — перекладывается.
+        lieMode = { side: 'belly', belly: 'back', back: 'side', off: 'side' }[lieMode];
+        if (!unlocked('lieStyles')) lieMode = 'belly';
+        try { localStorage.setItem('waifu-lie', lieMode); } catch { /* ignore */ }
+        renderLieToggle();
+        showToast({ side: '🛏 Ляжет на бок', belly: '🛏 Ляжет на живот', back: '🛏 Ляжет на спину' }[lieMode]);
+        showAutoStates(3500);
+        return;
+      }
+      showAutoStates(1300); // выбрал — значки скоро спрячутся
+      if (id === 'rep') {
+        repOffer = !repOffer;
+        try { localStorage.setItem('waifu-repoffer', repOffer ? '1' : '0'); } catch { /* ignore */ }
+        if (!repOffer) { if (reps.home.on) setRepeat(false, true); autoRec = null; autoRepOffer = null; renderAutoRep(); }
+        renderAutoStates();
+        showToast(repOffer ? '🔁 Повтор включён: подвигай её — предложит повторить' : '🔁 Повтор выключен');
+        return;
+      }
+      if (id === 'cam') { camOnly = !camOnly; renderAutoStates(); showToast(camOnly ? '🎥 Палец крутит камеру — её не задеваешь' : '👆 Снова можно гладить'); return; }
+      if (id === 'freeze') {
+        // 1-й тап — сама не двигается (записанный повтор идёт). 2-й — повтор замирает в той позе, где застал.
+        // 3-й — снова живая, повтор продолжается.
+        const repOn = reps.home.on && reps.home.state === 'play';
+        setAutoState(autoState === 'freeze' ? (repOn ? 'hold' : 'live') : autoState === 'hold' ? 'live' : 'freeze');
+        showToast({ freeze: repOn ? '🤫 Замерла — повтор идёт. Ещё тап — остановить' : '🤫 Замерла — можно гладить', hold: '⏸ Остановилась в этой позе', live: '🧍 Снова живая' }[autoState]);
+        showAutoStates(2600);
+        return;
+      }
+      setAutoState(autoState === id ? 'live' : id); // повторный тап — снова живая
+    });
+    autoStates.appendChild(b);
+  }
+}
+// Значки появляются по долгому тапу по ней и сами прячутся.
+let autoStatesTimer = 0;
+function showAutoStates(ms = 4500) {
+  renderAutoStates();
+  autoStates.classList.add('show');
+  clearTimeout(autoStatesTimer);
+  autoStatesTimer = setTimeout(() => autoStates.classList.remove('show'), ms);
+}
+{
+  let lp = null, held = null, downState = null;
+  const cancel = () => { if (lp) { clearTimeout(lp.t); lp = null; } };
+  grabHeldFn = () => !!held;
+  window.addEventListener('pointerdown', (e) => {
+    if (!e.isPrimary && (lp || held)) return; // второй палец зажим первого не сбивает
+    cancel();
+    if (!autoMode || e.target !== canvas || touches.size > 1) return;
+    // Чистый экран и режим «Камера»: долгий тап в любом месте (по ней можно и не попасть) — значки возвращаются.
+    const clean = document.body.classList.contains('cleanscreen');
+    if (!clean && !camOnly && !zoneAt(e, true)) return;
+    const e0 = { clientX: e.clientX, clientY: e.clientY };
+    downState = character ? { sit: character.sit, rot: character.bodyOffset.hipsRotX } : null; // что было до касания — чтобы отменить свайп, если это окажется взятием точки
+    // Только что водил её за точку — для следующего взятия хватит короткой задержки (0.2 с вместо 0.5), значки при
+    // этом не всплывают. Сразу повёл палец — это обычный свайп (сесть, лечь, наклон), точка НЕ хватается.
+    const quick = !clean && !camOnly && performance.now() - lastGrabAt < 9000;
+    // Только что вёл эту же точку и снова взялся прямо за неё — берётся сразу, без задержки (елозишь тазом раз за разом).
+    if (quick && lastGrabKey && grabPick(e, 48)?.key === lastGrabKey) {
+      held = { e0, x: e0.clientX, y: e0.clientY };
+      // Держишь палец на месте — значки меню всё равно появляются.
+      lp = { x: e.clientX, y: e.clientY, tol: 12, t: setTimeout(() => { lp = null; showAutoStates(); }, 480) };
+      return;
+    }
+    lp = { x: e.clientX, y: e.clientY, tol: quick ? 34 : 14, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
+  }, { capture: true, passive: true });
+  window.addEventListener('pointermove', (e) => {
+    if (!e.isPrimary) return; // второй палец (камера) зажим и взятие точки не трогает
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > lp.tol) cancel();
+    // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
+    if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
+      const h = held; held = null;
+      // Второй палец уже лежит на экране (ладонь, большой палец) — он становится пальцем камеры и взятию не мешает.
+      if (touches.size === 2 && camPid == null) { const other = [...touches.keys()].find((id) => id !== e.pointerId); if (other != null) { camPid = other; camLast = { ...touches.get(other) }; pinchDist = 0; twoTap = null; } }
+      const nTouch = touches.size - (camPid != null ? 1 : 0); // палец камеры не в счёт
+      // Берёшь точку — отменяем то, что за эти доли секунды успел сделать обычный свайп (присела, наклонилась):
+      // иначе одно движение пальца срабатывало дважды — и как свайп, и как точка.
+      if (downState && nTouch === 1 && character) {
+        if (Math.abs(character.sit - downState.sit) > 0.002) { character.sit = downState.sit; character.sitRate = 3; }
+        if (Math.abs(character.bodyOffset.hipsRotX - downState.rot) > 0.002) character.bodyOffset.hipsRotX = downState.rot;
+      }
+      const n = nTouch, ok = n === 1 && grabStart(h.e0);
+      if (ok) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
+      diag(ok ? 'взято: ' + (lastGrabKey ?? activeHandle ?? '?') : 'не взято: ' + (n !== 1 ? 'пальцев ' + n : poseMode ? 'режим позы' : grabWhy));
+    }
+  }, { capture: true, passive: true });
+  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, (e) => { if (!e.isPrimary && (lp || held)) return; held = null; cancel(); }, { capture: true, passive: true });
+}
+function setAutoState(st) {
+  autoState = st;
+  if (!character) return;
+  character.forceSleep = st === 'sleep';
+  character.frozen = st === 'freeze' || st === 'hold';
+  reps.home.hold = st === 'hold';
+  if (st !== 'live') stopAuto(true);
+  if (st === 'sleep') {
+    if (reps.home.on) { setRepeat(false, true); renderAutoRep(); }
+    autoBendTarget = 0;
+    character.sitRate = 1;
+    if (character.sit < sitMax() - 0.02) sitBy((sitMax() - character.sit) / 0.004);
+  } else if (st === 'live') character.wake?.(1);
+  renderAutoStates();
+}
+function setCleanScreen(on) {
+  document.body.classList.toggle('cleanscreen', on);
+  if (on) { autoMenu.hidden = true; autoHint.hidden = true; showToast('Чистый экран. Долгий тап — вернуть кнопки'); }
+}
+// Меню ☰: всё, что раньше было кнопками на экране, — в одном месте.
+const autoMenu = document.createElement('div');
+autoMenu.id = 'auto-menu';
+autoMenu.hidden = true;
+document.body.appendChild(autoMenu);
+for (const ev of ['pointerdown', 'touchstart']) autoMenu.addEventListener(ev, (e) => e.stopPropagation());
+// ✨ Блики на облегающей ткани (лосины, кофточки): можно выключить в меню.
+let skinSheen = true;
+try { skinSheen = localStorage.getItem('waifu-sheen-skin') !== '0'; } catch { /* ignore */ }
+setSkinSheenOn(skinSheen);
+let stockSheen = true;
+try { stockSheen = localStorage.getItem('waifu-sheen-legs') !== '0'; } catch { /* ignore */ }
+setStockSheen(stockSheen);
+let sheenOn = true;
+try { sheenOn = localStorage.getItem('waifu-sheen') !== '0'; } catch { /* ignore */ }
+setSheenOn(sheenOn);
+// Меню закрывается плавно (сворачивается в свою кнопку), а не исчезает рывком.
+function closeAutoMenu() {
+  if (autoMenu.hidden || autoMenu.classList.contains('closing')) return;
+  autoMenu.classList.add('closing');
+  setTimeout(() => { autoMenu.classList.remove('closing'); autoMenu.hidden = true; }, 150);
+}
+function renderAutoMenu() {
+  const items = [
+    ['👗', 'Гардероб', () => $('btn-wardrobe').click()],
+    ['🎵', 'Анимации и танцы', () => $('btn-anims').click()],
+    ['📷', 'Фото', () => $('cam-photo').click()],
+    [$('btn-voice').classList.contains('off') ? '🔇' : '🔊', $('btn-voice').classList.contains('off') ? 'Звук: выкл' : 'Звук: вкл', () => $('btn-voice').click(), true],
+    ['✨', sheenOn ? 'Блики на ткани: вкл' : 'Блики на ткани: выкл', () => { sheenOn = !sheenOn; try { localStorage.setItem('waifu-sheen', sheenOn ? '1' : '0'); } catch { /* ignore */ } setSheenOn(sheenOn); }, true],
+    ['🌟', skinSheen ? 'Блики на коже: вкл' : 'Блики на коже: выкл', () => { skinSheen = !skinSheen; try { localStorage.setItem('waifu-sheen-skin', skinSheen ? '1' : '0'); } catch { /* ignore */ } setSkinSheenOn(skinSheen); }, true],
+    // «Взгляд» и «домой» — в значках по долгому тапу на ней; в ручном виде возврат оставляем здесь.
+    ...(autoMode ? [] : [['↩️', 'Вернуть как было', () => resetView()]]),
+    autoMode ? ['🎛', 'Ручное управление: полосы, позы, точки', () => setAutoMode(false)] : ['✨', 'Простой вид (жесты)', () => setAutoMode(true)],
+  ];
+  // В ручном виде выход в простой — первым пунктом, чтобы не искать.
+  if (!autoMode) items.unshift(items.pop());
+  autoMenu.innerHTML = '';
+  for (const [icon, name, fn, stay] of items) {
+    const b = document.createElement('button');
+    b.innerHTML = `<i>${icon}</i><span>${name}</span>`;
+    b.addEventListener('click', (e) => { e.stopPropagation(); fn(); if (stay) renderAutoMenu(); else closeAutoMenu(); });
+    autoMenu.appendChild(b);
+  }
+  // Номер сборки — чтобы было видно, какая версия стоит.
+  const ver = document.createElement('small');
+  ver.textContent = `сборка ${WAIFU_BUILD}`;
+  ver.style.cssText = 'text-align:center;opacity:0.55;font-size:11px;padding-top:2px';
+  autoMenu.appendChild(ver);
+}
+autoExit.addEventListener('click', (e) => { e.stopPropagation(); autoHint.hidden = true; if (autoMenu.hidden) { renderAutoMenu(); autoMenu.classList.remove('closing'); autoMenu.hidden = false; } else closeAutoMenu(); });
+window.addEventListener('pointerdown', (e) => { if (!autoMenu.hidden && e.target !== autoExit && !autoMenu.contains(e.target)) closeAutoMenu(); }, { capture: true, passive: true });
+// ---------- «Авто»: подвигал её туда-сюда — всплывает «Повторить?» ----------
+// Запоминаем, как ты её двигал (наклон/прогиб, сесть/встать). Отпустил — 6 секунд висит кнопка:
+// нажал — она сама повторяет это движение по кругу, пока не нажмёшь «Стоп» или не возьмёшься двигать снова.
+let autoRec = null;
+let autoRepOffer = null;
+let autoRepTimer = 0;
+const autoRepBtn = document.createElement('button');
+autoRepBtn.id = 'auto-rep';
+autoRepBtn.hidden = true;
+document.body.appendChild(autoRepBtn);
+for (const ev of ['pointerdown', 'touchstart']) autoRepBtn.addEventListener(ev, (e) => e.stopPropagation());
+const camEase = { yaw: 0, pitch: 0 }; // сколько камере ещё довернуться
+let autoBendTarget = null; // куда палец ведёт наклон; тело догоняет плавно
+let autoLayer = null; // второй слой повтора: { kind: 'bend' | 'sit', S: [[t, v]…], dur, t }
+let autoLayerDrag = null; // сейчас рукой ведём второй слой ('bend' | 'sit')
+let autoDragAt = 0;
+let repOffDiagAt = 0;
+function autoRecNote() {
+  if (!repOffer) { const t = performance.now(); if (t - repOffDiagAt > 6000) { repOffDiagAt = t; diag('повтор выключен — значок 🔁 в меню'); } return; }
+  const now = performance.now();
+  if (!autoRec || now - autoRec.last > 1600) autoRec = { start: now, samples: [], layerKind: reps.home.on ? autoLayerDrag : null };
+  autoRec.last = now;
+  autoRec.samples.push({ t: (now - autoRec.start) / 1000, ...nowPose() });
+}
+// Каждый кадр: наклон плавно идёт к цели, движение пишется ровно (по кадрам, а не по касаниям),
+// плашка «Повторить» держится рядом с её головой и двигается вместе с ней.
+let autoLoopT = performance.now();
+(function autoLoop() {
+  requestAnimationFrame(autoLoop);
+  const now = performance.now(), dt = Math.min(0.05, (now - autoLoopT) / 1000);
+  autoLoopT = now;
+  if (!character) return;
+  if (autoBendTarget != null) {
+    const o = character.bodyOffset;
+    if (!autoMode || poseMode || (reps.home.on && autoLayerDrag !== 'bend')) autoBendTarget = null;
+    else if (reps.home.on) {
+      // второй слой: наклон ведём поверх идущего повтора приседаний
+      const r = reps.home;
+      r.layerBend = (r.layerBend ?? o.hipsRotX) + (autoBendTarget - (r.layerBend ?? o.hipsRotX)) * (1 - Math.exp(-dt * 11));
+      if (!poseDrag) autoBendTarget = null;
+    } else {
+      o.hipsRotX += (autoBendTarget - o.hipsRotX) * (1 - Math.exp(-dt * (poseDrag ? 11 : 3.5))); // за пальцем — плотно, сама — неспешно
+      o.spineX = bendSpine(o.hipsRotX);
+      if (!poseDrag && Math.abs(autoBendTarget - o.hipsRotX) < 0.004) autoBendTarget = null;
+    }
+  }
+  // Пишем, пока она выполняет команды (садится/встаёт, наклоняется) — ровно, по кадрам.
+  if (autoMode && (!reps.home.on || autoLayerDrag) && now - autoDragAt < 300) autoRecNote();
+  // Отпустил — сдвиг от руки плавно уходит, и она возвращается ровно к записанному повтору.
+  if (autoMode && reps.home.on && !(poseDrag?.shift)) {
+    const k = Math.exp(-dt * 2.2), r = reps.home;
+    if (r.bendOff) r.bendOff = Math.abs(r.bendOff) < 0.004 ? 0 : r.bendOff * k;
+    if (r.sitOff) r.sitOff = Math.abs(r.sitOff) < 0.004 ? 0 : r.sitOff * k;
+    if (autoLayer?.off) autoLayer.off = Math.abs(autoLayer.off) < 0.004 ? 0 : autoLayer.off * k;
+  }
+  // Второй слой повтора играет вместе с основным (туда-обратно, плавно).
+  if (!reps.home.on) { autoLayer = null; autoLayerDrag = null; reps.home.layerBend = null; }
+  else if (autoLayer && reps.home.state === 'play' && !reps.home.hold && !(poseDrag?.auto && autoLayerDrag === autoLayer.kind)) {
+    const L = autoLayer;
+    L.t = (L.t + dt) % (L.dur * 2);
+    const tri = L.t < L.dur ? L.t / L.dur : 2 - L.t / L.dur;
+    const u = (0.5 - 0.5 * Math.cos(Math.PI * tri)) * L.dur;
+    let i = 0; while (i < L.S.length - 2 && L.S[i + 1][0] < u) i++;
+    const a = L.S[i], b = L.S[i + 1], k = THREE.MathUtils.clamp((u - a[0]) / Math.max(1e-4, b[0] - a[0]), 0, 1), v = a[1] + (b[1] - a[1]) * k + (L.off ?? 0);
+    if (L.kind === 'bend') reps.home.layerBend = THREE.MathUtils.clamp(v, BEND_MIN, BEND_MAX);
+    else { reps.home.sitFree = true; character.sit = THREE.MathUtils.clamp(v, 0, sitMax()); character.sitRate = Math.max(character.sitRate, 1.2); character.slideHold = 3; }
+  }
+  // Камера: палец задаёт поворот, камера доезжает плавно и чуть «докатывается».
+  if (Math.abs(camEase.yaw) + Math.abs(camEase.pitch) > 1e-5) {
+    const a = 1 - Math.exp(-dt * 13);
+    rotateBy(camEase.yaw * a, camEase.pitch * a);
+    camEase.yaw *= 1 - a; camEase.pitch *= 1 - a;
+  }
+  autoRepCheck(now);
+  autoLife(now);
+  // Пока ты её двигаешь, гладишь или идёт повтор — она не засыпает (иначе во сне тело «обмякает»
+  // и наклон/прогиб лёжа почти не действует); взялся вести спящую — просыпается.
+  if (autoMode && (pointerActive || reps.home.on || now - lastOnHerAt < 9000)) {
+    character.lieT = 0;
+    if (poseDrag?.auto && character.sleep > 0.05 && autoState !== 'sleep') character.wake?.(4);
+  }
+  // Просьба-желание держится рядом с ней (слева от головы) и двигается вместе с ней.
+  if (!wishEl.hidden && character.bones?.head) {
+    const p = screenOf(character.bones.head, 0.02);
+    const w = wishEl.offsetWidth || 180;
+    wishEl.style.left = `${THREE.MathUtils.clamp(p.x - 40 - w / 2, w / 2 + 8, window.innerWidth - w / 2 - 8).toFixed(1)}px`;
+    wishEl.style.top = `${THREE.MathUtils.clamp(p.y + 46, 110, window.innerHeight - 90).toFixed(1)}px`;
+  }
+  if (!autoRepBtn.hidden && character.bones?.head) {
+    const v = character.bones.head.getWorldPosition(new THREE.Vector3());
+    v.y += 0.2 * (character.scale ?? 1);
+    v.project(camera);
+    const x = THREE.MathUtils.clamp((v.x * 0.5 + 0.5) * window.innerWidth + 78, 70, window.innerWidth - 70);
+    const y = THREE.MathUtils.clamp((-v.y * 0.5 + 0.5) * window.innerHeight, 90, window.innerHeight - 60);
+    autoRepBtn.style.left = `${x.toFixed(1)}px`;
+    autoRepBtn.style.top = `${y.toFixed(1)}px`;
+  }
+  // «✕ точки» — там же, у головы; если видна и «✕ отмена», встаёт под ней.
+  // Свечение на той части тела, которую ведёшь за точку: мягкое пятно света без контура, идёт вместе с ней.
+  {
+    const key = poseDrag?.grab ? lastGrabKey : null;
+    let shown = false;
+    if (key) {
+      const w = handleWorld(key);
+      if (w) {
+        grabGlowV.copy(w).project(camera);
+        if (grabGlowV.z < 1) {
+          const d = camera.position.distanceTo(w), sz = THREE.MathUtils.clamp(330 / Math.max(0.4, d), 120, 280);
+          grabGlow.style.width = grabGlow.style.height = `${sz.toFixed(0)}px`;
+          grabGlow.style.transform = `translate(${((grabGlowV.x * 0.5 + 0.5) * window.innerWidth - sz / 2).toFixed(1)}px, ${((-grabGlowV.y * 0.5 + 0.5) * window.innerHeight - sz / 2).toFixed(1)}px)`;
+          shown = true;
+        }
+      }
+    }
+    grabGlow.style.opacity = shown ? '1' : '0';
+  }
+  if (grabStop.style.display !== 'none' && character.bones?.head) {
+    const v = character.bones.head.getWorldPosition(new THREE.Vector3());
+    v.y += 0.2 * (character.scale ?? 1);
+    v.project(camera);
+    const x = THREE.MathUtils.clamp((v.x * 0.5 + 0.5) * window.innerWidth + 78, 70, window.innerWidth - 70);
+    const y = THREE.MathUtils.clamp((-v.y * 0.5 + 0.5) * window.innerHeight + (autoRepBtn.hidden ? 0 : 38), 90, window.innerHeight - 60);
+    grabStop.style.left = `${x.toFixed(1)}px`;
+    grabStop.style.top = `${y.toFixed(1)}px`;
+  }
+})();
+function renderAutoRep() {
+  const playing = autoMode && reps.home.on && reps.home.state === 'play';
+  autoRepBtn.hidden = !(autoMode && (playing || autoRepOffer));
+  const offer = !!autoRepOffer;
+  autoRepBtn.classList.toggle('active', playing && !offer);
+  autoRepBtn.classList.toggle('offer', offer);
+  autoRepBtn.textContent = offer ? (playing ? '🔁 + Повторить и это' : '🔁 Повторить') : '✕ отмена';
+}
+// Живые мелочи: во сне над головой плывут 💤, проснулась сама — зевает; на повторе — искорки и фразы;
+// глубокий наклон или прогиб — комментирует.
+const screenOf = (bone, up = 0) => {
+  const v = bone.getWorldPosition(new THREE.Vector3());
+  v.y += up * (character.scale ?? 1);
+  v.project(camera);
+  return { x: (v.x * 0.5 + 0.5) * window.innerWidth, y: (-v.y * 0.5 + 0.5) * window.innerHeight, ok: v.z < 1 };
+};
+const life = { zzz: 0, asleep: false, spark: 0, line: 0, bendSaid: 0, bendZone: 0 };
+function autoLife(now) {
+  const head = character.bones?.head;
+  if (!head) return;
+  const sl = character.sleep ?? 0;
+  if (sl > 0.8) {
+    life.asleep = true;
+    if (now - life.zzz > 1500) {
+      life.zzz = now;
+      const p = screenOf(head, 0.16);
+      if (p.ok) fxParticle(p.x + 14, p.y - 6, Math.random() < 0.35 ? '💤' : Math.random() < 0.5 ? 'z' : 'Z',
+        { dx: 22 + Math.random() * 26, dy: -64 - Math.random() * 36, size: 18 + Math.random() * 14, color: '#ffffff', dur: 2.8, rot: 14 });
+    }
+  } else if (life.asleep && sl < 0.3) {
+    life.asleep = false;
+    // Проснулась сама (не от касания) — сонно зевает.
+    if (!pointerActive && now - lastOnHerAt > 1500) {
+      character.setExpression('relaxed', 0.6, 2.6);
+      say(pick(['Ммм… я задремала~ 🥱', '*зевает* Доброе утро…', 'Ой… я уснула? 😳', 'Так сладко спалось~']));
+    }
+  }
+  // Повтор в «Авто»: искорки в такт и редкие довольные фразы.
+  if (autoMode && reps.home.on && reps.home.state === 'play') {
+    const chest = character.bones.chest ?? character.bones.spine ?? head;
+    if (now - life.spark > 2200) {
+      life.spark = now;
+      const p = screenOf(chest);
+      if (p.ok) fxSpark(p.x + (Math.random() - 0.5) * 90, p.y + (Math.random() - 0.5) * 70, 2);
+    }
+    if (now - life.line > 11000 && sl < 0.3) {
+      if (life.line) { character.setExpression('happy', 0.6, 2.2); say(pick(['Ещё? ♥', 'Не устану~', 'Хи, мне нравится~', 'Смотришь? 😏', 'Вот так… да~', 'Долго так могу ♥'])); }
+      life.line = now;
+    }
+  } else life.line = 0;
+  // Ведёшь наклон: дошёл до глубокого наклона или сильного прогиба — отзывается (не чаще раза в 7 с).
+  if (autoMode && autoBendTarget != null && poseDrag) {
+    const b = character.bodyOffset.hipsRotX;
+    const zone = b > 1.15 ? 1 : b < -0.55 ? -1 : Math.abs(b) < 0.4 ? 0 : life.bendZone;
+    if (zone !== life.bendZone) {
+      life.bendZone = zone;
+      if (zone && now - life.bendSaid > 7000) {
+        life.bendSaid = now;
+        character.setExpression(zone > 0 ? 'happy' : 'relaxed', 0.5, 2);
+        say(pick(zone > 0 ? ['Ой, так низко~', 'Растяжка! Хи~', 'Смотри, какая я гибкая ♥', 'Уф… достала до пола!']
+          : ['Ух, потянулась~', 'Спинка хрустнула… хи', 'Так красиво? ♥', 'Ммм, как хорошо тянется~']));
+      }
+    }
+  }
+}
+// Двойной тап по фону в «Авто»: всё плавно возвращается как было — она встаёт и выпрямляется,
+// камера снова «приклеена» к ней в обычном виде спереди.
+function autoReturn(keepCam = false) {
+  if (reps.home.on) { setRepeat(false, true); }
+  autoRec = null; autoRepOffer = null; renderAutoRep();
+  stopAuto(true);
+  camEase.yaw = 0; camEase.pitch = 0;
+  character.wake?.(2);
+  character.sitRate = 1;
+  if (character.sit > 0.01) sitBy(-character.sit / 0.004);
+  autoBendTarget = 0;
+  grabDone(true); grabLoopsClear(); try { character.importTouchPose(null); } catch { /* ignore */ }
+  if (!keepCam) resetView();
+}
+// Свайп-команда в «Авто». dir: +1 — вниз, −1 — вверх.
+// По груди/плечам/лицу — наклон вперёд ↔ прогиб назад (по ступенькам); по животу и ногам — ниже ↔ выше
+// (стоит → присела → на коленях → сидит → лежит). Движение делает она сама — плавно, без рывков.
+const AUTO_BENDS = [-0.65, 0, 0.75, 1.45];
+let autoSwipes = [];
+function autoSwipe(upper, dir) {
+  if (reps.home.on) { setRepeat(false, true); renderAutoRep(); } // идёт повтор — уступает новой команде
+  stopAuto(true);
+  lastOnHerAt = performance.now();
+  autoSwipes.push(lastOnHerAt);
+  autoRecNote();
+  if (upper) {
+    const cur = autoBendTarget ?? character.bodyOffset.hipsRotX;
+    const next = dir > 0 ? AUTO_BENDS.find((v) => v > cur + 0.12) : [...AUTO_BENDS].reverse().find((v) => v < cur - 0.12);
+    if (next == null) { showLabel(dir > 0 ? 'Ниже некуда~' : 'Дальше не гнётся~'); return; }
+    autoBendTarget = next;
+    character.effortT = 0.5;
+    showLabel(next > 0.05 ? 'Наклон вперёд' : next < -0.05 ? 'Прогиб назад' : 'Прямо');
+    return;
+  }
+  const marks = [0, 0.5, 0.8, 1.0, 1.3].filter((m) => m <= sitMax() + 1e-6);
+  const cur = character.sit;
+  const next = dir > 0 ? marks.find((v) => v > cur + 0.06) : [...marks].reverse().find((v) => v < cur - 0.06);
+  if (next == null) { showLabel(dir > 0 ? 'Уже лежит~' : 'Уже стоит~'); return; }
+  character.sitRate = 1.1;
+  character.effortT = 0.5;
+  sitBy((next - cur) / 0.004);
+  showLabel(['Встала', 'Присела', 'На коленях', 'Села', 'Легла'][[0, 0.5, 0.8, 1.0, 1.3].indexOf(next)] ?? '');
+}
+// Сделал подряд пару свайпов (подвигал её туда-сюда) — когда она закончит, предложим повторить.
+// Движение рукой поверх повтора не приняли — возвращаем прежний повтор этого движения.
+function autoLayerRestore() {
+  const r = reps.home;
+  if (!r.on) return;
+  if (autoLayer?.kind !== 'bend') r.layerBend = null;
+  if (autoLayer?.kind !== 'sit' && r.sitMoved !== false) r.sitFree = false;
+  autoLayerDrag = null;
+}
+function autoRepCheck(now) {
+  if (!autoMode || !autoRec || (reps.home.on && !autoRec.layerKind) || pointerActive || now - autoRec.last < 500) return;
+  const rec = autoRec;
+  autoRec = null;
+  const n = autoSwipes.filter((t) => t >= rec.start - 50).length;
+  autoSwipes = [];
+  const S = rec.samples;
+  const no = (why) => { if (why) diag('повтор не предложен: ' + why); if (rec.layerKind) autoLayerRestore(); };
+  if ((rec.turns ?? 0) < 1 && n < 2) return no(S.length > 20 ? 'нужно туда-обратно' : '');
+  if (S.length < 8) return no('');
+  const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
+  // Предлагаем повторить, только если водил её хотя бы 3 секунды — на короткие движения не всплывает.
+  // Предлагаем повторить, если водил её хотя бы 2 секунды (раньше — 3: короткие «туда-сюда» не засчитывались).
+  { const dur = S[S.length - 1].t, small = rec.layerKind ? rng(rec.layerKind) < (rec.layerKind === 'bend' ? 0.25 : 0.12) : (rng('bend') < 0.25 && rng('sit') < 0.12);
+    if (dur < 2) return no('коротко — ' + dur.toFixed(1) + ' с, нужно 2');
+    if (small) return no('маленький размах'); }
+  autoRepOffer = rec;
+  renderAutoRep();
+  try { navigator.vibrate?.(12); } catch { /* ignore */ }
+  clearTimeout(autoRepTimer);
+  autoRepTimer = setTimeout(() => { if (autoRepOffer?.layerKind) autoLayerRestore(); autoRepOffer = null; renderAutoRep(); }, 6000);
+}
+autoRepBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const r = reps.home;
+  // Идёт повтор и предложено второе движение — добавляем его слоем, первое не трогаем.
+  if (r.on && autoRepOffer?.layerKind) {
+    const rec2 = autoRepOffer, kd = rec2.layerKind;
+    autoRepOffer = null; clearTimeout(autoRepTimer);
+    autoLayer = { kind: kd, S: rec2.samples.map((x) => [x.t, kd === 'bend' ? (x.layerBend ?? x.bend) : x.sit]), dur: rec2.samples[rec2.samples.length - 1].t, t: 0 };
+    autoLayer.t = autoLayer.dur; // с того места, где отпустил
+    autoLayerDrag = null;
+    if (kd === 'sit') r.sitFree = true;
+    renderAutoRep();
+    say(pick(['И это тоже? Хи~', 'Сразу оба? Легко ♥', 'Запомнила и это~']), 'happy');
+    return;
+  }
+  if (r.on) { setRepeat(false, true); autoLayer = null; autoRepOffer = null; renderAutoRep(); return; }
+  const rec = autoRepOffer;
+  if (!rec) return;
+  autoRepOffer = null;
+  clearTimeout(autoRepTimer);
+  stopAuto(true);
+  Object.assign(r, { on: true, state: 'play', samples: rec.samples, dur: rec.samples[rec.samples.length - 1].t, blendFrom: null,
+    ptsTrack: null, ptsRec: null, sitFree: false, bendOff: 0, sitOff: 0, midFor: null, life: 0 });
+  r.t = r.dur;
+  r.movedPts = movedPoints(r.samples);
+  r.sitMoved = sitMovedIn(r.samples);
+  { // какое это движение: наклон, приседание или оба сразу (для второго слоя)
+    const S = rec.samples, rg = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
+    r.autoKind = rg('sit') > 0.12 ? (rg('bend') > 0.25 ? 'both' : 'sit') : 'bend';
+    r.layerBend = null; autoLayer = null; autoLayerDrag = null;
+  }
+  renderRep();
+  renderAutoRep();
+  character.react({ expression: 'happy' });
+  say(pick(['Вот так? Хи~', 'Запомнила! Смотри~', 'Повторяю ♥', 'Так нравится?~']), 'happy');
+});
+window.addEventListener('pointerdown', () => { autoTouchAt = performance.now(); }, { capture: true, passive: true });
+const AUTO_CAM_SWAY = false;
+// Камера плавно покачивается вокруг неё, пока её не трогают (и ещё 3 секунды после).
+function updateAutoCam(dt) {
+  // Покачивание выключено: камера стоит ровно там, где её оставил, и сама никуда не уезжает. Живость теперь
+  // даёт она сама (шаги, повороты), а не камера.
+  if (AUTO_CAM_SWAY === false) return;
+  if (!autoMode || !character || pointerActive || freeCam || faceCam) return;
+  if (document.querySelector('.panel:not(.hidden)')) return; // открыто меню — камера стоит спокойно
+  if (performance.now() - autoTouchAt < 3000) return;
+  autoPhase += dt * 0.16;
+  // Покачивание включается мягко (без рывка после касания).
+  const swayK = THREE.MathUtils.smoothstep(performance.now() - autoTouchAt, 3000, 8000);
+  camYaw = (camYaw + Math.cos(autoPhase) * 0.04 * dt * swayK) % (Math.PI * 2);
+  applyOrbit();
+}
+// ---------- Живые моменты ----------
+// Когда её не трогают, она не просто говорит фразу, а «живёт»: смеётся, дуется, потягивается,
+// поправляет волосы, смущается… Эмоция + движение + реплика. Не повторяется подряд.
+const EMOTES = [
+  { id: 'giggle', expr: ['happy', 0.75, 2.4], motion: 'bounce', lines: ['Хи-хи~', 'Ахах, вспомнила смешное~', 'Хи, ты забавный!'] },
+  { id: 'stretch', expr: ['relaxed', 0.6, 3], motion: 'stretch', lines: ['*потягивается* Ммм~', 'Ох, затекла спинка…', 'Ааах~ хорошо!'] },
+  { id: 'hair', expr: ['relaxed', 0.4, 3], motion: 'touchHair', lines: ['Причёска не растрепалась?', 'Волосы лезут в глаза~', 'Как я выгляжу?'] },
+  { id: 'pout', expr: ['angry', 0.4, 2.6], motion: 'turnAway', lines: ['Хмф… обрати на меня внимание!', 'Ну и ладно. Не трогай тогда.', 'Скучно без тебя…'], minTier: 1 },
+  { id: 'shy', expr: ['relaxed', 0.55, 2.8], motion: 'clasp', lines: ['Чего ты так смотришь?.. 😳', 'Не смотри так, я смущаюсь~', 'Хи… что?'] },
+  { id: 'look', expr: ['surprised', 0.3, 1.6], motion: 'lookAround', lines: ['Хм? Показалось…', 'Ты слышал?', 'А? Что там?'] },
+  { id: 'nails', expr: ['relaxed', 0.35, 3], motion: 'nails', lines: ['Надо бы маникюр обновить~', 'Хм… этот цвет мне идёт?', '*рассматривает ногти*'] },
+  { id: 'sigh', expr: ['sad', 0.35, 2.4], motion: 'sigh', lines: ['Эх…', 'О чём бы помечтать~', 'Тихо сегодня…'] },
+  { id: 'wink', expr: ['happy', 0.5, 1.6], wink: true, motion: 'tiltHead', lines: ['Хи~ 😉', 'Я тебя вижу~', 'Поймал мой взгляд?'], minTier: 1 },
+  { id: 'hip', expr: ['happy', 0.4, 3.5], motion: 'handOnHip', lines: ['Ну что, чем займёмся?', 'Я готова к приключениям!', 'Придумай что-нибудь~'] },
+  { id: 'love', expr: ['happy', 0.8, 3], motion: 'sway', lines: ['С тобой так хорошо ♥', 'Я рада, что ты рядом~', 'Останься подольше, ладно? ♥'], minTier: 2 },
+];
+let emoteLast = null;
+function idleEmote() {
+  const t = tier();
+  const opts = EMOTES.filter((e) => e.id !== emoteLast && (e.minTier ?? 0) <= t);
+  const e = opts[Math.floor(Math.random() * opts.length)];
+  emoteLast = e.id;
+  character.setExpression(e.expr[0], e.expr[1], e.expr[2]);
+  // Поза выставлена руками, идёт повтор или танец — без движений тела, только лицо и слова.
+  // Лежит — тоже без жестов телом: лёжа они её перегибают и дёргают.
+  const busy = poseMode || character.mixer || curRep().on || character.sitS > 0.95;
+  if (!busy) character.playMotion(e.motion);
+  if (e.wink) character.wink();
+  say(pick(e.lines));
+}
+// ---------- Желания ----------
+// Раз в пару минут она сама чего-то хочет. Выполнил — радуется и даёт бонус симпатии;
+// не успел — слегка дуется (без штрафа). Просит только то, что уже открыто.
+const WISHES = [
+  { id: 'headpat', need: 3, text: 'Погладь меня по голове', hint: 'Проведи пальцем по её макушке',
+    ask: ['Погладишь меня по голове?..', 'Хочу, чтобы меня погладили~', 'Мне бы сейчас немного ласки…'] },
+  { id: 'hair', need: 2, text: 'Поиграй с моими волосами', hint: 'Проведи пальцем по хвостикам',
+    ask: ['Поиграешь с моими волосами?', 'Потрогай хвостики, они мягкие~', 'Хочу, чтобы ты погладил мои волосы…'] },
+  { id: 'hand', need: 1, text: 'Возьми меня за руку', hint: 'Коснись её ладони',
+    ask: ['Возьмёшь меня за руку?', 'Дай руку… пожалуйста~', 'Хочу подержаться за руки ♥'] },
+  { id: 'sit', text: 'Давай присядем', hint: 'Потяни левый ползунок вниз', hintA: 'Веди пальцем вниз по её ногам или животу',
+    ok: () => character.sitS < 0.15, check: () => character.sitS > 0.35,
+    ask: ['Давай присядем?', 'Ножки устали… присядем?', 'Хочу присесть на минутку~'] },
+  { id: 'stand', text: 'Помоги мне встать', hint: 'Потяни левый ползунок вверх', hintA: 'Веди пальцем вверх по её ногам или животу',
+    ok: () => character.sitS > 0.5, check: () => character.sitS < 0.1,
+    ask: ['Поможешь встать?', 'Засиделась… хочу размяться!', 'Давай встанем~'] },
+  { id: 'lie', text: 'Хочу прилечь', hint: 'Потяни левый ползунок в самый низ', hintA: 'Веди пальцем вниз по её ногам до конца — или долгий тап по ней → 😴',
+    ok: () => unlocked('floor') && allowLie && character.sitS < 0.9, check: () => character.sitS > 1.1,
+    ask: ['Хочу прилечь… можно?', 'Давай полежим немножко~', 'Уложишь меня?'] },
+  { id: 'wear', text: 'Переодень меня', hint: 'Меню ☰ → Гардероб → выбери вещь',
+    ok: () => unlocked('wardrobe') && PIECE_SOURCES.length > 0,
+    ask: ['Хочу переодеться! Выберешь мне что-нибудь?', 'Надоел этот наряд… переоденешь?', 'Подбери мне что-нибудь красивое~'] },
+  { id: 'tint', text: 'Смени цвет моей одежды', hint: 'Меню ☰ → Гардероб → кружки цвета под вещами',
+    ok: () => unlocked('wardrobe'),
+    ask: ['Хочу другой цвет! Перекрасишь что-нибудь?', 'А в другом цвете мне пойдёт?', 'Давай поменяем цвет одежды~'] },
+  { id: 'dance', text: 'Хочу потанцевать!', hint: 'Меню ☰ → Анимации и танцы → «Танцевать» или «Плавный танец»',
+    ok: () => unlocked('dance') && MOCAP.some((m) => !m.idle),
+    ask: ['Хочу потанцевать! Включишь?', 'Так и тянет двигаться… потанцуем?', 'Включи мне танец~'] },
+  { id: 'photo', text: 'Сфотографируй меня', hint: 'Меню ☰ → Фото',
+    ok: () => unlocked('photo'),
+    ask: ['Сфоткаешь меня? Я сегодня красивая~', 'Хочу фото на память!', 'Щёлкни меня, пожалуйста ♥'] },
+];
+const WISH_THANKS = ['Спасибо! Ты лучший ♥', 'Ура~ именно этого я и хотела!', 'Хи, ты меня понимаешь ♥', 'Мне так приятно… спасибо~', 'Вот теперь я счастлива ♥'];
+const WISH_MISS = ['Ну вот… ладно, в другой раз.', 'Эх… ты не заметил.', 'Хм… забыл про меня?', 'Ничего, я подожду~'];
+const WISH_TIME = 32; // секунд на исполнение (сама просьба видна первые ~10 с, потом гаснет)
+const WISH_SHOW = 10;
+const WISH_BONUS = 8;
+let wish = null; // { def, progress, t }
+let wishTimer = 40; // до первого желания
+let wishLast = null;
+let wishCount = 0;
+try { wishCount = Number(localStorage.getItem('waifu-wishes')) || 0; } catch { /* ignore */ }
+const wishEl = document.createElement('button');
+wishEl.id = 'wish';
+wishEl.hidden = true;
+wishEl.innerHTML = '<span class="w-ico">💭</span><span class="w-text"></span><i class="w-bar"></i>';
+document.body.appendChild(wishEl);
+wishEl.addEventListener('pointerdown', (e) => e.stopPropagation());
+wishEl.addEventListener('click', (e) => { e.stopPropagation(); if (wish) showToast(`💡 ${(autoMode && wish.def.hintA) || wish.def.hint}`); });
+function wishEvent(id) {
+  if (!wish || wish.def.id !== id || wish.def.check) return;
+  wish.progress++;
+  if (wish.progress >= (wish.def.need ?? 1)) fulfillWish();
+}
+function fulfillWish() {
+  if (!wish) return;
+  wish = null;
+  wishEl.hidden = true;
+  wishTimer = 100 + Math.random() * 60;
+  wishCount++;
+  try { localStorage.setItem('waifu-wishes', String(wishCount)); } catch { /* ignore */ }
+  setLove(love + WISH_BONUS);
+  for (let i = 0; i < 6; i++) setTimeout(() => floatHeart(window.innerWidth * (0.3 + Math.random() * 0.4), window.innerHeight * 0.4), i * 110);
+  showToast(`💭 Желание исполнено · +${WISH_BONUS} ♥`);
+  fxBurst(window.innerWidth / 2, window.innerHeight * 0.4, 14, 110);
+  // Чуть позже — чтобы не перебить реакцию на само касание.
+  setTimeout(() => {
+    if (!character) return;
+    character.react({ expression: 'happy', motion: 'tiltHead' });
+    say(pick(WISH_THANKS), 'happy');
+  }, 900);
+}
+function updateWishes(dt) {
+  if (!character || document.hidden) return;
+  if (wish) {
+    wish.t -= dt;
+    wishEl.style.setProperty('--k', Math.max(0, wish.t / WISH_TIME).toFixed(3));
+    wishEl.classList.toggle('gone', WISH_TIME - wish.t > WISH_SHOW);
+    if (wish.def.check?.()) { fulfillWish(); return; }
+    if (wish.t <= 0) {
+      wish = null;
+      wishEl.hidden = true;
+      wishTimer = 70 + Math.random() * 50;
+      if (character.sleep < 0.3) say(pick(WISH_MISS), 'sad');
+    }
+    return;
+  }
+  wishTimer -= dt;
+  if (wishTimer > 0) return;
+  // Просит в спокойный момент: не спит, палец не на экране, панели закрыты, не режим поз.
+  if (pointerActive || poseMode || character.sleep > 0.3 || character.mixer || document.querySelector('.panel:not(.hidden)')
+    || !$('love-menu').hidden || (lockPop && !lockPop.hidden)) { wishTimer = 4; return; }
+  const opts = WISHES.filter((w) => w.id !== wishLast && (!w.ok || w.ok()));
+  if (!opts.length) { wishTimer = 30; return; }
+  const def = opts[Math.floor(Math.random() * opts.length)];
+  wishLast = def.id;
+  wish = { def, progress: 0, t: WISH_TIME };
+  wishEl.querySelector('.w-text').textContent = def.text;
+  wishEl.style.setProperty('--k', '1');
+  wishEl.classList.remove('gone');
+  wishEl.hidden = false;
+  character.react({ expression: 'relaxed', motion: 'tiltHead' });
+  say(pick(def.ask), 'happy');
+}
+// ---------- Флирт ----------
+// Когда её не трогают, она сама кокетничает: взгляд из-под ресниц, подмигивание, поправляет волосы, палец к губам,
+// оглядывается через плечо, чуть наклоняется к тебе, покачивает бёдрами. Жест + мимика + взгляд + реплика.
+// Чем выше симпатия, тем смелее и чаще. Коснулся её — сразу бросает и реагирует на тебя.
+let flirtGazeUntil = 0;
+let flirtTimer = 16;
+let flirtLast = '';
+let flirtUndo = null; // вернуть наклон/поворот после жеста
+const FLIRTS = [
+  { id: 'coy', run: () => { character.coy(4); character.setExpression('relaxed', 0.45, 3.6); setTimeout(() => character?.wink(), 1700); },
+    lines: [['Чего смотришь?.. Хи~', 'Привет~'], ['Нравлюсь тебе?~', 'Я знаю, что ты смотришь~'], ['Иди ближе ♥', 'Только на меня и смотри ♥']] },
+  { id: 'hair', run: () => { character.playMotion('twirl'); character.coy(3.5); character.setExpression('happy', 0.4, 3.5); },
+    lines: [['Волосы запутались~'], ['Тебе нравятся мои волосы?', 'Хи, залюбовался?'], ['Хочешь потрогать?~ ♥', 'Для тебя прихорашиваюсь ♥']] },
+  { id: 'lips', run: () => { character.playMotion('lips'); character.coy(3.2); character.setExpression('relaxed', 0.5, 3.4); },
+    lines: [['Хм… о чём бы подумать~'], ['Тсс… это секрет~', 'Угадай, о чём я думаю~'], ['О тебе думаю ♥', 'Мм… иди сюда~ ♥']], minTier: 1 },
+  { id: 'hairBack', run: () => { character.playMotion('hairBack'); character.setExpression('happy', 0.45, 3.5); setTimeout(() => character?.wink(), 2200); },
+    lines: [['Жарко сегодня~'], ['Как тебе так?~', 'Смотри на меня~'], ['Красивая? ♥', 'Не отводи взгляд ♥']] },
+  { id: 'waist', run: () => { character.playMotion('waistSlide'); character.coy(3); character.setExpression('happy', 0.35, 3.4); },
+    lines: [['Наряд сидит хорошо?'], ['Мне идёт, правда?~', 'Нравится, как сидит?'], ['Для тебя выбирала ♥', 'Скажи, что я красивая~ ♥']], minTier: 1 },
+  { id: 'behind', run: () => { character.playMotion('behindBack'); character.coy(4); character.setExpression('happy', 0.5, 3.8); },
+    lines: [['Хи… что?~'], ['Угадай, что я задумала~', 'А у меня сюрприз~'], ['Скучала по тебе ♥', 'Я вся твоя~ ♥']] },
+  { id: 'lean', stand: true, run: () => {
+      autoBendTarget = 0.32; character.setExpression('happy', 0.5, 3.6); character.coy(3.6); setTimeout(() => character?.wink(), 1900);
+      flirtUndo = { at: performance.now() + 4200, fn: () => { if (!poseDrag && !reps.home.on) autoBendTarget = 0; } };
+    },
+    lines: [['Что там у тебя?~'], ['Ближе~ Не бойся', 'Дай рассмотрю тебя~'], ['Хочу поближе к тебе ♥', 'Ммм… привет ♥']], minTier: 1 },
+  { id: 'shoulder', stand: true, move: true, run: () => {
+      const sg = Math.random() < 0.5 ? 1 : -1;
+      character.turnTo(sg * 1.75); // вполоборота спиной: голова ещё дотягивается посмотреть на тебя через плечо character.setExpression('happy', 0.45, 4.5); setTimeout(() => character?.wink(), 3000);
+      flirtUndo = { at: performance.now() + 6000, fn: () => character.turnTo(0) };
+    },
+    lines: [['Сейчас вернусь~'], ['Смотришь?~', 'Хи, поймал взгляд~'], ['Нравится вид? ♥', 'Знаю, что смотришь ♥']], minTier: 1 },
+  { id: 'sway', stand: true, run: () => { character.playMotion('handOnHip'); character.setExpression('happy', 0.4, 4); const r = AUTO_ROUTINES.find((x) => x.name === 'покачивание'); if (r && !auto) auto = { keys: r.keys, t: 0, last: null }; },
+    lines: [['Ла-ла-ла~'], ['Потанцуем?~', 'Музыка в голове играет~'], ['Смотри, как я умею ♥', 'Только для тебя ♥']] },
+];
+function updateFlirt(dt) {
+  if (!character || !autoMode) return;
+  const now = performance.now();
+  const touching = !!poseDrag || pointerActive && now - lastOnHerAt < 300 || now - lastOnHerAt < 1200;
+  if (flirtUndo && (now > flirtUndo.at || touching)) { const u = flirtUndo; flirtUndo = null; try { u.fn(); } catch { /* ignore */ } }
+  if (touching) { flirtGazeUntil = 0; flirtTimer = Math.max(flirtTimer, 7); return; }
+  const ok = autoState === 'live' && !poseMode && !reps.home.on && !grabLoops.length && !auto && (character.sleep ?? 0) < 0.1 && !character.dancing && !character.mixer && !character.loop
+    && character.sitS < 0.9 && $('wardrobe').classList.contains('hidden') && !character.turnGoal && !character.motions.length;
+  if (!ok) return;
+  flirtTimer -= dt;
+  if (flirtTimer > 0) return;
+  const t = tier();
+  flirtTimer = (t === 2 ? 13 : t === 1 ? 17 : 22) + Math.random() * 9;
+  const standing = character.sit < 0.02 && Math.abs(character.bodyOffset.hipsRotX) < 0.2;
+  const camMine = !!manualCam || !!freeCam;
+  const opts = FLIRTS.filter((f) => f.id !== flirtLast && (f.minTier ?? 0) <= t && (!f.stand || standing) && (!f.move || !camMine));
+  if (!opts.length) return;
+  const f = opts[Math.floor(Math.random() * opts.length)];
+  flirtLast = f.id;
+  flirtGazeUntil = now + 4500;
+  try { f.run(); } catch (e) { console.warn('flirt', e); }
+  say(pick(f.lines[t] ?? f.lines[0]));
+  idleTime = 0;
+}
+// Сама прохаживается, когда её не трогают: пара шагов в сторону или к тебе, потом обратно. Коснулся — стоит,
+// где стоит, и слушается; усадил/уложил — возвращается на место. Ничего на экране для этого нет.
+let walkTimer = 10;
+function autoWalk(dt) {
+  if (!character?.walkTo) return;
+  const calm = autoMode && autoState === 'live' && !poseMode && !poseDrag && !pointerActive && !reps.home.on && !grabLoops.length && !auto
+    && character.sit < 0.02 && (character.sleep ?? 0) < 0.1 && Math.abs(character.bodyOffset.hipsRotX) < 0.25
+    && !character.dancing && !character.mixer && !character.loop && $('wardrobe').classList.contains('hidden');
+  // Повернулась сама — а её тронули, усадили, включили повтор: сразу лицом к тебе (камеру крутить можно).
+  const bodyCalm = autoMode && autoState === 'live' && !poseMode && !reps.home.on && character.sit < 0.02 && (character.sleep ?? 0) < 0.1
+    && Math.abs(character.bodyOffset.hipsRotX) < 0.25 && !character.dancing && !character.mixer && !character.loop && $('wardrobe').classList.contains('hidden');
+  if (character.turnGoal && (!bodyCalm || poseDrag || performance.now() - lastOnHerAt < 400)) character.turnTo(0, true);
+  // Камеру настроил сам (приблизил, сдвинул, повернул) — она не уходит из кадра: стоит на месте, пока ракурс не
+  // вернут домиком или двойным тапом. Иначе кадр «уплывал» бы за ней и сбивался.
+  const cs = `${camYaw.toFixed(3)}|${camPitch.toFixed(3)}|${camZoom.toFixed(3)}|${camLift.toFixed(3)}|${camPanH.x.toFixed(3)}|${camPanH.z.toFixed(3)}`;
+  if (cs !== autoWalk.cs) { autoWalk.cs = cs; autoWalk.camAt = performance.now(); }
+  const camMine = !!manualCam || !!freeCam || performance.now() - (autoWalk.camAt ?? 0) < 20000;
+  if (!calm || camMine) { walkTimer = Math.max(walkTimer, 5); return; }
+  walkTimer -= dt;
+  if (walkTimer > 0) return;
+  walkTimer = 9 + Math.random() * 11;
+  const S = character.scale ?? 1;
+  // Иногда вместо шагов поворачивается: вполоборота, боком, спиной — и потом обратно.
+  if (character.turnGoal) { if (Math.random() < 0.75) { character.turnTo(0); return; } }
+  else if (Math.random() < 0.4) { const sgn = Math.random() < 0.5 ? 1 : -1; character.turnTo(sgn * [0.8, 0.8, 1.5, 1.5, Math.PI][Math.floor(Math.random() * 5)]); walkTimer = 6 + Math.random() * 6; return; }
+  if (character.walkAway() > 0.08 * S && Math.random() < 0.55) character.walkTo(0, 0);
+  else character.walkTo((Math.random() * 2 - 1) * 0.2 * S, (Math.random() * 0.16 - 0.05) * S); // недалеко: остаётся в кадре
+}
+// Какой её оставил — такой и встретит: поза (сидит/лежит, наклон), состояние (спит/замерла) и ракурс
+// запоминаются и возвращаются при следующем запуске. Только простой вид; повторы не храним.
+const LEFT_KEY = girlKey('waifu-left');
+let leftReady = false;
+function saveLeft() {
+  if (!leftReady || !character || !autoMode || poseMode) return;
+  const cam = freeCam ? null : { ...camState(), yaw: camYaw + camEase.yaw, manual: manualCam ? { off: camAnchor().clone().add(manualCam.off).sub(hipsTrack).toArray(), dist: manualCam.dist } : null };
+  const r = reps.home;
+  const v = {
+    sit: +(r.on ? 0 : character.sit).toFixed(3), bend: +(r.on ? 0 : autoBendTarget ?? character.bodyOffset.hipsRotX).toFixed(3),
+    st: autoState === 'hold' ? 'freeze' : autoState, cam, touch: (() => { try { return character.exportTouchPose(); } catch { return null; } })(),
+  };
+  try { localStorage.setItem(LEFT_KEY, JSON.stringify(v)); } catch { /* ignore */ }
+}
+function restoreLeft() {
+  leftReady = true;
+  if (!autoMode || !character) return;
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(LEFT_KEY) || 'null'); } catch { v = null; }
+  if (!v || typeof v !== 'object') return;
+  try {
+    if (Number.isFinite(v.sit) && v.sit > 0.01) {
+      character.sit = THREE.MathUtils.clamp(v.sit, 0, sitMax());
+      character.sitS = character.sit; // сразу в позе, без «садится на глазах»
+    }
+    if (Number.isFinite(v.bend) && Math.abs(v.bend) > 0.01) character.bodyOffset.hipsRotX = THREE.MathUtils.clamp(v.bend, BEND_MIN, BEND_MAX);
+    if (v.touch) { try { character.importTouchPose(v.touch); } catch { /* ignore */ } }
+    if (v.st === 'sleep' || v.st === 'freeze') setAutoState(v.st);
+    const c = v.cam;
+    if (c && [c.yaw, c.pitch, c.zoom].every(Number.isFinite)) {
+      applyCamState({ yaw: c.yaw, pitch: c.pitch, zoom: c.zoom, lift: c.lift, pan: c.pan, full: c.full });
+      if (c.manual && Array.isArray(c.manual.off) && Number.isFinite(c.manual.dist)) { manualCam = { off: new THREE.Vector3().fromArray(c.manual.off), dist: c.manual.dist }; lockCamBone(); }
+    }
+  } catch { /* битая запись — просто встречает как обычно */ }
+}
+setInterval(saveLeft, 4000);
+window.addEventListener('pagehide', saveLeft);
+// Вернулся в игру после перерыва больше минуты — пауза для рекламы (лимит — в ads.js).
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); saveLeft(); return; }
+  if (hiddenAt && Date.now() - hiddenAt > 60000) setTimeout(() => interstitial(), 800);
+  hiddenAt = 0;
+});
 function tick() {
   requestAnimationFrame(tick);
+  if (adPaused) { clock.getDelta(); return; }
   const dt = Math.min(clock.getDelta(), 0.05);
 
   updateCamera(dt);
+  updateSitSlider();
+  updateHandles();
+  updateBlob();
+  updateLiveIdle();
+  updateAuto(dt);
+  updateLoop(dt);
+  updatePtsLayer(dt);
+  updateWardrobeCam();
+  // Пока ты с ней — симпатия понемногу растёт и сама (раз в минуту).
+  if (!document.hidden) {
+    playGain += dt;
+    if (playGain > 60) { playGain = 0; setLove(love + (boostOn() ? 2 : 1)); }
+  }
+  updateSuggest(dt);
+  updateSelfDress(dt);
+  updateWishes(dt);
+  updateAutoCam(dt);
   if (character) {
     // Взгляд за пальцем/курсором: точка на плоскости перед моделью.
     raycaster.setFromCamera(pointer, camera);
     raycaster.ray.at(camera.position.distanceTo(cameraLookAt) - 0.3, lookPoint);
-    character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * 10));
+    // Микродвижения глаз (саккады): живой взгляд быстро «перескакивает» на чуть другую точку.
+    saccadeT -= dt;
+    if (saccadeT <= 0) {
+      saccadeT = 0.6 + Math.random() * 2.2;
+      saccade.set((Math.random() - 0.5) * 0.06, (Math.random() - 0.5) * 0.04, 0);
+    }
+    lookPoint.add(saccade);
+    // Взгляд «на меня»: глаза в камеру, голова к тебе.
+    const flirtLook = gazeMode !== 'closed' && performance.now() < flirtGazeUntil;
+    if (gazeMode === 'me' || flirtLook) lookPoint.copy(camera.position).add(saccade);
+    // Камера близко к лицу — она это чувствует (смущение, улыбка); смущаясь, отводит глаза.
+    {
+      const hp = character.bones.head.getWorldPosition(new THREE.Vector3());
+      const dist = camera.position.distanceTo(hp) / camBase.S;
+      character.camClose = THREE.MathUtils.clamp((1.5 - dist) / 0.6, 0, 1); // ближе ~1 м — «близко»
+      character.loveK = love / LOVE_MAX;
+      if ((character.shyNow ?? 0) > 0.2) lookPoint.add(new THREE.Vector3(0.6 * character.shyNow, -0.25 * character.shyNow, 0));
+    }
+    // Сразу после переключения взгляда глаза переводятся мягко (без скачка).
+    const gazeEase = Math.min(1, (performance.now() - gazeSwitchAt) / 900);
+    character.lookTarget.position.lerp(lookPoint, 1 - Math.exp(-dt * (4 + 14 * gazeEase * gazeEase)));
     // Головой за пальцем следит только когда мы перед ней.
     const facing = Math.max(0, Math.cos(camYaw));
-    lookNdc.set(pointer.x * facing, pointer.y * facing);
+    if (gazeMode === 'follow') lookNdc.set(pointer.x * facing, pointer.y * facing);
+    else lookNdc.set(0, 0);
+    character.eyesShut = gazeMode === 'closed' ? 1 : 0;
+    character.gazeTarget = gazeMode === 'me' || flirtLook ? camera.position : null;
+    character.gazeUp = (character.gazeUp ?? new THREE.Vector3()).set(0, 1, 0).applyQuaternion(camera.quaternion);
     character.headLook.lerp(lookNdc, 1 - Math.exp(-dt * 4));
 
     const patTarget = petting && petting.ticks > 0 ? 1 : 0;
     character.patAmount += (patTarget - character.patAmount) * (1 - Math.exp(-dt * 5));
+    // Удовольствие: гладят по голове или там, где ей уже нравится, — тянется к руке и жмурится.
+    {
+      const st = stroking && stroking.ticks > 0 ? STROKES[stroking.hit.zone] : null;
+      const liked = (petting && petting.ticks > 0) || (st && (st.affection[tier()] ?? 0) > 0);
+      const cur = character.pleasure ?? 0;
+      character.pleasure = cur + ((liked ? 1 : 0) - cur) * (1 - Math.exp(-dt * (liked ? 1.4 : 2.2)));
+      if (liked) {
+        const fx = (petting ?? stroking).lastX;
+        pleasureV.copy(character.bones.head.getWorldPosition(pleasureV)).project(camera);
+        const hx = (pleasureV.x * 0.5 + 0.5) * window.innerWidth;
+        character.touchSide = THREE.MathUtils.clamp((fx - hx) / (window.innerWidth * 0.1), -1, 1) * (Math.cos(camYaw) >= 0 ? 1 : -1);
+      }
+    }
 
+    if (character.stanceW == null) applyStance();
+    if (!character.furnApplied) applyFurn();
+    character.handPad = isPaint(wear.bottoms) ? 0.3 : 0;
+    updateGrabLoops(dt);
+    updateFurnSlide(dt);
+    updateStage(dt);
+    autoWalk(dt);
+    updateFlirt(dt);
+    character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
     character.update(dt);
+    pieceWardrobe.sync(dt);
 
     if (hitboxGroup?.visible) {
       for (const m of hitboxGroup.children) {
@@ -1033,24 +6094,43 @@ function tick() {
     bubbleTimer -= dt;
     const bubble = $('bubble');
     if (bubbleTimer <= 0) bubble.classList.add('hidden');
-    character.headScreenAnchor(anchor).project(camera);
-    const x = (anchor.x * 0.5 + 0.5) * window.innerWidth;
-    const y = (-anchor.y * 0.5 + 0.5) * window.innerHeight;
-    const half = bubble.offsetWidth / 2 + 8;
-    bubble.style.left = `${THREE.MathUtils.clamp(x, half, window.innerWidth - half)}px`;
-    // Не залезаем под верхнюю панель (на телефоне она в две строки).
-    const hudBottom = $('hud').getBoundingClientRect().bottom + 12;
-    bubble.style.top = `${Math.max(y, bubble.offsetHeight + hudBottom)}px`;
+    // Облачко скрыто — ничего не меряем и не двигаем (раньше каждый кадр заставляли браузер пересчитывать вёрстку).
+    if (!bubble.classList.contains('hidden')) {
+      character.headScreenAnchor(anchor).project(camera);
+      const x = (anchor.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-anchor.y * 0.5 + 0.5) * window.innerHeight;
+      // Размеры облачка и панели меряем изредка (и сразу при новой реплике), а не каждый кадр.
+      const bm = (tick.bm ??= { n: 0, w: 0, h: 0, hud: 0, text: '' });
+      if (bm.n-- <= 0 || bm.text !== bubble.textContent) {
+        bm.n = 10; bm.text = bubble.textContent;
+        bm.w = bubble.offsetWidth; bm.h = bubble.offsetHeight; bm.hud = $('hud').getBoundingClientRect().bottom + 12;
+      }
+      const half = bm.w / 2 + 8;
+      bubble.style.left = `${THREE.MathUtils.clamp(x, half, window.innerWidth - half).toFixed(1)}px`;
+      // Не залезаем под верхнюю панель (на телефоне она в две строки).
+      bubble.style.top = `${Math.max(y, bm.h + bm.hud).toFixed(1)}px`;
+    }
 
     // Если долго не трогают — скучает.
     idleTime = pointerActive ? 0 : idleTime + dt;
     if (idleTime > 18) {
       idleTime = 0;
-      say(pick(IDLE_LINES[tier()]), tier() === 2 ? 'relaxed' : 'sad');
+      if (character.sleep > 0.3) say(pick(['zzz…', '*тихо сопит*', 'Ммм… 😴']));
+      else if (autoMode && autoState === 'freeze') { /* замерла — молчит и не двигается */ }
+      else if (Math.random() < 0.6) idleEmote();
+      else say(pick(IDLE_LINES[tier()]), tier() === 2 ? 'relaxed' : 'sad');
     }
   }
 
   renderer.render(scene, camera);
+  if (photoPending) {
+    photoPending = false;
+    try {
+      $('photo-img').src = canvas.toDataURL('image/png');
+      $('photo-view').hidden = false;
+    } catch { showToast('Не получилось сделать фото'); }
+    document.body.classList.remove('photo');
+  }
 }
 
 resize();

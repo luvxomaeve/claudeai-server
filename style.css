@@ -424,6 +424,15 @@ html, body {
   color: var(--pink);
   animation: floatUp 1.1s ease-out forwards;
 }
+.float-heart { text-shadow: 0 0 8px rgba(255, 111, 168, 0.55); z-index: 21; animation-duration: 1.25s; }
+.float-heart.sway { animation-name: floatUpSway; }
+@keyframes floatUpSway {
+  0% { transform: translate(-50%, 0) scale(0.5) rotate(-8deg); opacity: 1; }
+  35% { transform: translate(calc(-50% + 9px), -26px) scale(1) rotate(8deg); }
+  70% { transform: translate(calc(-50% - 7px), -54px) scale(1.15) rotate(-6deg); opacity: 0.9; }
+  100% { transform: translate(-50%, -82px) scale(1.25) rotate(4deg); opacity: 0; }
+}
+.float-meh { font-size: 20px; filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.3)); }
 @keyframes floatUp {
   from { transform: translate(-50%, 0) scale(0.6); opacity: 1; }
   to { transform: translate(-50%, -70px) scale(1.2); opacity: 0; }
@@ -478,3 +487,1318 @@ body.dark #loading { background: #0d0812; color: #e9dcf5; }
   user-select: none;
 }
 #cam-controls button:active { background: var(--pink); color: #fff; }
+
+#cam-controls[hidden] { display: none; }
+#btn-camera.active { background: var(--pink); }
+#scene.camera { cursor: move; }
+#btn-zoom.off { opacity: 1; }
+#toast {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(0.95);
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(58, 34, 64, 0.85);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+#toast.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+#cam-controls #btn-zoom:not(.off) { background: var(--pink); color: #fff; }
+
+/* ---------- Единый стиль кнопок ---------- */
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(90, 40, 100, 0.14);
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+.icon-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+#buttons { gap: 8px; }
+#buttons .icon-btn.off { opacity: 0.5; }
+#buttons .icon-btn.active { background: var(--pink); color: #fff; border-color: transparent; }
+
+/* Зум — тонкая колонка справа (в режиме камеры и позы). */
+#cam-controls {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(90, 40, 100, 0.16);
+  display: flex;
+  z-index: 5;
+  animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+#cam-controls[hidden] { display: none; }
+#cam-controls .icon-btn {
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  font: inherit;
+  touch-action: none;
+}
+#cam-controls .icon-btn svg { width: 19px; height: 19px; }
+#cam-controls .icon-btn:active { background: rgba(255, 111, 168, 0.18); }
+#cam-controls #btn-zoom.off { opacity: 1; }
+#cam-controls #btn-zoom:not(.off) { background: var(--pink); color: #fff; }
+
+/* Кнопка поз. */
+#poses #poses-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  font-size: 15px;
+  font-weight: 600;
+}
+#poses-toggle svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#poses-toggle b { font-weight: 800; }
+#poses-toggle .chev { font-size: 11px; opacity: 0.6; transition: transform 0.2s ease; }
+#poses-toggle.open .chev { transform: rotate(180deg); }
+
+@media (max-width: 600px) {
+  #buttons { gap: 6px; }
+  #buttons .icon-btn { width: 40px; height: 40px; }
+}
+
+/* Панель режима «поза пальцем». */
+#pose-bar {
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 999px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(90, 40, 100, 0.18);
+  animation: popUp 0.2s ease-out;
+}
+#pose-bar[hidden] { display: none; }
+#poses #pose-bar button {
+  border: none;
+  border-radius: 999px;
+  padding: 9px 13px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  font-size: 13px;
+  font-weight: 700;
+}
+#poses #pose-bar button.primary { background: var(--pink); color: #fff; }
+
+#pose-bar-buttons, #pose-save-form { display: flex; gap: 4px; align-items: center; }
+#pose-bar-buttons[hidden], #pose-save-form[hidden] { display: none; }
+#pose-save-name {
+  width: 150px;
+  min-width: 0;
+  border: 1px solid rgba(120, 60, 120, 0.25);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--ink);
+}
+
+/* Точки-ручки в режиме позы. */
+#handles { position: fixed; inset: 0; pointer-events: none; }
+#handles[hidden] { display: none; }
+.handle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: rgba(255, 111, 168, 0.35);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px rgba(255, 111, 168, 0.8), 0 0 12px rgba(255, 111, 168, 0.9);
+  animation: handlePulse 1.6s ease-in-out infinite;
+}
+@keyframes handlePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+@media (prefers-reduced-motion: reduce) { .handle { animation: none; } }
+
+/* Панель позы: две иконки + «Готово». */
+#poses #pose-bar button.pb-icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+#poses #pose-bar button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#poses #pose-bar button.primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px 9px 12px;
+  font-size: 14px;
+}
+#poses #pose-bar button.pb-icon:active { background: rgba(255, 111, 168, 0.18); }
+/* В режиме позы кнопка списка поз не мешает. */
+/* В режиме позы список поз тоже доступен (свои сохранённые позы видны). */
+/* Удалить свою позу: крестик на кнопке. */
+#pose-list .del {
+  margin-left: 6px;
+  padding: 0 2px;
+  opacity: 0.45;
+  font-weight: 800;
+}
+#pose-list button.armed { background: #e2557f; color: #fff; }
+
+/* Ползунок посадки слева: тонкая линия, точки — стоит / присед / на коленях / боком / лёжа. */
+#sit-slider {
+  position: fixed;
+  left: max(6px, env(safe-area-inset-left, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  width: 64px;
+  height: min(56vh, 380px);
+  padding: 18px 0;
+  display: flex;
+  justify-content: center;
+  z-index: 5;
+  touch-action: none;
+  cursor: ns-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#sit-slider .track {
+  position: relative;
+  width: 4px;
+  height: 100%;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 1px 6px rgba(90, 40, 100, 0.15);
+}
+#sit-slider .track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(var(--k, 0) * 100%);
+  border-radius: 4px;
+  background: var(--pink);
+}
+#sit-slider i {
+  position: absolute;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+}
+#sit-slider .thumb {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--k, 0) * 100%);
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--pink);
+  box-shadow: 0 3px 10px rgba(90, 40, 100, 0.25);
+  transition: transform 0.15s ease;
+}
+#sit-slider.active .thumb { transform: scale(1.25); }
+
+/* Полоска невидимая: просто зона свайпа у левого края. Тонкий индикатор
+   появляется только пока ведёшь пальцем. */
+/* Почти прозрачная: еле заметная линия у края, ярче — пока ведёшь пальцем. */
+#sit-slider .track { opacity: 0.22; transition: opacity 0.4s ease; }
+#sit-slider.active .track { opacity: 1; transition-duration: 0.15s; }
+#poses #pose-list .sit-chip { background: rgba(255, 111, 168, 0.13); }
+#poses #pose-list .sit-chip:active { background: var(--pink); color: #fff; }
+
+/* Список поз — одна строка, листается пальцем вбок, не закрывается после выбора. */
+#pose-list {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  max-width: min(520px, calc(100vw - 24px));
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+#pose-list::-webkit-scrollbar { display: none; }
+#poses #pose-list button { flex: none; scroll-snap-align: center; white-space: nowrap; }
+
+/* ⌂ на главном экране — слева внизу, на одной линии с кнопкой поз. */
+#poses #btn-home {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: 16px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+#poses #btn-home:active { background: var(--pink); color: #fff; }
+body.posing #poses #btn-home { display: none; }
+
+/* Кнопка «ложиться вкл/выкл» под полосой посадки — маленькая и полупрозрачная. */
+#sit-slider { flex-direction: column; align-items: center; padding-bottom: 6px; }
+#sit-slider .track { flex: 1; }
+#lie-toggle {
+  margin-top: 12px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--pink);
+  opacity: 0.75;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15);
+}
+#lie-toggle svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#lie-toggle.off { color: var(--ink); opacity: 0.4; }
+#lie-toggle.off svg { stroke-dasharray: 2 2.5; }
+#sit-slider.no-lie .track i:last-of-type { display: none; }
+
+/* Отклик касания: мягкий розовый круг под пальцем. */
+.ripple {
+  position: fixed;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 111, 168, 0.8);
+  background: rgba(255, 111, 168, 0.15);
+  pointer-events: none;
+  z-index: 20;
+  animation: ripple 0.55s ease-out forwards;
+}
+@keyframes ripple {
+  from { transform: scale(0.4); opacity: 1; }
+  to { transform: scale(1.4); opacity: 0; }
+}
+
+/* Меньше кнопок: камера крутится свайпом по фону и щипком везде, зоны касаний — отладка. */
+#btn-camera, #btn-hitbox { display: none !important; }
+
+/* Открыта панель — полоса посадки и подсказка не просвечивают поверх неё. */
+.panel { z-index: 10; }
+body:has(.panel:not(.hidden)) #sit-slider,
+body:has(.panel:not(.hidden)) #hint { opacity: 0; pointer-events: none; }
+
+/* Режим позы: что держишь — ярко, остальное притухает; магниты для кистей. */
+#handles.dragging .handle { opacity: 0.25; animation: none; }
+#handles .handle.active {
+  opacity: 1;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  background: var(--pink);
+  box-shadow: 0 0 0 3px #fff, 0 0 22px 6px rgba(255, 111, 168, 0.85);
+  animation: none;
+}
+.anchor {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px dashed rgba(255, 255, 255, 0.95);
+  background: rgba(255, 111, 168, 0.18);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.anchor[hidden] { display: none; }
+.anchor.hot { transform: scale(1.7); background: rgba(255, 111, 168, 0.75); border-style: solid; }
+#pose-label {
+  position: fixed;
+  left: 50%;
+  top: 92px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(58, 34, 64, 0.82);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 6;
+}
+#pose-label.on { opacity: 1; }
+
+/* Режим позы: полоса = наклон вперёд/назад — без отметок посадки и кнопки «лечь». */
+#sit-slider.bend .track i, #sit-slider.pose-mode #lie-toggle { display: none; }
+#sit-slider.bend .track::before { background: linear-gradient(var(--pink), #b56cff); }
+
+/* Кнопка взгляда — рядом с ⌂ (видна и на главном экране, и в режиме позы). */
+#poses #btn-gaze {
+  position: fixed;
+  left: calc(max(16px, env(safe-area-inset-left, 0px)) + 52px);
+  bottom: 16px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+#poses #btn-gaze.active { background: var(--pink); color: #fff; border-color: transparent; }
+body.posing #poses #btn-home { display: grid; }
+
+/* Нижняя панель: вкладки ⌂ Домой и ✏️ Позы, 👁 взгляд, точки (во вкладке «Позы»); список поз — справа. */
+#btn-editor { display: none !important; }
+#pose-done { display: none !important; }
+#poses #btn-tab-pose, #poses #btn-handles {
+  position: fixed;
+  bottom: 16px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+}
+#poses #btn-tab-pose { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 52px); }
+#poses #btn-gaze { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 104px); }
+#poses #btn-handles { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 156px); }
+#poses #btn-handles[hidden] { display: none; }
+#poses #btn-home.active, #poses #btn-tab-pose.active { background: var(--pink); color: #fff; border-color: transparent; }
+#poses #btn-handles.active { background: rgba(255, 111, 168, 0.2); color: var(--pink); }
+#poses #poses-toggle { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: 16px; padding: 10px 14px 10px 12px; }
+#poses #pose-list { margin-bottom: 52px; }
+#poses #pose-bar { margin-bottom: 52px; }
+body.posing #poses #pose-list { margin-bottom: 0; }
+
+/* Кнопка поз — компактнее, не наезжает на круглые кнопки. */
+#poses #poses-toggle { max-width: min(40vw, 170px); padding: 9px 12px 9px 10px; font-size: 13px; gap: 6px; }
+#poses #poses-toggle > span:not(.chev) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#poses #poses-toggle svg { width: 17px; height: 17px; flex: none; }
+#poses #poses-toggle .chev { display: none; }
+
+/* Фоны. */
+body.bg-sunset { background: linear-gradient(180deg, #ffb38a 0%, #ff8fab 40%, #b07cc6 75%, #5d4a8a 100%); }
+body.bg-stars {
+  background:
+    radial-gradient(1.5px 1.5px at 12% 18%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 42%, #fff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 47% 12%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 63% 33%, #fff 50%, transparent 51%),
+    radial-gradient(2px 2px at 81% 22%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 90% 48%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 7% 58%, #fff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 36% 66%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 74% 61%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 55% 52%, #fff 50%, transparent 51%),
+    radial-gradient(ellipse at 50% 110%, #3a2f7a 0%, #161036 55%, #07061a 100%);
+}
+body.bg-room { background: linear-gradient(180deg, #f6dccb 0%, #eec4c8 55%, #b98f9f 78%, #8b6878 100%); }
+
+/* Список поз — только во вкладке «Позы» (дома она остаётся как ты её оставил). */
+
+
+body.posing #poses #pose-list[hidden] { display: none; }
+
+/* Список поз — компактная колонка справа над кнопкой ★ (не широкая полоса). */
+body.posing #poses #pose-list:not([hidden]) {
+  position: fixed;
+  right: calc(max(16px, env(safe-area-inset-right, 0px)) + 56px);
+  bottom: 70px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  max-height: 52vh;
+  max-width: 170px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px;
+  gap: 6px;
+  margin: 0;
+  z-index: 7;
+}
+body.posing #poses #pose-list button { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+
+/* Правая полоса (только во вкладке «Позы»): посадка, поза не ломается. */
+#sit-slider2 {
+  position: fixed;
+  right: max(4px, env(safe-area-inset-right, 0px));
+  top: 50%;
+  transform: translateY(-50%);
+  width: 64px;
+  height: min(56vh, 380px);
+  padding: 18px 0;
+  display: flex;
+  justify-content: center;
+  z-index: 5;
+  touch-action: none;
+  cursor: ns-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+#sit-slider2 .track {
+  position: relative;
+  width: 4px;
+  height: 100%;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 1px 6px rgba(90, 40, 100, 0.15);
+}
+#sit-slider2 .track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(var(--k, 0) * 100%);
+  border-radius: 4px;
+  background: var(--pink);
+}
+#sit-slider2 i {
+  position: absolute;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+}
+#sit-slider2 .thumb {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--k, 0) * 100%);
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid var(--pink);
+  box-shadow: 0 3px 10px rgba(90, 40, 100, 0.25);
+  transition: transform 0.15s ease;
+}
+#sit-slider2.active .thumb { transform: scale(1.25); }
+#sit-slider2 { flex-direction: column; align-items: center; padding-bottom: 6px; display: none; }
+body.posing #sit-slider2 { display: flex; }
+#sit-slider2 .track { flex: 1; opacity: 0.35; transition: opacity 0.4s ease; }
+#sit-slider2.active .track { opacity: 1; transition-duration: 0.15s; }
+#lie-toggle2 {
+  margin-top: 12px; width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%;
+  background: var(--panel); color: var(--pink); opacity: 0.8; display: grid; place-items: center; cursor: pointer;
+  box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15);
+}
+#lie-toggle2 svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#lie-toggle2.off { color: var(--ink); opacity: 0.4; }
+body.posing #cam-controls { right: calc(max(12px, env(safe-area-inset-right, 0px)) + 56px); }
+body:has(.panel:not(.hidden)) #sit-slider2 { opacity: 0; pointer-events: none; }
+
+/* Автоскрытие кнопок. */
+#hud, #poses, #cam-controls, #lie-toggle, #lie-toggle2, #handles, #sit-slider .track, #sit-slider2 .track { transition: opacity 0.6s ease; }
+body.ui-hidden #hud, body.ui-hidden #poses, body.ui-hidden #cam-controls,
+body.ui-hidden #lie-toggle, body.ui-hidden #lie-toggle2, body.ui-hidden #handles, body.ui-hidden #hint { opacity: 0; pointer-events: none; }
+body.ui-hidden #hud * , body.ui-hidden #poses *, body.ui-hidden #cam-controls * { pointer-events: none; }
+/* Спрятано: левая полоса остаётся еле видной, правая — совсем прозрачная (обе работают). */
+body.ui-hidden #sit-slider:not(.active) .track { opacity: 0.13; }
+body.ui-hidden #sit-slider:not(.active) .thumb { opacity: 0.5; }
+body.ui-hidden #sit-slider2:not(.active) .track { opacity: 0; }
+
+#cam-controls #cam-face.active { background: var(--pink); color: #fff; }
+/* На главной зум-колонка у правого края (там нет правой полосы). */
+body:not(.posing) #cam-controls { right: max(12px, env(safe-area-inset-right, 0px)); }
+
+/* Симпатия — компактная таблетка в одной строке с кнопками: сердечко с уровнем,
+   название и тонкая полоска прогресса до следующего уровня. Тап — меню макс/сброс. */
+#hud { flex-direction: row !important; align-items: center !important; justify-content: space-between; }
+#affection {
+  position: relative;
+  pointer-events: auto;
+  cursor: pointer;
+  gap: 8px;
+  padding: 5px 12px 5px 5px;
+  align-self: center !important;
+  max-width: calc(100vw - 32px - 3 * 46px);
+}
+#affection .heart {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--pink);
+  filter: drop-shadow(0 2px 4px rgba(255, 111, 168, 0.45));
+}
+#affection .heart b {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding-bottom: 2px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+}
+#affection .love-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+#affection-label { font-size: 12.5px; line-height: 1.1; }
+#affection .bar { width: 96px; max-width: 30vw; height: 5px; }
+#affection .fill { background: linear-gradient(90deg, #ffb3d1, var(--pink), #c77dff); }
+#affection.levelup .heart { animation: lvlPop 0.9s ease; }
+@keyframes lvlPop { 0% { transform: scale(1); } 35% { transform: scale(1.5); } 100% { transform: scale(1); } }
+#love-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(253, 244, 250, 0.96);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 30px rgba(90, 40, 100, 0.28);
+  color: var(--ink);
+  z-index: 8;
+  cursor: default;
+  animation: lmIn 0.18s ease;
+}
+@keyframes lmIn { from { opacity: 0; transform: translateY(-6px) scale(0.98); } to { opacity: 1; transform: none; } }
+#love-menu[hidden] { display: none; }
+#love-menu .lm-head { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: baseline; }
+#love-menu .lm-head b { font-size: 16px; }
+#love-menu .lm-head span { font-size: 12px; opacity: 0.7; font-weight: 700; }
+#love-menu .lm-head small { grid-column: 1 / -1; font-size: 12px; color: var(--pink); font-weight: 700; }
+#love-menu .lm-levels { display: flex; flex-direction: column; gap: 6px; }
+#love-menu .lm-lvl { border-radius: 14px; padding: 8px 10px; background: rgba(255, 255, 255, 0.45); }
+#love-menu .lm-lvl.cur { background: linear-gradient(135deg, rgba(255, 179, 209, 0.55), rgba(199, 125, 255, 0.35)); box-shadow: 0 0 0 2px var(--pink) inset; }
+#love-menu .lm-lvl.lock { opacity: 0.62; }
+#love-menu .lm-top { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 700; }
+#love-menu .lm-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--pink); color: #fff; font-size: 12px; flex: none; }
+#love-menu .lm-lvl.lock .lm-n { background: transparent; }
+#love-menu .lm-lvl.done .lm-n { background: #9fdcc4; }
+#love-menu .lm-name { flex: 1; }
+#love-menu .lm-min { font-size: 11.5px; opacity: 0.65; }
+#love-menu .lm-bar { height: 5px; margin: 6px 0 2px 30px; border-radius: 99px; background: rgba(255, 255, 255, 0.6); overflow: hidden; }
+#love-menu .lm-bar i { display: block; height: 100%; background: linear-gradient(90deg, #ffb3d1, var(--pink), #c77dff); border-radius: inherit; }
+#love-menu ul { list-style: none; margin: 4px 0 0 30px; padding: 0; font-size: 12.5px; line-height: 1.5; }
+#love-menu li.open { color: #2f9e7a; font-weight: 700; }
+#love-menu li em { font-style: normal; font-weight: 400; opacity: 0.75; }
+#love-menu .lm-btns, #love-menu .lm-dev { display: flex; gap: 6px; flex-wrap: wrap; }
+#love-menu .lm-dev[hidden], #love-menu button[hidden] { display: none; }
+#love-menu button {
+  flex: 1;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 12px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#love-menu #love-boost { background: linear-gradient(90deg, var(--pink), #c77dff); color: #fff; }
+#love-menu #love-boost:disabled { opacity: 0.85; }
+#love-max { background: var(--pink) !important; color: #fff !important; }
+/* Окошко прогресса открыто — оно поверх всего, реплика не мешает. */
+body.love-open #hud { z-index: 60; opacity: 1 !important; }
+body.love-open #affection, body.love-open #love-menu, body.love-open #love-menu * { pointer-events: auto !important; opacity: 1; }
+body.love-open #bubble { opacity: 0; }
+#hud { z-index: 9; }
+
+/* Камера: одна кнопка 🎥 внизу; по нажатию — маленькая строка над нижней панелью. */
+#poses #btn-cam {
+  position: fixed;
+  bottom: 16px;
+  width: 44px; height: 44px; padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  display: grid; place-items: center;
+  left: calc(max(16px, env(safe-area-inset-left, 0px)) + 104px);
+}
+#poses #btn-cam.active { background: var(--pink); color: #fff; border-color: transparent; }
+#poses #btn-gaze { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 156px) !important; }
+#poses #btn-handles { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 208px) !important; }
+#cam-controls #btn-zoom { display: none !important; }
+#cam-controls, body.posing #cam-controls, body:not(.posing) #cam-controls {
+  top: auto !important;
+  transform: none !important;
+  right: auto !important;
+  left: calc(max(16px, env(safe-area-inset-left, 0px)) + 80px) !important;
+  bottom: 68px !important;
+  flex-direction: row !important;
+  z-index: 8;
+}
+
+/* Шарик-джойстик камеры. */
+#cam-stick, #cam-stick2 {
+  position: relative;
+  width: 40px; height: 40px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: rgba(255, 111, 168, 0.14);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 111, 168, 0.45);
+  touch-action: none;
+  cursor: grab;
+}
+#cam-stick b, #cam-stick2 b {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 20px; height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: var(--pink);
+  box-shadow: 0 2px 6px rgba(255, 111, 168, 0.6);
+  transition: transform 0.15s ease;
+  pointer-events: none;
+}
+
+#cam-stick2 { background: rgba(181, 108, 255, 0.14); box-shadow: inset 0 0 0 1.5px rgba(181, 108, 255, 0.5); }
+#cam-stick2 b { background: #b56cff; box-shadow: 0 2px 6px rgba(181, 108, 255, 0.6); }
+#cam-stick2::before, #cam-stick2::after { content: ''; position: absolute; left: 50%; width: 0; height: 0; margin-left: -3px; border: 3px solid transparent; }
+#cam-stick2::before { top: 2px; border-bottom-color: rgba(181, 108, 255, 0.7); }
+#cam-stick2::after { bottom: 2px; border-top-color: rgba(181, 108, 255, 0.7); }
+/* Строка камеры шире — сдвигаем левее, чтобы влезла. */
+#cam-controls, body.posing #cam-controls, body:not(.posing) #cam-controls { left: max(12px, env(safe-area-inset-left, 0px)) !important; }
+
+/* Строка камеры короче: ＋/− убраны (есть щипок). */
+#cam-controls #cam-in, #cam-controls #cam-out { display: none !important; }
+/* Окошко поз: избранные сверху. */
+body.posing #poses #pose-list:not([hidden]) { display: flex; flex-direction: column; }
+#poses #pose-list button[data-pose^="saved:"] { order: -1; }
+/* Окошко поз компактнее — не закрывает её. */
+body.posing #poses #pose-list:not([hidden]) { max-width: 124px; max-height: 38vh; padding: 5px; gap: 4px; background: rgba(255, 255, 255, 0.55); }
+body.posing #poses #pose-list button { padding: 5px 9px; font-size: 12px; box-shadow: none; }
+
+#handles.calm .handle, #handles.calm .anchor { opacity: 0.12; animation: none; transition: opacity 0.2s ease; }
+
+/* Дома: кнопка ★ открывает только твои сохранённые позы (по названиям) и «Стоит».
+   Во вкладке «Позы»: только стандартные позы. */
+body:not(.posing) #poses #pose-list:not([hidden]) {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right, 0px));
+  bottom: 70px;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  max-width: 150px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 6px;
+  gap: 5px;
+  margin: 0;
+  background: rgba(255, 255, 255, 0.6);
+  z-index: 7;
+}
+body:not(.posing) #poses #pose-list button { padding: 6px 10px; font-size: 13px; box-shadow: none; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body:not(.posing) #poses #pose-list button:not([data-pose^="saved:"]):not([data-pose="stand"]) { display: none; }
+body.posing #poses #pose-list button[data-pose^="saved:"] { display: none; }
+
+/* Окошко поз (одинаково в обеих вкладках): избранные ★ и «Стоит», ниже «Все позы ▾». */
+#poses #pose-list:not([hidden]) {
+  position: fixed !important;
+  right: max(16px, env(safe-area-inset-right, 0px)) !important;
+  bottom: 70px !important;
+  flex-direction: column !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  max-width: 150px !important;
+  max-height: 46vh !important;
+  overflow-y: auto !important;
+  padding: 6px !important;
+  gap: 5px !important;
+  margin: 0 !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+  z-index: 7;
+}
+#poses #pose-list button { display: block !important; padding: 6px 10px !important; font-size: 13px !important; box-shadow: none !important; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#poses #pose-list button[data-pose^="saved:"] { order: -2; }
+#poses #pose-list button[data-pose="stand"] { order: -1; }
+#poses #pose-list:not(.show-std) button[data-pose]:not([data-pose^="saved:"]):not([data-pose="stand"]) { display: none !important; }
+#poses #pose-list #pose-more { order: 0; background: transparent !important; color: var(--pink) !important; text-align: center; }
+#poses #pose-list.show-std #pose-more { order: 99; }
+/* Кнопка поз — круглая со звёздочкой, без подписи: не налезает на соседние. */
+#poses #poses-toggle { width: 44px; height: 44px; padding: 0 !important; justify-content: center; border-radius: 50%; }
+#poses #poses-toggle > span { display: none !important; }
+#poses #poses-toggle svg { width: 20px; height: 20px; }
+body.posing #poses #pose-list:not([hidden]) { right: calc(max(16px, env(safe-area-inset-right, 0px)) + 50px) !important; }
+
+/* Фото. */
+body.photo #hud, body.photo #poses, body.photo #cam-controls, body.photo #sit-slider, body.photo #sit-slider2,
+body.photo #handles, body.photo #bubble, body.photo #hint, body.photo #toast, body.photo #pose-label { visibility: hidden !important; }
+#photo-view {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+  background: rgba(20, 10, 30, 0.82); backdrop-filter: blur(6px);
+  padding: 16px;
+}
+#photo-view[hidden] { display: none; }
+#photo-view img { max-width: 100%; max-height: 78vh; border-radius: 16px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5); -webkit-touch-callout: default; }
+#photo-view p { color: #fff; font-size: 13px; font-weight: 700; margin: 0; opacity: 0.85; }
+#photo-close { position: absolute; top: 16px; right: 16px; }
+/* Свои ракурсы — маленькие кружки с номерами. */
+#cam-views { display: flex; gap: 3px; align-items: center; }
+.cam-view-chip {
+  width: 26px; height: 26px; padding: 0; border: none; border-radius: 50%;
+  background: rgba(255, 111, 168, 0.18); color: var(--pink);
+  font: inherit; font-size: 12px; font-weight: 800; cursor: pointer;
+}
+.cam-view-chip:active { background: var(--pink); color: #fff; }
+
+/* Одежда по частям. */
+#piece-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.piece-row { display: flex; flex-direction: column; gap: 4px; }
+.piece-cat { font-size: 12px; font-weight: 800; color: var(--ink); opacity: 0.7; }
+
+/* Шкаф: вкладки и карточки вещей. */
+.closet-tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.closet-tabs::-webkit-scrollbar { display: none; }
+.closet-tab {
+  flex: none; display: flex; align-items: center; gap: 4px;
+  border: none; border-radius: 999px; padding: 7px 11px;
+  background: rgba(255, 111, 168, 0.1); color: var(--ink);
+  font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.closet-tab.active { background: var(--pink); color: #fff; }
+.closet-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: 8px; }
+.closet-item {
+  display: flex; align-items: center; gap: 8px; text-align: left;
+  border: 2px solid transparent; border-radius: 14px; padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.75); color: var(--ink);
+  box-shadow: 0 2px 8px rgba(90, 40, 100, 0.08);
+  font: inherit; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.closet-item.active { border-color: var(--pink); background: rgba(255, 111, 168, 0.12); }
+.closet-item .ci-icon { font-size: 20px; flex: none; }
+.closet-item .ci-name { line-height: 1.2; }
+/* Вкладки шкафа влезают: только иконка у неактивных на узком экране. */
+@media (max-width: 480px) { .closet-tab:not(.active) { font-size: 0; gap: 0; padding: 7px 10px; } .closet-tab span { font-size: 15px; } }
+
+.closet-item { position: relative; }
+.ci-tint { position: absolute; right: 8px; top: 8px; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px #fff, 0 1px 3px rgba(0,0,0,.25); }
+
+/* Предложение переодеться. */
+#suggest { position: fixed; left: 50%; top: 150px; transform: translateX(-50%); display: flex; gap: 8px; z-index: 12; animation: popUp 0.25s ease-out; }
+#suggest[hidden] { display: none; }
+#suggest button { border: none; border-radius: 999px; padding: 9px 16px; font: inherit; font-size: 14px; font-weight: 800; cursor: pointer; background: var(--panel); color: var(--ink); box-shadow: 0 4px 14px rgba(90, 40, 100, 0.2); }
+#suggest #suggest-yes { background: var(--pink); color: #fff; }
+body.ui-hidden #suggest { opacity: 1; pointer-events: auto; }
+#suggest button { white-space: nowrap; }
+
+/* Строка камеры: 🙂 📸 📍 [1][2][3] ⌂ — всё влезает. */
+#cam-controls #cam-view { display: none !important; }
+#cam-controls #cam-stick2 { flex: none; margin-right: 4px; }
+#cam-controls { max-width: calc(100vw - 24px); }
+.cam-view-chip { width: 30px; height: 30px; font-size: 13px; }
+#cam-controls button.cam-view-chip { width: 30px; height: 30px; margin: 0 1px; background: rgba(255, 111, 168, 0.18); color: var(--pink); font-size: 13px; font-weight: 800; box-shadow: none; border: none; }
+#cam-controls button.cam-view-chip:active { background: var(--pink); color: #fff; }
+
+/* Взгляд — в строке камеры. */
+#cam-controls #btn-gaze.active { background: var(--pink); color: #fff; }
+#cam-controls #cam-auto.active { background: var(--pink); color: #fff; }
+
+/* Закрытые (ещё не открытые) возможности. */
+.locked { position: relative; opacity: 0.55; }
+.locked::after { content: '🔒'; position: absolute; right: -3px; top: -4px; font-size: 11px; line-height: 1; pointer-events: none; }
+#lock-pop { position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%); z-index: 50; width: min(320px, calc(100vw - 32px));
+  background: var(--panel); backdrop-filter: blur(12px); border-radius: 20px; padding: 16px; box-shadow: 0 12px 40px rgba(60, 20, 80, 0.3); text-align: center; }
+#lock-pop[hidden] { display: none; }
+#lock-pop .lp-title { font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+#lock-pop .lp-text { font-size: 14px; opacity: 0.85; margin-bottom: 12px; }
+#lock-pop .lp-btns { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+#lock-pop button { border: none; border-radius: 999px; padding: 9px 14px; font: inherit; background: rgba(255,255,255,0.7); }
+#lock-pop button.primary { background: var(--pink); color: #fff; }
+
+/* Панель авто-режима: темп и музыка. */
+#flow-panel { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(150px + env(safe-area-inset-bottom, 0px)); z-index: 6;
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--panel); backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(90, 40, 100, 0.16); }
+#flow-panel[hidden] { display: none; }
+#flow-panel input { width: 140px; accent-color: var(--pink); }
+#flow-panel button { width: 34px; height: 34px; border-radius: 50%; border: none; background: transparent; font-size: 18px; }
+#flow-panel button.active { background: var(--pink); color: #fff; }
+body.ui-hidden #flow-panel { opacity: 0.35; }
+#cam-controls #cam-auto.rec { background: #e8455f; color: #fff; animation: recPulse 1s ease-in-out infinite; }
+@keyframes recPulse { 50% { opacity: 0.6; } }
+
+/* Кнопка «Повтор движения» над левым ползунком. */
+#rep-btn { margin-bottom: 24px; width: 34px; height: 34px; padding: 0; border: none; border-radius: 50%; background: var(--panel);
+  color: var(--pink); display: grid; place-items: center; cursor: pointer; box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15); flex: none; position: relative; }
+#rep-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+#rep-btn.active { background: var(--pink); color: #fff; }
+#rep-btn.rec { background: #e8455f; color: #fff; animation: recPulse 1s ease-in-out infinite; }
+#cam-controls #cam-auto { display: none; }
+body.ui-hidden #rep-btn:not(.active) { opacity: 0.35; }
+
+/* Избранные движения повтора — столбик справа от кнопки повтора. */
+#sit-slider { position: fixed; }
+#rep-favs { position: absolute; left: 52px; top: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 6; }
+#rep-favs[hidden] { display: none; }
+#rep-favs button { width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%; background: var(--panel);
+  color: var(--pink); font: inherit; font-weight: 700; font-size: 14px; box-shadow: 0 2px 8px rgba(90, 40, 100, 0.15); cursor: pointer; touch-action: none; }
+#rep-favs .rf-add { font-size: 18px; }
+#rep-favs .rf-add:disabled { opacity: 0.35; }
+body.ui-hidden #rep-favs { opacity: 0.4; }
+
+/* Готовые движения повтора. */
+#rep-favs .rf-preset { font-size: 15px; background: rgba(255, 255, 255, 0.55); }
+/* Чистый вид: только она. */
+#clean-exit { display: none; }
+body.clean #hud, body.clean #buttons, body.clean #cam-controls, body.clean #sit-slider, body.clean #sit-slider2,
+body.clean #handles, body.clean #poses, body.clean #rep-favs, body.clean #toast, body.clean .pose-label, body.clean #pose-label { display: none !important; }
+body.clean #clean-exit { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px));
+  width: 34px; height: 34px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.25); color: rgba(255, 255, 255, 0.8);
+  font-size: 16px; backdrop-filter: blur(6px); }
+/* Шкаф пониже — над ним она видна целиком. */
+@media (max-width: 700px) { #wardrobe.panel { max-height: 40%; } }
+
+/* Старый раздел «Наряды» (замена всей модели) прячем — вещи меняются в «Шкафу» по одной. */
+#wardrobe .editor-group:has(+ #outfit-list), #outfit-list, #wardrobe .panel-add, #wardrobe .panel-add + .panel-note { display: none !important; }
+
+/* 📌/🔁 — режим точек (над кнопкой точек) */
+#btn-pointmode {
+  position: fixed;
+  bottom: 72px;
+  right: calc(max(16px, env(safe-area-inset-right, 0px)) + 2px);
+  width: 40px; height: 40px; padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  background: var(--panel);
+  font-size: 18px;
+  display: grid; place-items: center;
+  box-shadow: 0 4px 12px rgba(90, 40, 100, 0.2);
+  z-index: 12;
+  cursor: pointer;
+}
+#btn-pointmode[hidden] { display: none; }
+#btn-pointmode.rec { background: rgba(255, 111, 168, 0.25); }
+#btn-pointmode.recording::after {
+  content: ''; position: absolute; top: 3px; right: 3px; width: 9px; height: 9px;
+  border-radius: 50%; background: #ff3b5c; box-shadow: 0 0 6px #ff3b5c;
+}
+body.ui-hidden #btn-pointmode { opacity: 0.35; }
+
+/* Желание девушки: плашка под шкалой симпатии */
+#wish { position: fixed; bottom: calc(104px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); white-space: nowrap; z-index: 8; display: flex; align-items: center; gap: 7px; max-width: calc(100vw - 32px);
+  padding: 8px 14px 10px 10px; border: none; border-radius: 16px; background: rgba(253, 244, 250, 0.94); color: var(--ink);
+  font: inherit; font-size: 13.5px; font-weight: 700; box-shadow: 0 6px 18px rgba(90, 40, 100, 0.25); overflow: hidden; cursor: pointer;
+  animation: wishIn 0.35s ease; }
+#wish[hidden] { display: none; }
+#wish .w-ico { font-size: 17px; animation: wishBob 1.6s ease-in-out infinite; }
+#wish .w-bar { position: absolute; left: 0; bottom: 0; height: 3px; width: calc(var(--k, 1) * 100%); background: linear-gradient(90deg, var(--pink), #c77dff); border-radius: 0 3px 3px 0; }
+@keyframes wishIn { from { opacity: 0; transform: translate(-50%, 8px) scale(0.95); } to { opacity: 1; transform: translateX(-50%); } }
+body.posing #wish { bottom: calc(136px + env(safe-area-inset-bottom, 0px)); }
+@keyframes wishBob { 50% { transform: translateY(-2px) scale(1.12); } }
+body.love-open #wish { opacity: 0; pointer-events: none; }
+#love-menu .lm-head .lm-wishes { color: var(--ink); opacity: 0.75; font-weight: 600; }
+
+/* Выбор девушки в гардеробе */
+#girl-pick { display: flex; gap: 8px; margin-bottom: 10px; }
+#girl-pick .girl-chip { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; border: 2px solid transparent;
+  border-radius: 14px; background: rgba(255, 255, 255, 0.7); color: var(--ink); font: inherit; font-weight: 700; font-size: 14px; cursor: pointer; }
+#girl-pick .girl-chip.active { border-color: var(--pink); background: linear-gradient(135deg, rgba(255, 179, 209, 0.5), rgba(199, 125, 255, 0.3)); }
+#girl-pick .girl-chip.closed { opacity: 0.65; }
+#girl-pick .gc-ico { font-size: 17px; }
+#girl-pick .gc-lock { font-size: 12px; }
+
+/* Эффекты: частицы, вспышка, баннер уровня, огоньки на фоне */
+.fx-p { position: fixed; pointer-events: none; z-index: 61; line-height: 1; text-shadow: 0 0 8px currentColor; animation: fxFly 1.1s cubic-bezier(0.2, 0.7, 0.3, 1) forwards; will-change: transform, opacity; }
+@keyframes fxFly {
+  0% { transform: translate(-50%, -50%) scale(0.3) rotate(0deg); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1.15) rotate(var(--r)); opacity: 0; }
+}
+.fx-glow { position: fixed; inset: 0; pointer-events: none; z-index: 59; animation: fxGlow 1.3s ease-out forwards;
+  background: radial-gradient(circle at 50% 40%, rgba(255, 220, 240, 0.85) 0%, rgba(255, 150, 200, 0.35) 35%, transparent 70%); }
+@keyframes fxGlow { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
+.fx-banner { position: fixed; left: 50%; top: 60%; z-index: 62; pointer-events: none; white-space: nowrap; font-weight: 900; font-size: clamp(24px, 7.5vw, 38px);
+  color: #fff; text-shadow: 0 2px 0 #ff6fa8, 0 0 18px rgba(255, 111, 168, 0.9), 0 0 34px rgba(199, 125, 255, 0.8); animation: fxBanner 2.6s ease forwards; }
+@keyframes fxBanner {
+  0% { transform: translate(-50%, 14px) scale(0.6); opacity: 0; }
+  14% { transform: translate(-50%, 0) scale(1.12); opacity: 1; }
+  22% { transform: translate(-50%, 0) scale(1); }
+  78% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -18px) scale(1.04); opacity: 0; }
+}
+#ambient { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+#ambient i { position: absolute; width: var(--sz); height: var(--sz); border-radius: 50%; background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 10px 3px rgba(255, 105, 180, 0.75); opacity: 0; animation: ambFloat var(--d) linear var(--delay) infinite; }
+@keyframes ambFloat {
+  0% { transform: translate(0, 30px); opacity: 0; }
+  15% { opacity: 0.75; }
+  85% { opacity: 0.55; }
+  100% { transform: translate(var(--drift), -130px); opacity: 0; }
+}
+body.bg-stars #ambient i { background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 6px 1px rgba(190, 210, 255, 0.8); animation-name: ambTwinkle; animation-timing-function: ease-in-out; }
+@keyframes ambTwinkle { 0%, 100% { opacity: 0.08; transform: scale(0.5); } 50% { opacity: 1; transform: scale(1.4); } }
+body.bg-night #ambient i { background: rgba(230, 200, 255, 0.85); box-shadow: 0 0 8px 2px rgba(199, 125, 255, 0.7); }
+body.photo #ambient { display: none; }
+
+/* Режим «Авто»: кнопка внизу и сам режим (только она, без интерфейса) */
+#poses #btn-automode { position: fixed; bottom: 16px; left: calc(max(16px, env(safe-area-inset-left, 0px)) + 208px); height: 44px; padding: 0 14px 0 11px;
+  display: flex; align-items: center; gap: 5px; border: 1px solid rgba(255, 255, 255, 0.75); border-radius: 999px; font: inherit; font-weight: 800; font-size: 14px;
+  color: #fff; background: linear-gradient(90deg, var(--pink), #c77dff); box-shadow: 0 4px 14px rgba(255, 111, 168, 0.4); cursor: pointer; transition: transform 0.12s ease; }
+#poses #btn-automode:active { transform: scale(0.94); }
+#poses #btn-automode span { font-size: 15px; }
+body.posing #btn-automode { display: none; }
+#auto-exit { display: none; }
+body.automode #hud, body.automode #cam-controls, body.automode #sit-slider, body.automode #sit-slider2, body.automode #handles,
+body.automode #poses, body.automode #rep-favs, body.automode #hint, body.automode #pose-label, body.automode #btn-pointmode,
+body.automode #clean-exit, body.automode #suggest { display: none !important; }
+body.automode #auto-exit { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+  width: 36px; height: 36px; border: none; border-radius: 50%; background: rgba(255, 255, 255, 0.22); color: rgba(255, 255, 255, 0.9);
+  font-size: 15px; backdrop-filter: blur(6px); cursor: pointer; }
+body.automode #wish { bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
+/* Плавные меню: панели выезжают, кнопки пружинят */
+.panel:not(.hidden) { animation: panelIn 0.26s cubic-bezier(0.2, 0.8, 0.3, 1); }
+@keyframes panelIn { from { transform: translateY(22px); opacity: 0; } to { transform: none; opacity: 1; } }
+#lock-pop:not([hidden]) { animation: popIn 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+@keyframes popIn { from { transform: translate(-50%, -46%) scale(0.92); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+.girl-chip, .closet-tabs button, #piece-list button, .chip, .panel-big { transition: transform 0.12s ease, background 0.2s ease, border-color 0.2s ease; }
+.girl-chip:active, .closet-tabs button:active, #piece-list button:active, .chip:active, .panel-big:active { transform: scale(0.95); }
+
+/* Шпаргалка по жестам в режиме «Авто» */
+#auto-hint { position: fixed; left: 50%; bottom: calc(36px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 31; width: min(330px, calc(100vw - 28px));
+  display: flex; flex-direction: column; gap: 5px; padding: 13px 15px; border-radius: 18px; background: rgba(30, 20, 48, 0.82); backdrop-filter: blur(10px);
+  color: #fff; font-size: 13px; line-height: 1.3; pointer-events: none; animation: fadeIn 0.3s ease; box-shadow: 0 8px 26px rgba(0, 0, 0, 0.35); }
+#auto-hint[hidden] { display: none; }
+#auto-hint b { font-size: 14.5px; margin-bottom: 2px; }
+#auto-hint span { opacity: 0.92; }
+
+/* ── «Жидкое стекло»: чистое прозрачное стекло с бликом, тёмные матовые меню ── */
+:root {
+  --glass-bg:
+    radial-gradient(120% 70% at 20% -15%, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0) 46%),
+    radial-gradient(100% 60% at 85% 125%, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
+  --glass-on:
+    radial-gradient(120% 70% at 20% -15%, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 46%),
+    linear-gradient(140deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.22));
+  --glass-edge:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    inset 2px 2px 3px -1px rgba(255, 255, 255, 0.95), inset -2px -2px 4px -1px rgba(255, 255, 255, 0.5),
+    inset 0 0 12px rgba(255, 255, 255, 0.1),
+    0 8px 22px rgba(0, 0, 0, 0.28);
+  --glass-blur: blur(3px) saturate(1.7) brightness(1.12);
+}
+button:not(.swatch):not(.ci-tint):not(.del):not(.outfit-del):not(.panel-close), #buttons .btn, .chip, #wish, #affection, #toast {
+  background: var(--glass-bg) !important;
+  border: 1px solid rgba(255, 255, 255, 0.4) !important;
+  box-shadow: var(--glass-edge) !important;
+  -webkit-backdrop-filter: var(--glass-blur) !important;
+  backdrop-filter: var(--glass-blur) !important;
+  color: #fff !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.45);
+  transition: transform 0.14s ease, box-shadow 0.25s ease, background 0.25s ease;
+}
+button:not(.swatch):not(.ci-tint):not(.del):not(.outfit-del):not(.panel-close):active { transform: scale(0.93); }
+/* внутри уже стеклянной плашки — без второго размытия (экономим телефон) */
+#cam-controls button, .panel button, .panel .chip, #love-menu button, #pose-bar button, #pose-list button {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16), inset 2px 2px 3px -1px rgba(255, 255, 255, 0.8), inset -2px -2px 4px -1px rgba(255, 255, 255, 0.35), 0 3px 10px rgba(0, 0, 0, 0.2) !important;
+}
+button:is(.active, .primary, .armed):not(.swatch):not(.ci-tint):not(.closet-item):not(#_), .chip.active:not(#_), #cam-controls #btn-zoom:not(.off) {
+  background: var(--glass-on) !important;
+  border-color: rgba(255, 255, 255, 0.6) !important;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.8), inset -1px -1px 0 rgba(255, 255, 255, 0.25), 0 0 16px rgba(255, 255, 255, 0.55), 0 6px 18px rgba(0, 0, 0, 0.3) !important;
+  color: #fff !important;
+}
+#affection > :not(#love-menu), #affection > :not(#love-menu) * { color: #fff !important; }
+/* плашки и меню — тёмное матовое стекло, светлый текст */
+#cam-controls, #pose-bar, .panel, #love-menu {
+  --ink: #fff;
+  color: #fff !important;
+  background:
+    radial-gradient(120% 50% at 12% -5%, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0) 50%),
+    linear-gradient(165deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.16)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.38) !important;
+  -webkit-backdrop-filter: blur(5px) saturate(1.6) !important;
+  backdrop-filter: blur(5px) saturate(1.6) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 2px 2px 4px -1px rgba(255, 255, 255, 0.85), inset -2px -2px 5px -1px rgba(255, 255, 255, 0.35), 0 16px 44px rgba(0, 0, 0, 0.35) !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.5);
+}
+#cam-controls, #pose-bar { background: linear-gradient(165deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)) !important; }
+#love-menu { background: radial-gradient(120% 50% at 12% -5%, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0) 50%), linear-gradient(165deg, rgba(40, 40, 46, 0.42), rgba(0, 0, 0, 0.5)) !important; }
+#love-menu .lm-lvl { background: rgba(255, 255, 255, 0.09); }
+#love-menu .lm-lvl.cur { background: rgba(255, 255, 255, 0.24); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.8) inset; }
+#love-menu li.open { color: #fff; }
+#love-menu .lm-head small, .panel h3, .panel .editor-group > b, .panel .editor-group > span { color: rgba(255, 255, 255, 0.75) !important; }
+#love-menu .lm-bar { background: rgba(255, 255, 255, 0.18); }
+.panel .swatch, .panel input, .panel select { background: rgba(255, 255, 255, 0.12) !important; color: #fff !important; border-color: rgba(255, 255, 255, 0.2); }
+.panel .swatch.active, .panel .closet-item.active { border-color: #fff !important; }
+.panel .panel-close { color: #fff; background: rgba(255, 255, 255, 0.14); border-radius: 50%; }
+.panel .closet-item.active:not(#_) {
+  border-color: #fff !important;
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.16)) !important;
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.6), 0 0 14px rgba(255, 255, 255, 0.45) !important;
+}
+
+/* «Авто»: плашка «Повторить» рядом с ней (двигается вместе с ней) */
+#auto-rep { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); z-index: 30; white-space: nowrap;
+  padding: 9px 16px; border-radius: 999px; font: inherit; font-size: 15px; font-weight: 800; cursor: pointer; animation: fadeIn 0.25s ease; }
+#auto-rep[hidden] { display: none; }
+#auto-rep:active { transform: translate(-50%, -50%) scale(0.94) !important; }
+#auto-rep.offer { animation: fadeIn 0.25s ease, autoRepPulse 1s ease-in-out infinite; }
+#auto-rep.active { padding: 6px 12px; font-size: 12.5px; font-weight: 700; opacity: 0.8; background: var(--glass-bg) !important; box-shadow: var(--glass-edge) !important; }
+@keyframes autoRepPulse { 0%, 100% { box-shadow: var(--glass-edge), 0 0 0 0 rgba(255, 255, 255, 0.55); } 50% { box-shadow: var(--glass-edge), 0 0 0 10px rgba(255, 255, 255, 0); } }
+.panel .editor-group:not(#_) { color: rgba(255, 255, 255, 0.72) !important; }
+#love-menu .lm-n:not(#_) { background: rgba(255, 255, 255, 0.28); color: #fff; }
+
+/* «Авто» — круглая кнопка справа, рядом со звёздочкой: не закрывает кнопку точек */
+#poses #btn-automode { left: auto; right: calc(max(16px, env(safe-area-inset-right, 0px)) + 56px); width: 44px; padding: 0; justify-content: center; border-radius: 50%; }
+#poses #btn-automode span { font-size: 19px; }
+
+/* «Авто»: кнопка «?» — показать, как управлять */
+#auto-help { display: none; }
+body.automode #auto-help { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(56px + env(safe-area-inset-right, 0px));
+  width: 36px; height: 36px; border-radius: 50%; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer; }
+
+/* Простой вид: меню ☰ — всё в одном месте */
+#auto-menu { position: fixed; z-index: 31; top: calc(56px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 20px; min-width: 214px; animation: fadeIn 0.18s ease;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.22)); border: 1px solid rgba(255, 255, 255, 0.38);
+  -webkit-backdrop-filter: blur(8px) saturate(1.5); backdrop-filter: blur(8px) saturate(1.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), inset 2px 2px 4px -1px rgba(255, 255, 255, 0.8), 0 16px 44px rgba(0, 0, 0, 0.35); }
+#auto-menu[hidden] { display: none; }
+#auto-menu button { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 14px; font: inherit; font-size: 15px; font-weight: 700; text-align: left; cursor: pointer;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+#auto-menu button i { font-style: normal; font-size: 18px; width: 24px; text-align: center; flex: none; }
+/* сердечко с уровнем остаётся и в простом виде — маленькое, слева вверху */
+body.automode #hud:not(#_) { display: flex !important; }
+body.automode #hud #buttons { display: none !important; }
+body.automode #affection { transform: scale(0.82); transform-origin: left top; }
+
+/* Меню ☰ — всегда на месте, в обоих видах. В ручном виде на экране только то, чего нет в меню:
+   полосы, дом, позы, камера, точки и список поз. */
+#auto-exit:not(#_) { display: grid; place-items: center; position: fixed; z-index: 30;
+  top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px));
+  width: 36px; height: 36px; border-radius: 50%; font-size: 15px; cursor: pointer; }
+body:not(.automode) #hud #buttons, body:not(.automode) #poses #btn-gaze, body:not(.automode) #poses #btn-automode { display: none !important; }
+body:not(.automode) #poses #btn-handles:not(#_) { left: calc(max(16px, env(safe-area-inset-left, 0px)) + 156px); }
+body.ui-hidden #auto-exit, body.ui-hidden #auto-help { opacity: 0.35; transition: opacity 0.6s ease; }
+
+/* Желание — просьба рядом с ней: появляется у головы, через ~10 секунд тихо гаснет */
+#wish:not(#_) { animation: fadeIn 0.35s ease; bottom: auto; left: 50%; top: 40%; transform: translate(-50%, -50%); padding: 8px 14px; font-size: 14px; transition: opacity 0.9s ease; }
+#wish.gone { opacity: 0; pointer-events: none; }
+#wish .w-bar { display: none; }
+
+/* Стандартные позы убраны: в списке ★ только свои сохранённые */
+#poses #pose-list #pose-more:not(#_) { display: none !important; }
+
+/* Шкаф: палитра цвета для надетой вещи */
+.closet-palette { display: flex; flex-wrap: wrap; gap: 9px; padding: 12px 4px 4px; justify-content: center; }
+.closet-palette .ci-tint.pal { position: static; width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.55); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3); cursor: pointer; padding: 0; }
+.closet-palette .ci-tint.pal.on { border-color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 12px rgba(255, 255, 255, 0.7); transform: scale(1.12); }
+.closet-grid .closet-item { min-height: 54px; }
+/* Шкаф повыше (видно больше вещей); выбор девушки и готик-кнопка — компактнее */
+@media (max-width: 700px) { #wardrobe.panel:not(#_) { max-height: 52%; } }
+#wardrobe #goth-preset { padding: 7px 10px; font-size: 12.5px; opacity: 0.85; }
+#girl-pick .girl-chip { padding: 7px 8px; }
+
+/* ── Гардероб: сначала вещи, остальное (девушка, готик, волосы, фон) — ниже ── */
+#wardrobe .panel-body { display: flex; flex-direction: column; }
+#wardrobe .panel-body > * { order: 5; flex: none; }
+#wardrobe #piece-list { order: 0; }
+#wardrobe .editor-group:has(+ #piece-list) { display: none; }
+/* вкладки: шесть равных кнопок во всю ширину, ничего не обрезается; подпись — только у выбранной */
+#wardrobe .closet-tabs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; overflow: visible; position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; }
+#wardrobe .closet-tab:not(#_) { justify-content: center; padding: 8px 2px; font-size: 0; gap: 0; min-width: 0; }
+#wardrobe .closet-tab span { font-size: 18px; }
+#wardrobe .closet-tabs::after { content: attr(data-title); grid-column: 1 / -1; font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.72; padding: 2px 2px 0; }
+/* вещи: кружок цвета не налезает на название */
+#wardrobe .closet-item { padding-right: 30px; min-height: 52px; font-size: 12.5px; }
+#wardrobe .closet-item .ci-name { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+#wardrobe .closet-item .ci-tint { right: 9px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; }
+#wardrobe .closet-item .ci-icon { font-size: 17px; }
+/* подсказка не лезет на нижние кнопки; при открытом меню не видна */
+#hint:not(#_) { bottom: 84px; font-size: 13px; }
+body:has(#auto-menu:not([hidden])) #hint, body:has(#love-menu:not([hidden])) #hint { opacity: 0 !important; }
+/* всплывающая надпись — выше середины, не на ней и не на кнопках */
+#toast:not(#_) { top: 24%; max-width: 78vw; font-size: 14px; padding: 9px 16px; }
+
+/* Простой вид: значки состояний внизу */
+#auto-states { display: none; }
+body.automode #auto-states { display: flex; gap: 8px; position: fixed; z-index: 29; left: 50%; transform: translateX(-50%);
+  bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 4px); transition: opacity 0.6s ease; }
+#auto-states button { display: flex; align-items: center; gap: 0; height: 42px; min-width: 42px; padding: 0 11px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; }
+#auto-states button i { font-style: normal; font-size: 18px; }
+#auto-states button span { max-width: 0; overflow: hidden; white-space: nowrap; transition: max-width 0.25s ease, margin 0.25s ease; }
+#auto-states button.active span { max-width: 90px; margin-left: 6px; }
+body.ui-hidden #auto-states { opacity: 0.3; }
+body:has(.panel:not(.hidden)) #auto-states, body:has(#auto-menu:not([hidden])) #auto-states { opacity: 0; pointer-events: none; }
+body.automode #wish:not(#_) { z-index: 8; }
+/* Чистый экран: только она */
+body.cleanscreen #hud, body.cleanscreen #auto-exit, body.cleanscreen #auto-help, body.cleanscreen #auto-states, body.cleanscreen #wish,
+body.cleanscreen #bubble, body.cleanscreen #auto-rep, body.cleanscreen #hint, body.cleanscreen #auto-hint,
+body.cleanscreen #poses, body.cleanscreen #sit-slider, body.cleanscreen #sit-slider2, body.cleanscreen #cam-controls, body.cleanscreen #handles,
+body.cleanscreen .float-heart, body.cleanscreen .fx-banner, body.cleanscreen #suggest { display: none !important; }
+body.cleanscreen #hud:not(#_):not(#__), body.cleanscreen .fx-p { display: none !important; }
+
+/* Значки состояний: скрыты, появляются по долгому тапу по ней */
+body.automode #auto-states:not(#_) { opacity: 0; pointer-events: none; transform: translateX(-50%) translateY(10px); transition: opacity 0.25s ease, transform 0.25s ease; }
+body.automode #auto-states.show:not(#_) { opacity: 1; pointer-events: auto; transform: translateX(-50%); }
+#auto-states button span { max-width: 90px; margin-left: 6px; }
+
+/* Анимации: готовые движения-чипы убраны */
+#anims #mocap-list, #anims #mocap-list + .panel-note { display: none !important; }
+
+/* пять значков помещаются: подпись только у «позы сна» и у включённых */
+#auto-states { gap: 6px !important; }
+#auto-states button { padding: 0 10px; }
+#auto-states button span:empty { display: none; }
+#auto-states button:not(.active) span { max-width: 0; margin-left: 0; }
+#auto-states button:nth-child(3) span { max-width: 90px; margin-left: 6px; }
+
+/* значки состояний: только иконки, одинаковые кружки, всегда влезают в экран */
+#auto-states:not(#_) { gap: 8px !important; max-width: calc(100vw - 16px); }
+#auto-states button:not(#_) { width: 46px; min-width: 0; height: 46px; padding: 0; justify-content: center; flex: 0 1 46px; }
+#auto-states button i { font-size: 21px; }
+#auto-states button svg { width: 24px; height: 24px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* открыто меню ☰ — облачко с фразой не просвечивает сквозь него */
+body:has(#auto-menu:not([hidden])) #bubble { opacity: 0; }
+
+/* Значки по долгому тапу: две группы — состояния и инструменты. */
+#auto-states button.sep { margin-left: 10px; }
+#auto-states:not(#_):not(#__) { gap: 6px !important; }
+
+/* ---------- Живые переходы интерфейса (сборка 152) ----------
+   Только прозрачность и сдвиг/масштаб — видеокарта делает это сама, кадры игры не страдают.
+   Свойства translate/scale отдельные, чтобы не ломать уже заданные transform у элементов. */
+@keyframes uiPop { from { opacity: 0; scale: 0.92; translate: 0 -8px; } to { opacity: 1; scale: 1; translate: 0 0; } }
+@keyframes uiRise { from { opacity: 0; translate: 0 18px; } to { opacity: 1; translate: 0 0; } }
+@keyframes uiBubble { 0% { scale: 0.86; } 60% { scale: 1.04; } 100% { scale: 1; } }
+/* Меню ☰ раскрывается из своей кнопки. */
+#auto-menu:not([hidden]) { transform-origin: 100% 0; animation: uiPop 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+/* Панели (гардероб, анимации…) выезжают снизу. */
+.panel:not(.hidden) { animation: uiRise 0.26s cubic-bezier(0.2, 0.8, 0.25, 1) both; }
+/* Облачко с репликой мягко «выпрыгивает», подсказка-желание и кнопка повтора — тоже. */
+#bubble:not(.hidden) { animation: uiBubble 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+#bubble { transition: opacity 0.25s ease; }
+#photo-view:not([hidden]) { animation: uiPop 0.22s ease both; }
+/* Нажатие чувствуется: кнопки и значки чуть поджимаются под пальцем и пружинят обратно. */
+#auto-menu button, #auto-states button, #auto-exit, #auto-help, .chip, .panel button { transition: scale 0.16s cubic-bezier(0.3, 1.6, 0.5, 1), background-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease; }
+#auto-menu button:active, #auto-states button:active, #auto-exit:active, #auto-help:active, .chip:active, .panel button:active { scale: 0.93; transition-duration: 0.05s; }
+/* Включённый значок плавно подсвечивается. */
+#auto-states button.active { transition: scale 0.16s cubic-bezier(0.3, 1.6, 0.5, 1), background-color 0.25s ease, box-shadow 0.25s ease; }
+@media (prefers-reduced-motion: reduce) {
+  #auto-menu:not([hidden]), .panel:not(.hidden), #bubble:not(.hidden), #photo-view:not([hidden]) { animation: none; }
+}
+
+/* ---------- Сборка 184: ровные меню ---------- */
+/* Гардероб: вкладки при прокрутке больше не висят прозрачно поверх вещей — у них своя подложка, список уходит под неё. */
+#wardrobe .closet-tabs:not(#_) { background: rgba(38, 30, 84, 0.92); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); margin: 0 -10px; padding: 6px 10px 6px; border-radius: 14px; box-shadow: 0 6px 14px -8px rgba(0, 0, 0, 0.5); }
+/* Симметрия: одинокая последняя вещь (нечётное число) и большие кнопки — во всю ширину. */
+.closet-grid .closet-item:last-child:nth-child(odd) { grid-column: 1 / -1; justify-content: center; }
+#piece-list .panel-big { margin-top: 8px; }
+/* Меню ☰: пункты одной высоты, значки в одну колонку; закрывается плавно. */
+#auto-menu button { min-height: 46px; width: 100%; }
+#auto-menu.closing { animation: uiPopOut 0.15s ease forwards; pointer-events: none; }
+@keyframes uiPopOut { to { opacity: 0; scale: 0.94; translate: 0 -6px; } }
+/* Значки по долгому тапу: ровно по центру, одинаковые промежутки, появляются по очереди. */
+#auto-states.show button { animation: uiChip 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+#auto-states.show button:nth-child(2) { animation-delay: 0.02s; } #auto-states.show button:nth-child(3) { animation-delay: 0.04s; }
+#auto-states.show button:nth-child(4) { animation-delay: 0.06s; } #auto-states.show button:nth-child(5) { animation-delay: 0.08s; }
+#auto-states.show button:nth-child(6) { animation-delay: 0.10s; } #auto-states.show button:nth-child(7) { animation-delay: 0.12s; }
+#auto-states.show button:nth-child(8) { animation-delay: 0.14s; }
+@keyframes uiChip { from { opacity: 0; translate: 0 10px; scale: 0.8; } to { opacity: 1; translate: 0 0; scale: 1; } }
+#grab-ask { animation: uiRise 0.2s ease both; }
+@media (prefers-reduced-motion: reduce) { #auto-states.show button, #auto-menu.closing, #grab-ask { animation: none; } }
+
+/* ---------- Сборка 185 ---------- */
+.panel.closing { animation: uiSink 0.17s ease forwards; pointer-events: none; }
+@keyframes uiSink { to { opacity: 0; translate: 0 16px; } }
+/* Панели: большие кнопки одной высоты и с одинаковыми промежутками, заголовок и крестик на одной линии. */
+.panel .panel-big { min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }
+.panel .panel-body > .panel-big:first-child { margin-top: 0; }
+.panel .panel-head { display: flex; align-items: center; justify-content: space-between; }
+@media (prefers-reduced-motion: reduce) { .panel.closing { animation: none; } }
+
+/* ---------- Сборка 189: значки по долгому тапу — ровно по центру, одинаковые промежутки, не упираются в края ---------- */
+#auto-states:not(#_):not(#__):not(#___) { gap: 6px !important; padding: 0 10px; box-sizing: border-box; width: 100vw; max-width: 460px; justify-content: center; }
+#auto-states button:not(#_):not(#__) { flex: 0 1 44px; width: 44px; height: 44px; }
+#auto-states button.sep:not(#_) { margin-left: 12px; }
+
+/* Значки по долгому тапу — ровные круги одного размера в два ряда по центру: сверху что она делает,
+   снизу инструменты. Не сжимаются в овалы, сколько бы их ни было. */
+#auto-states:not(#_):not(#__) { --sz: 44px; gap: 8px !important; flex-wrap: wrap; justify-content: center; align-items: center; width: max-content; max-width: calc(100vw - 16px); }
+#auto-states button:not(#_):not(#__) { width: var(--sz); height: var(--sz); min-width: 0; flex: 0 0 var(--sz); padding: 0; margin: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; line-height: 1; }
+#auto-states .brk { flex: 0 0 100%; height: 0; margin: 0; padding: 0; }
+#auto-states button:not(#_) i { font-size: 20px; line-height: 1; display: block; }
+#auto-states button:not(#_) svg { width: 23px; height: 23px; display: block; }
+
+/* Свечение на части тела, которую ведёшь за точку: мягкий свет без контура, слегка дышит. */
+#grab-glow { position: fixed; left: 0; top: 0; z-index: 6; pointer-events: none; border-radius: 50%; opacity: 0; transition: opacity 0.25s ease;
+  background: radial-gradient(circle, rgba(255,225,248,0.85) 0%, rgba(255,160,225,0.5) 26%, rgba(200,150,255,0.22) 50%, rgba(190,150,255,0) 70%);
+  mix-blend-mode: screen; filter: blur(3px); animation: grabGlowPulse 1.3s ease-in-out infinite; will-change: transform, opacity; }
+@keyframes grabGlowPulse { 0%, 100% { filter: blur(3px) brightness(1); } 50% { filter: blur(4px) brightness(1.25); } }

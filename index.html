@@ -21,32 +21,76 @@
 
   <div id="hud">
     <div id="affection">
-      <span class="heart">♥</span>
-      <div class="bar"><div class="fill" id="affection-fill"></div></div>
-      <span id="affection-label">Незнакомец</span>
+      <span class="heart">♥<b id="affection-lvl">1</b></span>
+      <div class="love-text">
+        <span id="affection-label">Незнакомец</span>
+        <div class="bar"><div class="fill" id="affection-fill"></div></div>
+      </div>
+      <div id="love-menu" hidden>
+        <button id="love-max">♥ Макс</button>
+        <button id="love-reset">Сброс</button>
+      </div>
     </div>
     <div id="buttons">
-      <button id="btn-voice" title="Озвучка">🔊</button>
-      <button id="btn-zoom" title="Во весь рост / крупно">🔍</button>
-      <button id="btn-wardrobe" title="Гардероб">👗</button>
-      <button id="btn-anims" title="Анимации и танец">🎬</button>
-      <button id="btn-editor" title="Редактор поз">✏️</button>
-      <button id="btn-hitbox" title="Показать зоны касаний">🎯</button>
+      <button id="btn-voice" class="icon-btn" title="Озвучка"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></svg></button>
+      <button id="btn-camera" class="icon-btn" title="Режим камеры: вращать и приближать"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="12.5" height="10" rx="2.5"/><path d="M15.5 11l5-3v8l-5-3"/></svg></button>
+      <button id="btn-wardrobe" class="icon-btn" title="Гардероб"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7.5a2 2 0 1 1 2-2"/><path d="M12 7.5v1.2L3.5 14.5a1.2 1.2 0 0 0 .7 2.2h15.6a1.2 1.2 0 0 0 .7-2.2L12 8.7"/></svg></button>
+      <button id="btn-anims" class="icon-btn" title="Анимации и танец"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 17.5V6l10-2v11.5"/><circle cx="6.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="15.5" r="2.5"/></svg></button>
+      <button id="btn-editor" class="icon-btn" title="Редактор поз"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4.5L15.5 5a2 2 0 0 1 2.8 0l.7.7a2 2 0 0 1 0 2.8L8.5 19z"/><path d="M13.5 7l3.5 3.5"/></svg></button>
+      <button id="btn-hitbox" class="icon-btn" title="Показать зоны касаний"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8"/></svg></button>
     </div>
   </div>
 
   <div id="bubble" class="hidden"></div>
 
-  <div id="cam-controls">
-    <button id="cam-in" title="Приблизить">＋</button>
-    <button id="cam-out" title="Отдалить">−</button>
-    <button id="cam-left" title="Повернуть влево">⟲</button>
-    <button id="cam-right" title="Повернуть вправо">⟳</button>
-    <button id="cam-reset" title="Вернуть вид">⌂</button>
+  <div id="toast"></div>
+  <div id="suggest" hidden><button id="suggest-yes">👗 Надень</button><button id="suggest-no">Не сейчас</button></div>
+  <div id="handles" hidden></div>
+  <div id="pose-label"></div>
+
+  <div id="sit-slider" aria-label="Левый край: вниз — присесть, сесть, лечь; вверх — встать">
+    <div class="track"><i style="top:0%"></i><i style="top:38.5%"></i><i style="top:61.5%"></i><i style="top:76.9%"></i><i style="top:100%"></i><b class="thumb"></b></div>
+    <button id="lie-toggle" title="Ложиться: вкл"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11.5" r="1.8"/></svg></button>
   </div>
+
+  <div id="sit-slider2" aria-label="Справа: вниз — присесть, сесть, лечь; вверх — встать">
+    <div class="track"><i style="top:0%"></i><i style="top:38.5%"></i><i style="top:61.5%"></i><i style="top:76.9%"></i><i style="top:100%"></i><b class="thumb"></b></div>
+    <button id="lie-toggle2" title="Как ложится"><svg viewBox="0 0 24 24" aria-hidden="true"></svg></button>
+  </div>
+
+  <div id="cam-controls" hidden>
+    <button id="cam-face" class="icon-btn" title="Камера к лицу"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="9.2" cy="10.5" r="0.9" fill="currentColor"/><circle cx="14.8" cy="10.5" r="0.9" fill="currentColor"/><path d="M9 14.5c1.6 1.4 4.4 1.4 6 0"/></svg></button>
+    <button id="cam-auto" class="icon-btn" title="Повтор движения"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a6 6 0 0 1 10.5-4M20 12a6 6 0 0 1-10.5 4"/><path d="M14 4.5l.8 3.6-3.6.6M10 19.5l-.8-3.6 3.6-.6"/></svg></button>
+    <button id="cam-photo" class="icon-btn" title="Фото"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7H8l1.5-2h5L16 7h2.5A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+    <button id="cam-pin" class="icon-btn" title="Запомнить ракурс"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.5-6-11a6 6 0 0 1 12 0c0 5.5-6 11-6 11z"/><path d="M12 7.5v5M9.5 10h5"/></svg></button>
+    <span id="cam-views"></span>
+    <button id="cam-in" class="icon-btn" title="Приблизить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg></button>
+    <button id="cam-out" class="icon-btn" title="Отдалить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+    <button id="btn-zoom" class="icon-btn" title="Во весь рост / крупно"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg></button>
+    <button id="cam-reset" class="icon-btn" title="Вернуть вид"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6.5 9.5V19h11V9.5"/></svg></button>
+  </div>
+
   <div id="poses">
     <div id="pose-list" hidden></div>
-    <button id="poses-toggle" aria-expanded="false">🧍 Поза: <span id="pose-current">Стоит</span> ▴</button>
+    <div id="pose-bar" hidden>
+      <div id="pose-bar-buttons">
+        <button id="pose-reset" class="pb-icon" title="Сбросить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4 4.5v4h4"/></svg></button>
+        <button id="pose-undo" class="pb-icon" title="Отменить"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+        <button id="pose-save" class="pb-icon" title="Сохранить позу"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.6.9 5.2-4.6-2.4-4.6 2.4.9-5.2-3.8-3.6 5.2-.8z"/></svg></button>
+        <button id="pose-done" class="primary"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Готово</button>
+      </div>
+      <form id="pose-save-form" hidden>
+        <input id="pose-save-name" type="text" maxlength="20" placeholder="Название позы" autocomplete="off" />
+        <button type="submit" class="primary">OK</button>
+        <button type="button" id="pose-save-cancel">✕</button>
+      </form>
+    </div>
+    <button id="btn-tab-pose" class="icon-btn" title="Позы"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l1-4.5L15.5 5a2 2 0 0 1 2.8 0l.7.7a2 2 0 0 1 0 2.8L8.5 19z"/><path d="M13.5 7l3.5 3.5"/></svg></button>
+    <button id="btn-gaze" class="icon-btn" title="Взгляд"><svg viewBox="0 0 24 24" aria-hidden="true"></svg></button>
+    <button id="btn-handles" class="icon-btn" title="Точки"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg></button>
+    <button id="btn-cam" class="icon-btn" title="Камера"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="12.5" height="10" rx="2.5"/><path d="M15.5 11l5-3v8l-5-3"/></svg></button>
+    <button id="btn-home" class="icon-btn" title="Вид спереди, встать"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6.5 8 6.5"/><path d="M6.5 9.5V19h11V9.5"/></svg></button>
+    <button id="poses-toggle" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.5l2.3 4.7 5.2.8-3.8 3.6.9 5.2-4.6-2.4-4.6 2.4.9-5.2-3.8-3.6 5.2-.8z"/></svg><span><b id="pose-current">Стоит</b></span><span class="chev">▴</span></button>
   </div>
 
   <div id="wardrobe" class="panel hidden">
@@ -56,20 +100,19 @@
     </div>
     <div class="panel-body">
       <button id="goth-preset" class="panel-big">🖤 Готик-образ одной кнопкой</button>
+      <div class="editor-group">Шкаф</div>
+      <div id="piece-list"></div>
       <div class="editor-group">Наряды</div>
       <div id="outfit-list"></div>
       <label class="panel-add">+ Добавить наряд (.vrm)
         <input id="outfit-input" type="file" accept=".vrm" hidden />
       </label>
       <p class="panel-note">Сделай в VRoid Studio ту же девушку в разных нарядах и добавь каждый файл сюда.</p>
-      <div class="editor-group">Цвет одежды</div>
-      <div id="color-list"></div>
+      <div id="color-list" style="display:none"></div>
       <div class="editor-group">Волосы</div>
       <div id="hair-list" class="swatches"></div>
-      <div class="editor-group">Чулки</div>
-      <div id="stocking-list" class="chips"></div>
-      <div class="editor-group">Атмосфера</div>
-      <button id="dark-toggle" class="panel-big">🌙 Готичная атмосфера: выкл</button>
+      <div class="editor-group">Фон и свет</div>
+      <div id="bg-list" class="chips"></div>
     </div>
   </div>
 
@@ -79,31 +122,21 @@
       <button class="panel-close" title="Закрыть">✕</button>
     </div>
     <div class="panel-body">
+      <button id="btn-auto" class="panel-big">🌸 Сама двигается: вкл</button>
       <button id="btn-dance" class="panel-big">💃 Танцевать</button>
-      <div class="editor-group">Mocap-анимации</div>
+      <div id="loop-list" class="chips" style="display:none"></div>
+      <div class="editor-group">Движения</div>
+      <button id="btn-live-idle" class="panel-big">✨ Живое ожидание</button>
+      <div id="mocap-list" class="chips"></div>
+      <p class="panel-note">Движения из CMU Motion Capture Database (mocap.cs.cmu.edu).</p>
+      <div class="editor-group">Свои анимации</div>
       <div id="anim-list"></div>
-      <label class="panel-add">+ Загрузить анимацию (.vrma)
-        <input id="anim-input" type="file" accept=".vrma" hidden />
+      <label class="panel-add">+ Загрузить анимацию (.vrma или .fbx Mixamo)
+        <input id="anim-input" type="file" accept=".vrma,.fbx" hidden />
       </label>
     </div>
   </div>
 
-  <div id="editor" class="panel hidden">
-    <div class="editor-head">
-      <b>Своя поза</b>
-      <button class="panel-close" title="Закрыть">✕</button>
-    </div>
-    <div id="editor-sliders"></div>
-    <form id="editor-save-row" hidden>
-      <input id="pose-name" type="text" maxlength="20" placeholder="Название позы" autocomplete="off" />
-      <button type="submit" class="primary">OK</button>
-    </form>
-    <div class="editor-actions">
-      <button id="editor-clear">Удалить сохранённые</button>
-      <button id="editor-reset">Сброс</button>
-      <button id="editor-save" class="primary">Сохранить</button>
-    </div>
-  </div>
   <div id="hint">Гладь по голове, бери за руку… просто попробуй 😉</div>
 
   <div id="loading">
@@ -112,7 +145,12 @@
   </div>
 
   <div id="flash"></div>
-  <div id="drop-overlay" class="hidden">Отпусти файл: .vrm — новый наряд, .vrma — анимация</div>
+  <div id="photo-view" hidden>
+    <img id="photo-img" alt="Фото">
+    <p>Нажми и держи фото — «Сохранить изображение»</p>
+    <button id="photo-close" class="icon-btn" title="Закрыть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div id="drop-overlay" class="hidden">Отпусти файл: .vrm — новый наряд, .vrma/.fbx — анимация</div>
 
   <script type="module" src="src/main.js"></script>
 </body>

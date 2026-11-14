@@ -5,11 +5,18 @@ import * as THREE from 'three';
 // полупрозрачным тёмным цветом, сверху — плотная кружевная полоса.
 // Работает с моделями VRoid (материал тела называется *Body*SKIN*).
 
+// height: 'thigh' — чулки до середины бедра, 'waist' — колготки до талии, 'knee' — гольфы выше колена.
+// band: 'lace' — кружевная резинка, 'plain' — гладкая, 'none' — без полосы.
 const STYLES = {
   black: { base: 'rgba(18, 14, 22, 0.78)', band: 'rgba(10, 8, 12, 0.96)' },
   sheer: { base: 'rgba(25, 20, 28, 0.45)', band: 'rgba(15, 12, 18, 0.92)' },
   white: { base: 'rgba(250, 248, 252, 0.82)', band: 'rgba(255, 255, 255, 0.98)' },
   wine: { base: 'rgba(70, 12, 30, 0.72)', band: 'rgba(45, 6, 18, 0.95)' },
+  tights: { base: 'rgba(20, 16, 24, 0.62)', height: 'waist', bandType: 'none' },
+  tightsSheer: { base: 'rgba(30, 24, 32, 0.36)', height: 'waist', bandType: 'none' },
+  tightsNude: { base: 'rgba(214, 170, 150, 0.32)', height: 'waist', bandType: 'none' },
+  kneeBlack: { base: 'rgba(16, 12, 20, 0.92)', band: 'rgba(8, 6, 10, 1)', height: 'knee', bandType: 'plain' },
+  kneeWhite: { base: 'rgba(250, 248, 252, 0.95)', band: 'rgba(235, 232, 240, 1)', height: 'knee', bandType: 'plain' },
 };
 
 function lacePattern(ctx, color) {
@@ -59,6 +66,7 @@ export class Stockings {
     const knee = y('leftLowerLeg');
     this.ok = hip !== null && knee !== null;
     this.top = knee + (hip - knee) * 0.45; // верх чулка: чуть ниже середины бедра
+    this.tops = { thigh: this.top, waist: hip + (hip - knee) * 0.35, knee: knee + (hip - knee) * 0.12 };
     this.band = (hip - knee) * 0.12; // ширина кружевной полосы
   }
 
@@ -89,7 +97,7 @@ export class Stockings {
 
     const triCount = index ? index.count / 3 : pos.count / 3;
     const idx = (n) => (index ? index.getX(n) : n);
-    const lace = lacePattern(ctx, style.band);
+    const lace = lacePattern(ctx, style.band ?? style.base);
     // Два прохода, чтобы полупрозрачный слой не накладывался сам на себя:
     // сначала собираем маску ног, потом заливаем её одним цветом.
     const mask = document.createElement('canvas');
@@ -105,8 +113,10 @@ export class Stockings {
       const b = idx(t * 3 + 1);
       const c = idx(t * 3 + 2);
       const maxY = Math.max(ys[a], ys[b], ys[c]);
-      if (maxY > this.top) continue;
-      const target = maxY > this.top - this.band ? bctx : mctx;
+      const top = this.tops[style.height ?? 'thigh'];
+      if (maxY > top) continue;
+      const bandW = style.bandType === 'none' ? 0 : style.bandType === 'plain' ? this.band * 0.6 : this.band;
+      const target = maxY > top - bandW ? bctx : mctx;
       target.beginPath();
       target.moveTo(uv.getX(a) * w, uv.getY(a) * h);
       target.lineTo(uv.getX(b) * w, uv.getY(b) * h);
@@ -125,7 +135,7 @@ export class Stockings {
     ctx.drawImage(mask, 0, 0);
     // Кружевная полоса.
     bctx.globalCompositeOperation = 'source-in';
-    bctx.fillStyle = lace;
+    bctx.fillStyle = style.bandType === 'plain' ? style.band : lace;
     bctx.fillRect(0, 0, w, h);
     ctx.drawImage(bandCanvas, 0, 0);
 
@@ -137,6 +147,15 @@ export class Stockings {
     tex.anisotropy = this.original.anisotropy;
     this.textures[styleName] = tex;
     return tex;
+  }
+
+  // Новая основа кожи (чулки/колготки из другого наряда) — рисуем поверх неё.
+  setBase(tex) {
+    if (!this.available || !tex || tex === this.original) return;
+    this.original = tex;
+    this.originalShade = tex;
+    for (const t of Object.values(this.textures)) t.dispose();
+    this.textures = {};
   }
 
   // styleName: 'off' | 'black' | 'sheer' | 'white' | 'wine'
@@ -160,4 +179,8 @@ export const STOCKING_STYLES = [
   { id: 'sheer', name: 'Тонкие' },
   { id: 'wine', name: 'Бордо' },
   { id: 'white', name: 'Белые' },
+  { id: 'tights', name: 'Колготки' },
+  { id: 'tightsSheer', name: 'Колготки тонкие' },
+  { id: 'kneeBlack', name: 'Гольфы чёрные' },
+  { id: 'kneeWhite', name: 'Гольфы белые' },
 ];
