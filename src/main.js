@@ -4981,7 +4981,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 267;
+const WAIFU_BUILD = 268;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4999,8 +4999,9 @@ const STANCES = [
 // ступни на полу. Значок 🪑 в меню — по кругу: без мебели → стул → трон.
 const FURN = [
   { id: 'none', icon: '🪑', name: 'Без мебели' },
+  { id: 'pouf', icon: '🟣', name: 'Пуф', h: 0.42, back: 0.3 },
   { id: 'chair', icon: '🪑', name: 'Стул', h: 0.45, back: 0.33 },
-  { id: 'throne', icon: '👑', name: 'Трон', h: 0.48, back: 0.34 },
+  { id: 'throne', icon: '👑', name: 'Трон', h: 0.47, back: 0.33 },
 ];
 var furnIdx = 0;
 const furnGroup = new THREE.Group();
@@ -5009,22 +5010,35 @@ scene.add(furnGroup);
 function buildFurn(f, S) {
   furnGroup.clear();
   const mat = (color, rough = 0.7) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0.05 });
-  const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w * S, h * S, d * S), m); o.position.set(x * S, y * S, z * S); furnGroup.add(o); return o; };
+  const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x * S, y * S, z * S); furnGroup.add(o); return o; };
+  const box = (w, h, d, x, y, z, m) => add(new THREE.BoxGeometry(w * S, h * S, d * S), m, x, y, z);
+  const rod = (r, h, x, y, z, m) => add(new THREE.CylinderGeometry(r * S, r * S, h * S, 12), m, x, y, z);
+  // Тело вращения по профилю [радиус, высота] — мягкие округлые формы (пуф, подушка).
+  const lathe = (pts, m, x = 0, z = 0) => add(new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r * S, y * S)), 28), m, x, 0, z);
   const top = f.h; // верх сиденья
-  if (f.id === 'chair') {
-    const wood = mat(0x8a5a3c), dark = mat(0x5e3b27);
-    box(0.44, 0.045, 0.44, 0, top - 0.0225, 0, wood);
-    for (const [x, z] of [[-0.19, -0.19], [0.19, -0.19], [-0.19, 0.19], [0.19, 0.19]]) box(0.04, top - 0.045, 0.04, x, (top - 0.045) / 2, z, dark);
-    box(0.04, 0.5, 0.04, -0.19, top + 0.25, -0.2, dark); box(0.04, 0.5, 0.04, 0.19, top + 0.25, -0.2, dark);
-    box(0.42, 0.16, 0.03, 0, top + 0.4, -0.2, wood); box(0.42, 0.05, 0.03, 0, top + 0.2, -0.2, wood);
+  if (f.id === 'pouf') {
+    // Маленький мягкий пуф: округлые бока, чуть вдавленный верх, тонкая кайма.
+    const velvet = mat(0x8e5bb5, 0.95), trim = mat(0xe3c98a, 0.4);
+    lathe([[0, 0], [0.17, 0], [0.2, 0.03], [0.215, top * 0.5], [0.2, top - 0.05], [0.16, top - 0.008], [0, top - 0.015]], velvet);
+    lathe([[0.2, 0.035], [0.222, 0.045], [0.2, 0.06]], trim);
+  } else if (f.id === 'chair') {
+    // Лёгкий стул: тонкие круглые ножки, небольшое сиденье с подушкой, низкая спинка.
+    const wood = mat(0xc9a27a, 0.6), cushion = mat(0xe8c9d8, 0.9);
+    lathe([[0, top - 0.035], [0.17, top - 0.035], [0.185, top - 0.02], [0.17, top - 0.008], [0, top - 0.012]], cushion);
+    lathe([[0, top - 0.05], [0.18, top - 0.05], [0.18, top - 0.035], [0, top - 0.035]], wood);
+    for (const [x, z] of [[-0.12, -0.12], [0.12, -0.12], [-0.12, 0.12], [0.12, 0.12]]) rod(0.013, top - 0.05, x * 1.05, (top - 0.05) / 2, z * 1.05, wood);
+    for (const x of [-0.11, 0.11]) rod(0.012, 0.3, x, top + 0.1, -0.15, wood);
+    const backRest = box(0.26, 0.09, 0.02, 0, top + 0.22, -0.15, wood); backRest.geometry = new THREE.CapsuleGeometry(0.045 * S, 0.2 * S, 6, 12); backRest.rotation.z = Math.PI / 2; backRest.scale.z = 0.35;
   } else {
+    // Трон поменьше и изящнее: узкое основание на ножках, мягкое сиденье, высокая округлая спинка.
     const gold = mat(0xd9b45a, 0.35), velvet = mat(0x7a1f4d, 0.9), body = mat(0x3a2147, 0.6);
-    box(0.6, top - 0.06, 0.52, 0, (top - 0.06) / 2, 0, body); // основание
-    box(0.5, 0.06, 0.46, 0, top - 0.03, 0.02, velvet); // подушка
-    box(0.6, 1.0, 0.07, 0, top + 0.44, -0.27, body); box(0.46, 0.8, 0.03, 0, top + 0.42, -0.225, velvet); // спинка
-    box(0.64, 0.05, 0.09, 0, top + 0.96, -0.27, gold); // верх спинки
-    for (const sx of [-1, 1]) { box(0.07, 0.24, 0.5, sx * 0.3, top + 0.1, 0, body); box(0.09, 0.03, 0.52, sx * 0.3, top + 0.235, 0, gold); } // подлокотники
-    box(0.64, 0.03, 0.56, 0, 0.015, 0, gold); // кайма у пола
+    box(0.44, 0.07, 0.5, 0, top - 0.075, -0.04, body);
+    lathe([[0, top - 0.04], [0.19, top - 0.04], [0.205, top - 0.022], [0.18, top - 0.006], [0, top - 0.012]], velvet);
+    for (const [x, z] of [[-0.19, -0.18], [0.19, -0.18], [-0.19, 0.18], [0.19, 0.18]]) { rod(0.018, top - 0.11, x, (top - 0.11) / 2, z, gold); }
+    const back = add(new THREE.CapsuleGeometry(0.19 * S, 0.5 * S, 8, 20), body, 0, top + 0.36, -0.29); back.scale.z = 0.16;
+    const pad = add(new THREE.CapsuleGeometry(0.15 * S, 0.44 * S, 8, 20), velvet, 0, top + 0.36, -0.275); pad.scale.z = 0.14;
+    add(new THREE.SphereGeometry(0.035 * S, 14, 10), gold, 0, top + 0.83, -0.29);
+    for (const sx of [-1, 1]) { rod(0.014, 0.17, sx * 0.21, top + 0.05, 0.14, gold); const arm = add(new THREE.CapsuleGeometry(0.02 * S, 0.3 * S, 6, 10), gold, sx * 0.21, top + 0.14, -0.02); arm.rotation.x = Math.PI / 2; }
   }
 }
 function applyFurn(sitNow = false) {
@@ -5090,7 +5104,7 @@ function renderAutoStates() {
       }
       if (id === 'dice') { diceOutfit(); showAutoStates(3500); return; }
       if (id === 'furn') {
-        // Мебель по кругу: без мебели → стул → трон. Выбрал — она садится; убрал — встаёт.
+        // Мебель по кругу: без мебели → пуф → стул → трон. Выбрал — она садится; убрал — встаёт.
         furnIdx = (furnIdx + 1) % FURN.length;
         const f = FURN[furnIdx];
         if (f.id === 'none') { applyFurn(); if (character.sit > 0.01) sitBy(-character.sit / 0.004); }
