@@ -277,7 +277,7 @@ function installCrotchFix(vrm, mesh) {
 const HIP_WELD = new Map();
 const HIP_ENTRIES = [];
 const hipKey = (cloth, v) => `${cloth ? 'c' : 'b'}${Math.round(v.x * 5000)},${Math.round(v.y * 5000)},${Math.round(v.z * 5000)}`;
-const HIP_UNDER = globalThis.__ua ?? [1.25, -0.005, 0.03]; // сила, где полоса начинает сходить на нет и где кончается (в долях роста таза)
+const HIP_UNDER = globalThis.__ua ?? [0, -0.005, 0.03]; // 0 — выключено: при 1.25 сбоку вылезал острый угол (сборка 257), откатано // сила, где полоса начинает сходить на нет и где кончается (в долях роста таза)
 function hipKeepFill(e) {
   const { mesh, cloth, L, k0, back, centers } = e;
   const g = mesh.geometry, pos = g.getAttribute('position'), nor = g.getAttribute('normal');

@@ -1075,6 +1075,8 @@ function touchRipple(x, y) {
 // Активные касания: для щипка (зум) двумя пальцами и поворота свайпом по фону.
 const touches = new Map();
 let orbitDrag = null; // { lastX }
+let camPid = null, camLast = null; // второй палец во время захвата точки — крутит камеру
+var grabHeldFn = () => false; // долгий зажим уже сработал, точка ещё не взята
 let stroking = null;
 let lastOnHerAt = 0; // когда последний раз палец был на ней (для «Авто»: промах ≠ жест камерой)
 let bgSwipe = null; // свайп по пустому месту в обычном режиме // поглаживание не головы: { hit, lastX, lastY, moved, dist, ticks }
@@ -1125,6 +1127,12 @@ canvas.addEventListener('pointerdown', (e) => {
   pointerActive = true;
   $('hint').style.opacity = 0;
 
+  // Держишь точку одним пальцем (или зажал и ещё не повёл), а вторым касаешься экрана — второй палец крутит камеру,
+  // захват не сбрасывается: можно расставлять её и одновременно смотреть с другой стороны.
+  if (touches.size === 2 && autoMode && (poseDrag?.grab || grabHeldFn())) {
+    camPid = e.pointerId; camLast = { x: e.clientX, y: e.clientY };
+    return;
+  }
   // Два пальца в любом режиме — щипок: приблизить/отдалить.
   if (touches.size === 2) {
     // Двойной тап двумя пальцами — чистый экран: пропадает весь интерфейс, остаётся только она. Ещё раз — вернуть.
@@ -1278,6 +1286,12 @@ function dragDirection(e) {
 }
 
 canvas.addEventListener('pointermove', (e) => {
+  if (camPid != null && e.pointerId === camPid) {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    rotateBy(-(e.clientX - camLast.x) * 0.01, (e.clientY - camLast.y) * 0.005);
+    camLast = { x: e.clientX, y: e.clientY };
+    return;
+  }
   toNdc(e);
   if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (touches.size === 2 && pinchDist > 0) {
@@ -1514,6 +1528,8 @@ let autoTap = null;
 let twoTap = null; // два пальца коснулись: когда и где (для «двойного тапа двумя пальцами»)
 let twoTapAt = 0;
 function endPointer(e) {
+  if (camPid != null && e.pointerId === camPid) { camPid = null; camLast = null; touches.delete(e.pointerId); return; } // убрал палец камеры — захват точки продолжается
+  if (camPid != null) { touches.delete(camPid); camPid = null; camLast = null; } // отпустил точку — палец камеры больше не считается
   if (twoTap && touches.size === 2) {
     const now = performance.now();
     const still = twoTap.start.every(([id, x, y]) => { const c = touches.get(id); return c && Math.hypot(c.x - x, c.y - y) < 14; });
@@ -4963,7 +4979,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 257;
+const WAIFU_BUILD = 258;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5095,7 +5111,9 @@ function showAutoStates(ms = 4500) {
 {
   let lp = null, held = null, downState = null;
   const cancel = () => { if (lp) { clearTimeout(lp.t); lp = null; } };
+  grabHeldFn = () => !!held;
   window.addEventListener('pointerdown', (e) => {
+    if (!e.isPrimary && (lp || held)) return; // второй палец зажим первого не сбивает
     cancel();
     if (!autoMode || e.target !== canvas || touches.size > 1) return;
     // Чистый экран и режим «Камера»: долгий тап в любом месте (по ней можно и не попасть) — значки возвращаются.
@@ -5116,22 +5134,26 @@ function showAutoStates(ms = 4500) {
     lp = { x: e.clientX, y: e.clientY, tol: quick ? 34 : 14, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
+    if (!e.isPrimary) return; // второй палец (камера) зажим и взятие точки не трогает
     if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > lp.tol) cancel();
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
+      // Второй палец уже лежит на экране (ладонь, большой палец) — он становится пальцем камеры и взятию не мешает.
+      if (touches.size === 2 && camPid == null) { const other = [...touches.keys()].find((id) => id !== e.pointerId); if (other != null) { camPid = other; camLast = { ...touches.get(other) }; pinchDist = 0; twoTap = null; } }
+      const nTouch = touches.size - (camPid != null ? 1 : 0); // палец камеры не в счёт
       // Берёшь точку — отменяем то, что за эти доли секунды успел сделать обычный свайп (присела, наклонилась):
       // иначе одно движение пальца срабатывало дважды — и как свайп, и как точка.
-      if (downState && touches.size === 1 && character) {
+      if (downState && nTouch === 1 && character) {
         if (Math.abs(character.sit - downState.sit) > 0.002) { character.sit = downState.sit; character.sitRate = 3; }
         if (Math.abs(character.bodyOffset.hipsRotX - downState.rot) > 0.002) character.bodyOffset.hipsRotX = downState.rot;
       }
-      const n = touches.size, ok = n === 1 && grabStart(h.e0);
+      const n = nTouch, ok = n === 1 && grabStart(h.e0);
       if (ok) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
       diag(ok ? 'взято: ' + (lastGrabKey ?? activeHandle ?? '?') : 'не взято: ' + (n !== 1 ? 'пальцев ' + n : poseMode ? 'режим позы' : grabWhy));
     }
   }, { capture: true, passive: true });
-  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, () => { cancel(); held = null; }, { capture: true, passive: true });
+  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, (e) => { if (!e.isPrimary && (lp || held)) return; held = null; cancel(); }, { capture: true, passive: true });
 }
 function setAutoState(st) {
   autoState = st;
