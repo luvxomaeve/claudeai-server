@@ -356,7 +356,7 @@ function installHipKeep(vrm, mesh, cloth) {
   // Новая сетка могла добавить нормали в общие точки — пересчитываем все уже обработанные.
   for (const e of HIP_ENTRIES) hipKeepFill(e);
   for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-    patchBulge(m);
+    patchBulge(m, true); // сгиб без потери объёма — и тело, и ткань поверх него (иначе тело вылезает из-под юбки)
   }
 }
 
@@ -2133,7 +2133,7 @@ function installSheen(mesh) {
   }
 }
 const HIP_DQS = globalThis.__dq ?? [1.5]; // сила смешивания «сгиба без потери объёма» в зоне ягодиц (0 — выключено)
-function patchBulge(mat) {
+function patchBulge(mat, dqs = false) {
   if (!mat || mat.userData.bulgePatched) return;
   mat.userData.bulgePatched = true;
   const prev = mat.onBeforeCompile;
@@ -2148,7 +2148,7 @@ function patchBulge(mat) {
     // Зона ягодиц сгибается «без потери объёма» (смешивание поворотов костей как двойных кватернионов): при обычном
     // сгибе вершины между тазом и бедром стягиваются к суставу — форма плющится, а выталкивание поправкой даёт
     // складки. Здесь вершина идёт по дуге вокруг сустава и остаётся на том же расстоянии, что стоя. Вес — по hipBulge.
-    if (HIP_DQS[0] > 0 && sh.vertexShader.includes('#include <skinning_vertex>')) {
+    if (dqs && HIP_DQS[0] > 0 && sh.vertexShader.includes('#include <skinning_vertex>')) {
       sh.vertexShader = sh.vertexShader.replace('void main() {', `
 vec4 hipQuatOf( mat3 m ) {
   m[0] = normalize( m[0] ); m[1] = normalize( m[1] ); m[2] = normalize( m[2] );
@@ -2186,7 +2186,7 @@ void main() {`).replace('#include <skinning_vertex>', `#include <skinning_vertex
     }
   };
   const prevKey = mat.customProgramCacheKey?.bind(mat);
-  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2dq${HIP_DQS[0]}`;
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2dq${dqs ? HIP_DQS[0] : 0}`;
   mat.needsUpdate = true;
 }
 export function shapeHips(vrm, amount = 0.036) {

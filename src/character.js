@@ -1462,6 +1462,7 @@ export class Character {
     this.footPlantFix();
     this.footFloorFix();
     this.handFloorFix();
+    this.palmFix();
     this.applyBlendFrom(dt);
     // Пол для всего тела: колени, таз, руки, голова не проходят сквозь пол.
     if (this.floorPush()) {
@@ -1473,6 +1474,7 @@ export class Character {
       this.footPlantFix();
       this.footFloorFix();
       this.handFloorFix();
+      this.palmFix();
     }
     // Точная доводка взгляда: лицо смотрит прямо в камеру с любого ракурса.
     this.applyHeadAim(dt);
@@ -1520,6 +1522,7 @@ export class Character {
     }
 
     this.calmArms(dt);
+    this.palmFix();
     this.finishFrame(dt);
   }
 
@@ -1854,6 +1857,7 @@ export class Character {
       const lower = this.bones[`${side}LowerArm`];
       const hand = this.bones[`${side}Hand`];
       if (!upper || !lower || !hand) continue;
+      if (this.palmQ) this.palmQ[side] = null;
       const shoulder = upper.getWorldPosition(new THREE.Vector3());
       const handPos = hand.getWorldPosition(new THREE.Vector3());
       const len = this.armLength(side) + 0.07 * S; // с кистью
@@ -1876,7 +1880,7 @@ export class Character {
       const wRaw = this.supW[side];
       const w = wRaw * wRaw * (3 - 2 * wRaw); // плавный разгон и остановка
       const below = handPos.y < palmY * 0.9;
-      if (w < 0.01 && !below && !((this.belowW?.[side] ?? 0) > 0.01)) { this.plant[side] = null; continue; }
+      if (w < 0.01 && !below && !((this.belowW?.[side] ?? 0) > 0.01)) { this.plant[side] = null; if (this.plantYaw) this.plantYaw[side] = null; continue; }
       const sx = side === 'left' ? 1 : -1;
       // Где ладонь стоит удобнее всего: под плечом, чуть впереди и в сторону.
       const ideal = shoulder.clone()
@@ -1894,7 +1898,16 @@ export class Character {
       const pl = this.plant[side];
       // Ладонь стоит; ушла далеко — плавно переставляет.
       // Ладонь стоит на месте, пока рука до неё достаёт; ушла далеко или не дотягивается — переставляет.
-      if (dt > 0 && (pl.distanceTo(ideal) > 0.14 * S || pl.distanceTo(shoulder) > len * 0.85)) pl.lerp(ideal, 1 - Math.exp(-dt * (pl.distanceTo(shoulder) > len * 0.85 ? 7 : 3)));
+      const stepping = pl.distanceTo(ideal) > 0.14 * S || pl.distanceTo(shoulder) > len * 0.85;
+      if (dt > 0 && stepping) pl.lerp(ideal, 1 - Math.exp(-dt * (pl.distanceTo(shoulder) > len * 0.85 ? 7 : 3)));
+      // Куда смотрят пальцы поставленной ладони: запоминается, когда ладонь встала, и меняется только когда она
+      // переставляется. Раньше ладонь каждый кадр доворачивалась за тазом — стояла на месте, а кисть крутилась на
+      // запястье при каждом покачивании («руки выворачивает»).
+      {
+        const py = this.plantYaw ??= { left: null, right: null }, yawNow = Math.atan2(fwd.x, fwd.z);
+        if (py[side] == null) py[side] = yawNow;
+        else if (dt > 0) { let dy = yawNow - py[side]; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); if (stepping || Math.abs(dy) > 0.6) py[side] += dy * (1 - Math.exp(-dt * 5)); }
+      }
       const target = handPos.clone().lerp(pl, w);
       if (target.y < palmY) target.y = palmY;
       const q1 = upper.quaternion.clone();
@@ -1915,12 +1928,14 @@ export class Character {
         const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -sx * Math.PI / 2);
         const want = hq.clone();
         // Только поворот по горизонтали от таза.
-        const yaw = Math.atan2(fwd.x, fwd.z);
+        const yaw = this.plantYaw?.[side] ?? Math.atan2(fwd.x, fwd.z);
         want.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw).multiply(this.rootRestQ ?? new THREE.Quaternion()).multiply(turn);
         const parentQ = lower.getWorldQuaternion(new THREE.Quaternion());
         const local = parentQ.invert().multiply(want);
         hand.quaternion.slerp(local, Math.min(1, w) * 0.85);
         hand.updateWorldMatrix(false, true);
+        // Запоминаем, как лежит ладонь: после пределов суставов и сглаживания её поворот возвращается (см. palmFix).
+        (this.palmQ ??= {})[side] = { q: want.clone(), w: Math.min(1, w) * 0.85 };
       }
     }
   }
@@ -2784,6 +2799,19 @@ export class Character {
   // Стоя и в приседе ступня стоит на своём месте. Пределы суставов (после расчёта ног) при далёком сдвиге таза
   // срывали дальнюю ногу: ступня уезжала под таз на 20–35 см, ноги почти скрещивались. Возвращаем ступню на её
   // точку; колено остаётся там, куда его поставили пределы, поэтому нога не выворачивается.
+  // Ладонь, стоящая на полу, лежит плашмя и смотрит туда, куда её поставили. Пределы суставов, возврат ладони на
+  // место и сглаживание рук меняли её поворот уже после расчёта — пальцы разворачивало на 120° и задирало вверх.
+  palmFix() {
+    if (!this.palmQ || this.mixer) return;
+    for (const side of ['left', 'right']) {
+      const pq = this.palmQ[side], hand = this.bones[`${side}Hand`];
+      if (!pq || !hand || this.handTargets[side]) continue;
+      const cur = hand.getWorldQuaternion(new THREE.Quaternion());
+      this.setWorldQuat(hand, cur.slerp(pq.q, pq.w));
+      hand.updateWorldMatrix(false, true);
+    }
+  }
+
   footPlantFix() {
     if (this.mixer || this.dancing) return;
     const S = this.scale, v = new THREE.Vector3();
