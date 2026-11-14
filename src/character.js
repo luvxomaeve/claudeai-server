@@ -1838,12 +1838,21 @@ export class Character {
           const shp = up.getWorldPosition(new THREE.Vector3()), dh = Math.hypot(shp.x - hp.p.x, shp.z - hp.p.z), reach = (r0.l1 + r0.l2) * 0.95;
           lim = Math.min(lim, Math.max(0.2 * S, hp.p.y + Math.sqrt(Math.max(0, reach * reach - dh * dh))));
         }
-        const v = mid.clone().sub(sp), f = v.dot(fwd), r = Math.hypot(f, v.y);
+        // «Вперёд» берём по линии таз → плечи (по горизонтали), а не по тазу: когда тело почти лежит, таз смотрит в пол,
+        // его «вперёд» по горизонтали вырождается и на кадр-другой переворачивалось — спину резко сгибало на 30–50°
+        // (голова и руки дёргались при переходе с четверенек на живот).
+        // …а когда тело стоит вертикально (на коленях), эта линия по горизонтали почти нулевая — там надёжен как раз
+        // таз. Складываем оба с весом по их длине: кто сейчас определён, тот и ведёт.
+        const bodyF = mid.clone().sub(this.bones.hips.getWorldPosition(new THREE.Vector3())).setY(0);
+        bodyF.addScaledVector(new THREE.Vector3(0, 0, 1).applyQuaternion(hq).setY(0), 0.15 * S);
+        if (bodyF.lengthSq() < 1e-6) bodyF.copy(fwd); bodyF.normalize();
+        const bodySide = new THREE.Vector3(0, 1, 0).cross(bodyF).normalize();
+        const v = mid.clone().sub(sp), f = v.dot(bodyF), r = Math.hypot(f, v.y);
         if (r > 1e-4 && mid.y > lim) {
           const a = Math.atan2(v.y, f), a2 = Math.asin(THREE.MathUtils.clamp((lim - sp.y) / r, -1, 1));
           const d = THREE.MathUtils.clamp(a - a2, 0, 0.9) * THREE.MathUtils.smoothstep(four0, 0.05, 0.6);
           if (d > 1e-4) {
-            const q = new THREE.Quaternion().setFromAxisAngle(side3, d).multiply(spine.getWorldQuaternion(new THREE.Quaternion()));
+            const q = new THREE.Quaternion().setFromAxisAngle(bodySide, d).multiply(spine.getWorldQuaternion(new THREE.Quaternion()));
             this.setWorldQuat(spine, q);
             spine.updateWorldMatrix(false, true);
             // Выставленные руки считались до этой поправки — возвращаем их на свои точки.
