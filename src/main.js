@@ -3005,8 +3005,9 @@ function poseDragMove(e) {
   const clamp = THREE.MathUtils.clamp;
   if (poseDrag.kind === 'head') {
     const o = character.headOffset;
-    o.y = clamp(o.y + dx * 0.006 * facing, -0.9, 0.9);
-    o.x = clamp(o.x + dy * 0.005, -0.5, 0.5);
+    // Голову можно вести далеко: сверх поворота шеи за ней идут плечи и грудь (см. character.js) — размах большой и живой.
+    o.y = clamp(o.y + dx * 0.007 * facing, -1.5, 1.5);
+    o.x = clamp(o.x + dy * 0.006, -0.85, 1.0);
   } else if (poseDrag.kind === 'spine') {
     // Вниз — наклон вперёд как у человека: в основном в тазобедренных (таз уходит
     // назад для баланса, ноги на полу) и немного в спине; вверх — прогиб назад.
@@ -4982,7 +4983,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 274;
+const WAIFU_BUILD = 275;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

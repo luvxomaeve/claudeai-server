@@ -947,8 +947,18 @@ export class Character {
     }
 
     // Голова, корпус и таз, заданные пальцем в режиме позы.
-    pose.headY += this.headOffset.y;
-    pose.headX += this.headOffset.x;
+    // Шея берёт свою долю (мягкий предел), остальное уходит в корпус: ведёшь голову дальше — за ней поворачиваются
+    // плечи и грудь, наклон вперёд/назад продолжает спина. Голова не «откручивается», а тянет тело за собой.
+    {
+      const soft = (v, lim) => lim * Math.tanh(v / lim);
+      const hy = this.headOffset.y, hx = this.headOffset.x;
+      const ny = soft(hy, 0.95), nx = soft(hx, hx > 0 ? 0.6 : 0.5);
+      pose.headY += ny; pose.headX += nx;
+      const flatK = 1 - 0.6 * Math.max(this.sitPhases().b4, this.sitPhases().c4); // лёжа корпус идёт за головой меньше
+      pose.spineY += ((hy - ny) * 0.9 + ny * 0.15) * flatK;
+      pose.spineX += ((hx - nx) * 0.9 + nx * 0.12) * flatK;
+      pose.spineZ -= ny * 0.06 * flatK;
+    }
     // Наклон с левой полосы работает в полную силу и в приседе, и на коленях
     // (таз наклоняется так же красиво, как стоя); уходит только когда она садится
     // на пол / ложится — там наклон делает спина.
