@@ -743,6 +743,8 @@ export class Character {
     // Пока ведёшь полосу (и пару секунд после) — ножками не болтает.
     this.slideHold = Math.max(0, (this.slideHold ?? 0) - dt);
     this.seatK = (this.seatK ?? 0) + ((this.seat ? 1 : 0) - (this.seatK ?? 0)) * (1 - Math.exp(-dt * 4)); // мебель под ней появляется/уходит плавно
+    // Высота и глубина сиденья тоже меняются плавно — при смене мебели она пересаживается, а не прыгает.
+    if (this.seat) { const k = this.seatHs == null ? 1 : 1 - Math.exp(-dt * 5); this.seatHs = (this.seatHs ?? this.seat.h) + (this.seat.h - (this.seatHs ?? this.seat.h)) * k; this.seatBs = (this.seatBs ?? this.seat.back) + (this.seat.back - (this.seatBs ?? this.seat.back)) * k; }
     this.leadK = (this.leadK ?? 0) + ((this.ledNow ? 1 : 0) - (this.leadK ?? 0)) * (1 - Math.exp(-dt * (this.ledNow ? 8 : 1.5))); // ведут пальцем прямо сейчас (ставит main.js каждый кадр)
     this.kickOn = (this.kickOn ?? 1) + ((this.slideHold > 0 ? 0 : 1) - (this.kickOn ?? 1)) * (1 - Math.exp(-dt * 2.5));
     // Сон: улеглась (на живот, на спину или на бок) — немного полежит (~10 с) и уснёт.
@@ -783,7 +785,7 @@ export class Character {
       this.sitDropNow = this.sitDropFor(s);
       this.sitSideNow = 0.12 * p3 * this.scale; // сидя боком таз смещён к руке-опоре
       // Сидит на мебели: таз уходит назад на длину бедра (ступни остаются на месте, голени вертикально).
-      this.sitBackNow = ((0.12 + ((this.seat?.back ?? 0.33) - 0.12) * (this.seatK ?? 0)) * p1 * (1 - p2)) * this.scale;
+      this.sitBackNow = ((0.12 + ((this.seatBs ?? 0.33) - 0.12) * (this.seatK ?? 0)) * p1 * (1 - p2)) * this.scale;
       // Таз опускаем напрямую (без отдельной пружины), чтобы он не отставал от ног.
       // Присед на каблуках: таз уходит назад и наклоняется вперёд, поясница прогибается,
       // корпус подаётся вперёд, грудь раскрыта. На коленях — прямая спина с лёгким прогибом.
@@ -3441,7 +3443,7 @@ export class Character {
     // Глубокий присед: таз опускается почти к пяткам (ниже модель не идёт — упирается в пределы суставов).
     // Отсюда на колени таз почти не меняет высоту: колени просто уходят вперёд на пол.
     // Сидит на мебели (стул, трон): вместо глубокого приседа таз опускается на высоту сиденья.
-    const squatY = THREE.MathUtils.lerp(restY * 0.40, ((this.seat?.h ?? 0.45) + 0.09) * this.scale, this.seatK ?? 0);
+    const squatY = THREE.MathUtils.lerp(restY * 0.40, ((this.seatHs ?? 0.45) + 0.09) * this.scale, this.seatK ?? 0);
     const floorY = 0.36 * this.scale; // на коленях, таз над пятками
     const sideY = 0.15 * this.scale; // сидит боком прямо на полу
     const { p1, p2, p3, p4 } = this.sitPhases(s);

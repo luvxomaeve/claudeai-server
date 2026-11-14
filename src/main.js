@@ -4913,6 +4913,7 @@ document.body.appendChild(autoExit);
 function setAutoMode(on) {
   if (on && poseMode) setPoseMode(false);
   autoMode = on;
+  try { renderFurnPager(); } catch { /* ещё не создан при запуске */ }
   autoSmoothCam = on;
   if (!on) autoHint.hidden = true;
   autoMenu.hidden = true;
@@ -4981,7 +4982,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 268;
+const WAIFU_BUILD = 269;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5000,7 +5001,8 @@ const STANCES = [
 const FURN = [
   { id: 'none', icon: '🪑', name: 'Без мебели' },
   { id: 'pouf', icon: '🟣', name: 'Пуф', h: 0.42, back: 0.3 },
-  { id: 'chair', icon: '🪑', name: 'Стул', h: 0.45, back: 0.33 },
+  { id: 'chair', icon: '🪑', name: 'Стеклянный стул', h: 0.44, back: 0.32 },
+  { id: 'table', icon: '🔷', name: 'Стеклянный стол', h: 0.66, back: 0.2 },
   { id: 'throne', icon: '👑', name: 'Трон', h: 0.47, back: 0.33 },
 ];
 var furnIdx = 0;
@@ -5010,9 +5012,13 @@ scene.add(furnGroup);
 function buildFurn(f, S) {
   furnGroup.clear();
   const mat = (color, rough = 0.7) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0.05 });
+  // Стекло: прозрачное, с бликами; кромки подсвечены тонкими светлыми ободками, чтобы форма читалась.
+  const glass = () => new THREE.MeshPhysicalMaterial({ color: 0xcfeaff, roughness: 0.05, metalness: 0, transparent: true, opacity: 0.3, clearcoat: 1, clearcoatRoughness: 0.04, side: THREE.DoubleSide, depthWrite: false });
+  const edge = () => new THREE.MeshBasicMaterial({ color: 0xeaf7ff, transparent: true, opacity: 0.75 });
   const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x * S, y * S, z * S); furnGroup.add(o); return o; };
   const box = (w, h, d, x, y, z, m) => add(new THREE.BoxGeometry(w * S, h * S, d * S), m, x, y, z);
   const rod = (r, h, x, y, z, m) => add(new THREE.CylinderGeometry(r * S, r * S, h * S, 12), m, x, y, z);
+  const ring = (r, tube, x, y, z, m) => { const o = add(new THREE.TorusGeometry(r * S, tube * S, 8, 40), m, x, y, z); o.rotation.x = Math.PI / 2; return o; };
   // Тело вращения по профилю [радиус, высота] — мягкие округлые формы (пуф, подушка).
   const lathe = (pts, m, x = 0, z = 0) => add(new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r * S, y * S)), 28), m, x, 0, z);
   const top = f.h; // верх сиденья
@@ -5022,13 +5028,21 @@ function buildFurn(f, S) {
     lathe([[0, 0], [0.17, 0], [0.2, 0.03], [0.215, top * 0.5], [0.2, top - 0.05], [0.16, top - 0.008], [0, top - 0.015]], velvet);
     lathe([[0.2, 0.035], [0.222, 0.045], [0.2, 0.06]], trim);
   } else if (f.id === 'chair') {
-    // Лёгкий стул: тонкие круглые ножки, небольшое сиденье с подушкой, низкая спинка.
-    const wood = mat(0xc9a27a, 0.6), cushion = mat(0xe8c9d8, 0.9);
-    lathe([[0, top - 0.035], [0.17, top - 0.035], [0.185, top - 0.02], [0.17, top - 0.008], [0, top - 0.012]], cushion);
-    lathe([[0, top - 0.05], [0.18, top - 0.05], [0.18, top - 0.035], [0, top - 0.035]], wood);
-    for (const [x, z] of [[-0.12, -0.12], [0.12, -0.12], [-0.12, 0.12], [0.12, 0.12]]) rod(0.013, top - 0.05, x * 1.05, (top - 0.05) / 2, z * 1.05, wood);
-    for (const x of [-0.11, 0.11]) rod(0.012, 0.3, x, top + 0.1, -0.15, wood);
-    const backRest = box(0.26, 0.09, 0.02, 0, top + 0.22, -0.15, wood); backRest.geometry = new THREE.CapsuleGeometry(0.045 * S, 0.2 * S, 6, 12); backRest.rotation.z = Math.PI / 2; backRest.scale.z = 0.35;
+    // Маленький стеклянный стул: круглое сиденье, тонкие ножки, невысокая выгнутая спинка.
+    const g = glass(), e = edge();
+    lathe([[0, top - 0.025], [0.165, top - 0.025], [0.17, top - 0.012], [0.165, top], [0, top]], g);
+    ring(0.168, 0.004, 0, top - 0.012, 0, e);
+    for (const [x, z] of [[-0.11, -0.11], [0.11, -0.11], [-0.11, 0.11], [0.11, 0.11]]) rod(0.011, top - 0.025, x, (top - 0.025) / 2, z, g);
+    for (const x of [-0.1, 0.1]) rod(0.009, 0.26, x, top + 0.12, -0.15, g);
+    const back = add(new THREE.CapsuleGeometry(0.05 * S, 0.17 * S, 6, 14), g, 0, top + 0.25, -0.15); back.rotation.z = Math.PI / 2; back.scale.z = 0.28;
+    const be = add(new THREE.TorusGeometry(0.05 * S, 0.004 * S, 6, 24), e, 0, top + 0.25, -0.15); be.scale.x = 2.7;
+  } else if (f.id === 'table') {
+    // Стеклянный стол: круглая столешница на одной изящной ножке; она присаживается на край.
+    const g = glass(), e = edge();
+    lathe([[0, top - 0.02], [0.33, top - 0.02], [0.34, top - 0.01], [0.33, top], [0, top]], g, 0, -0.16);
+    ring(0.338, 0.005, 0, top - 0.01, -0.16, e);
+    lathe([[0, 0], [0.19, 0], [0.19, 0.012], [0.05, 0.03], [0.022, 0.12], [0.018, top - 0.1], [0.07, top - 0.02], [0, top - 0.02]], g, 0, -0.16);
+    ring(0.19, 0.004, 0, 0.008, -0.16, e);
   } else {
     // Трон поменьше и изящнее: узкое основание на ножках, мягкое сиденье, высокая округлая спинка.
     const gold = mat(0xd9b45a, 0.35), velvet = mat(0x7a1f4d, 0.9), body = mat(0x3a2147, 0.6);
@@ -5041,10 +5055,12 @@ function buildFurn(f, S) {
     for (const sx of [-1, 1]) { rod(0.014, 0.17, sx * 0.21, top + 0.05, 0.14, gold); const arm = add(new THREE.CapsuleGeometry(0.02 * S, 0.3 * S, 6, 10), gold, sx * 0.21, top + 0.14, -0.02); arm.rotation.x = Math.PI / 2; }
   }
 }
+const furnBase = new THREE.Vector3();
 function applyFurn(sitNow = false) {
   if (!character) return;
   character.furnApplied = true;
   const f = FURN[furnIdx];
+  renderFurnPager();
   if (f.id === 'none') { character.seat = null; furnGroup.visible = false; return; }
   character.seat = { h: f.h, back: f.back };
   const S = character.scale;
@@ -5053,10 +5069,77 @@ function applyFurn(sitNow = false) {
   const hips = character.bones.hips, pq = hips.parent.getWorldQuaternion(new THREE.Quaternion());
   const backDir = new THREE.Vector3(0, 0, -character.flip).applyQuaternion(pq).setY(0).normalize();
   const rest = character.restHips;
-  furnGroup.position.set(rest.x + backDir.x * (f.back - 0.1) * S, 0, rest.z + backDir.z * (f.back - 0.1) * S);
+  furnBase.set(rest.x + backDir.x * (f.back - 0.1) * S, 0, rest.z + backDir.z * (f.back - 0.1) * S);
+  furnGroup.position.copy(furnBase);
   furnGroup.rotation.y = Math.atan2(-backDir.x, -backDir.z);
   furnGroup.visible = true;
   if (sitNow) { const d = 0.5 - character.sit; if (Math.abs(d) > 0.01) sitBy(d / 0.004); }
+}
+// Смена мебели — как перелистывание экранов: прежняя уезжает в сторону свайпа, новая въезжает с другой стороны.
+let furnSlide = null; // { phase: 'out' | 'in', t, dir, next }
+function switchFurn(step) {
+  if (!character || furnSlide) return;
+  const next = (furnIdx + step + FURN.length) % FURN.length, dir = step > 0 ? -1 : 1; // свайп влево (следующая) — уезжает влево
+  furnSlide = { phase: furnGroup.visible ? 'out' : 'swap', t: 0, dir, next };
+  try { navigator.vibrate?.(8); } catch { /* ignore */ }
+}
+function updateFurnSlide(dt) {
+  const a = furnSlide;
+  if (!a || !character) return;
+  const S = character.scale, ease = (x) => x * x * (3 - 2 * x);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).setY(0);
+  if (right.lengthSq() < 1e-6) right.set(1, 0, 0); right.normalize();
+  if (a.phase === 'out') {
+    a.t = Math.min(1, a.t + dt / 0.2);
+    furnGroup.position.copy(furnBase).addScaledVector(right, a.dir * 1.6 * S * ease(a.t));
+    if (a.t >= 1) a.phase = 'swap';
+  }
+  if (a.phase === 'swap') {
+    furnIdx = a.next;
+    const f = FURN[furnIdx];
+    if (f.id === 'none') { applyFurn(); if (character.sit > 0.01) sitBy(-character.sit / 0.004); showToast('Мебель убрана'); furnSlide = null; renderAutoStates(); return; }
+    if (character.sit > 0.5) character.sit = 0.5;
+    applyFurn(true);
+    showToast(`${f.icon} ${f.name}`);
+    renderAutoStates();
+    a.phase = 'in'; a.t = 0;
+  }
+  if (a.phase === 'in') {
+    a.t = Math.min(1, a.t + dt / 0.28);
+    furnGroup.position.copy(furnBase).addScaledVector(right, -a.dir * 1.6 * S * (1 - ease(a.t)));
+    if (a.t >= 1) { furnGroup.position.copy(furnBase); furnSlide = null; }
+  }
+}
+// Точки-указатель внизу: какая мебель выбрана. Там же её и листают — свайпом влево-вправо по нижней полоске экрана
+// (именно по ней, чтобы случайно не сменить, когда гладишь её или крутишь камеру).
+const furnPager = document.createElement('div');
+furnPager.id = 'furn-pager';
+furnPager.style.cssText = 'position:fixed;left:50%;bottom:10px;transform:translateX(-50%);z-index:20;display:flex;gap:7px;align-items:center;padding:5px 10px;border-radius:999px;background:rgba(30,22,60,.35);pointer-events:none;opacity:.55;transition:opacity .3s;font:11px sans-serif;color:#fff';
+document.body.appendChild(furnPager);
+function renderFurnPager() {
+  furnPager.innerHTML = '<span style="opacity:.7">‹</span>' + FURN.map((f, i) => `<span style="width:${i === furnIdx ? 9 : 6}px;height:${i === furnIdx ? 9 : 6}px;border-radius:50%;background:${i === furnIdx ? '#fff' : 'rgba(255,255,255,.45)'}"></span>`).join('') + '<span style="opacity:.7">›</span>';
+  furnPager.style.display = autoMode ? 'flex' : 'none';
+}
+{
+  let sw = null;
+  const inStrip = (e) => e.clientY > window.innerHeight * 0.87;
+  window.addEventListener('pointerdown', (e) => {
+    if (!autoMode || poseMode || e.target !== canvas || !e.isPrimary || !inStrip(e)) return;
+    sw = { x: e.clientX, y: e.clientY, id: e.pointerId, done: false };
+    furnPager.style.opacity = '1';
+    e.stopPropagation();
+  }, { capture: true });
+  window.addEventListener('pointermove', (e) => {
+    if (!sw || e.pointerId !== sw.id) return;
+    e.stopPropagation();
+    const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+    if (!sw.done && Math.abs(dx) > 56 && Math.abs(dx) > 2 * Math.abs(dy)) { sw.done = true; switchFurn(dx < 0 ? 1 : -1); }
+  }, { capture: true });
+  for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, (e) => {
+    if (!sw || e.pointerId !== sw.id) return;
+    sw = null; furnPager.style.opacity = '.55';
+    e.stopPropagation();
+  }, { capture: true });
 }
 var stanceIdx = 0;
 try { stanceIdx = Math.min(STANCES.length - 1, Math.max(0, +(localStorage.getItem('waifu-stance') ?? 0) || 0)); } catch { /* ignore */ }
@@ -5104,13 +5187,9 @@ function renderAutoStates() {
       }
       if (id === 'dice') { diceOutfit(); showAutoStates(3500); return; }
       if (id === 'furn') {
-        // Мебель по кругу: без мебели → пуф → стул → трон. Выбрал — она садится; убрал — встаёт.
-        furnIdx = (furnIdx + 1) % FURN.length;
-        const f = FURN[furnIdx];
-        if (f.id === 'none') { applyFurn(); if (character.sit > 0.01) sitBy(-character.sit / 0.004); }
-        else { if (character.sit > 0.5) character.sit = 0.5; applyFurn(true); }
-        showToast(f.id === 'none' ? '🪑 Мебель убрана' : `${f.icon} ${f.name}: села`);
-        renderAutoStates(); showAutoStates(3500);
+        // Мебель по кругу: без мебели → пуф → стеклянный стул → стеклянный стол → трон. То же — свайпом по нижней полоске.
+        switchFurn(1);
+        showAutoStates(3500);
         return;
       }
       if (id === 'stance') {
@@ -5961,6 +6040,7 @@ function tick() {
     if (!character.furnApplied) applyFurn();
     character.handPad = isPaint(wear.bottoms) ? 0.3 : 0;
     updateGrabLoops(dt);
+    updateFurnSlide(dt);
     autoWalk(dt);
     updateFlirt(dt);
     character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
