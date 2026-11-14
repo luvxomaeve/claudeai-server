@@ -2730,7 +2730,7 @@ function grabMakeLoop(rec) {
   grabStop.style.display = 'block';
   return true;
 }
-grabAsk.style.cssText = 'position:fixed;left:50%;top:80%;transform:translate(-50%,-50%);z-index:32;display:none;gap:8px;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
+grabAsk.style.cssText = 'position:fixed;left:50%;top:13%;transform:translate(-50%,-50%);z-index:32;display:none;gap:8px;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
 document.body.appendChild(grabAsk);
 for (const ev of ['pointerdown', 'touchstart']) grabAsk.addEventListener(ev, (e) => e.stopPropagation());
 let grabAskTimer = 0;
@@ -2755,8 +2755,8 @@ var lastGrabAt = -1e9, lastGrabKey = null; // когда и за какую то
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
-  // Только что вёл точку — та же точка берётся охотнее (продолжаешь то же движение, а не хватаешь соседнюю руку).
-  const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
+  // «Прилипание» к прошлой точке убрано: после колена или руки следующим касанием нельзя было взять ничего другого.
+  const bias = character.sitS > 0.3 ? { hips: 0.45 } : {};
   let hit = nearestHandle(e0, 70, Object.keys(bias).length ? bias : null) ?? zoneAt(e0, true);
   if (!hit) return false;
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
@@ -4930,7 +4930,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 236;
+const WAIFU_BUILD = 237;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
