@@ -2579,7 +2579,13 @@ export class Character {
       }
       // Лёжа на животе или спине ноги едут вбок вместе с тазом (иначе ступни стояли на месте, таз уезжал,
       // и ноги разъезжались в шпагат).
-      { const phL2 = this.sitPhases(), lieK = Math.max(phL2.b4, phL2.c4); if (lieK > 0) target.x += (this.bodyOffset.hipsX ?? 0) * this.hipsOffK() * this.flip * 0.85 * lieK; }
+      {
+        const phL2 = this.sitPhases(), lieK = Math.max(phL2.b4, phL2.c4);
+        // Сдвиг берём сглаженным: палец двигает таз ступеньками (от события к событию), и ступни шли за ним рывками
+        // по 4–5 см каждые пару кадров. Таз сам сглажен позой — ноги теперь тоже.
+        if (this.lieHipTick !== this.time) { this.lieHipTick = this.time; const raw = (this.bodyOffset.hipsX ?? 0) * this.hipsOffK(); this.lieHipX = (this.lieHipX ?? raw) + (raw - (this.lieHipX ?? raw)) * (1 - Math.exp(-(this.lastDt ?? 0.016) * 12)); }
+        if (lieK > 0) target.x += (this.lieHipX ?? 0) * this.flip * 0.85 * lieK;
+      }
       // Сама прошлась (см. updateWalk): ступня там, куда шагнула.
       if (this.walk) target.addScaledVector(this.walk.foot[side], this.walk.k);
       if (this.turnStep > 0.01) target.y += Math.max(0, Math.sin((this.turnPhase ?? 0) + (L ? 0 : Math.PI))) * 0.035 * S * this.turnStep * (1 - p1);
