@@ -277,7 +277,7 @@ export class Character {
   react({ expression, motion, side, strength = 1 }) {
     if (expression) this.setExpression(expression, strength);
     // «Спит» и «Замри»: на касание отвечает только лицом — тело не двигается.
-    if (motion && !this.forceSleep && !this.frozen) this.playMotion(motion, side);
+    if (motion && !this.forceSleep && !this.frozen && !((this.leadK ?? 0) > 0.5)) this.playMotion(motion, side); // пока ведут — телом не отвечает
   }
 
   coy(sec = 3.5) { this.coyT = sec; this.coySide = Math.random() < 0.5 ? 1 : -1; }
@@ -447,7 +447,8 @@ export class Character {
     // Сильно наклонена/прогнута — запись (с её поворотами корпуса) уходит, иначе перекручивает.
     want *= 1 - THREE.MathUtils.smoothstep(Math.abs(this.bodyOffset.hipsRotX), 0.15, 0.5);
     want *= 1 - THREE.MathUtils.smoothstep(this.sitS, 0.02, 0.3);
-    L.w += (want - L.w) * (1 - Math.exp(-dt * 2.5));
+    want *= 1 - (this.leadK ?? 0); // её ведут пальцем — запись живого ожидания уходит
+    L.w += (want - L.w) * (1 - Math.exp(-dt * ((this.leadK ?? 0) > 0.5 ? 7 : 2.5)));
     if (L.stopping && L.w < 0.01) { this.upper = null; return; }
     L.f = Math.min(1, L.f + dt / 1.6);
     const fe = L.f * L.f * (3 - 2 * L.f);
@@ -616,7 +617,10 @@ export class Character {
 
     // Перенос веса: стоит то на одной, то на другой ноге (контрапост).
     // tanh делает «плато» — она подолгу стоит на одной ноге, а не качается маятником.
-    const w = Math.tanh(2.2 * Math.sin(t * 0.42)) / Math.tanh(2.2);
+    // Пока её ведут пальцем (за таз, за точку), сама она почти не двигается: иначе её собственные покачивания
+    // складываются с движением руки, и в запись/повтор попадает не то, что вёл.
+    const leadQ = 1 - 0.9 * (this.leadK ?? 0);
+    const w = Math.tanh(2.2 * Math.sin(t * 0.42)) / Math.tanh(2.2) * leadQ;
     const relaxL = Math.max(0, -w); // левая нога расслаблена
     const relaxR = Math.max(0, w); // правая нога расслаблена
     pose.hipsX += w * 0.055 * this.scale;
@@ -625,7 +629,7 @@ export class Character {
     // Плавная «восьмёрка» бёдрами в покое: таз чуть поворачивается и покачивается,
     // плечи и голова уравновешивают — живая, женственная стойка.
     {
-      const st = 1 - THREE.MathUtils.smoothstep(this.sitS, 0.1, 0.4);
+      const st = (1 - THREE.MathUtils.smoothstep(this.sitS, 0.1, 0.4)) * leadQ;
       const f = Math.sin(t * 0.55);
       const g = Math.sin(t * 1.1 + 0.6);
       pose.hipsRotY += f * 0.13 * st;
@@ -636,7 +640,7 @@ export class Character {
     // Живая плавная пластика: медленные несинхронные волны в корпусе, плечах и голове —
     // она будто дышит всем телом, ни на секунду не замирая (небольшая амплитуда).
     {
-      const aw = (1 - 0.92 * (this.sleep ?? 0)) * (this.posing ? 0.6 : 1) * (this.frozen ? 0.12 : 1); // «Замри» — только дыхание
+      const aw = (1 - 0.92 * (this.sleep ?? 0)) * (this.posing ? 0.6 : 1) * (this.frozen ? 0.12 : 1) * leadQ; // «Замри» — только дыхание
       const n = (a, b, c) => Math.sin(t * a + b) * 0.6 + Math.sin(t * a * 2.17 + c) * 0.4;
       pose.spineZ += n(0.29, 0.3, 1.7) * 0.035 * aw;
       pose.spineY += n(0.21, 2.1, 0.4) * 0.04 * aw;
@@ -738,6 +742,7 @@ export class Character {
     this.wakeT = Math.max(0, (this.wakeT ?? 0) - dt);
     // Пока ведёшь полосу (и пару секунд после) — ножками не болтает.
     this.slideHold = Math.max(0, (this.slideHold ?? 0) - dt);
+    this.leadK = (this.leadK ?? 0) + ((this.ledNow ? 1 : 0) - (this.leadK ?? 0)) * (1 - Math.exp(-dt * (this.ledNow ? 8 : 1.5))); // ведут пальцем прямо сейчас (ставит main.js каждый кадр)
     this.kickOn = (this.kickOn ?? 1) + ((this.slideHold > 0 ? 0 : 1) - (this.kickOn ?? 1)) * (1 - Math.exp(-dt * 2.5));
     // Сон: улеглась (на живот, на спину или на бок) — немного полежит (~10 с) и уснёт.
     // Тормошат — просыпается; гладят и нежно трогают — спит дальше, довольная.
@@ -836,7 +841,7 @@ export class Character {
       const tt = this.hipClock;
       // во сне — почти неподвижна; лёжа на боку ёрзает вдвое спокойнее (иначе её «перегибает»)
       // На животе сама ёрзает заметно спокойнее (иначе её «возит» по полу); пока её ведут или выставили точки — ещё тише.
-      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2) * (1 - 0.5 * this.sitPhases(s).p4) * (1 - 0.7 * this.sitPhases(s).b4) * (this.slideHold > 0 ? 0.5 : 1)
+      const hipLife = p1 * (1 - 0.88 * (this.sleep ?? 0)) * (1 + 0.25 * p2) * (1 - 0.5 * this.sitPhases(s).p4) * (1 - 0.7 * this.sitPhases(s).b4) * (1 - 0.9 * (this.leadK ?? 0))
         * (1 - 0.55 * p2 * (1 - this.sitPhases(s).p3)); // на коленях сама «плавает» вдвое меньше
       if (hipLife > 0) {
         const ph2 = this.sitPhases(s);
@@ -1313,7 +1318,7 @@ export class Character {
           return this.lastIdleMotion;
         };
         const lying = this.sitS > 1.05;
-        if (this.frozen || this.dancing || this.loop || (this.upper && !this.upper.stopping && this.sitS < 0.2) || (this.sleep ?? 0) > 0.3) { /* замерла, занята или спит */ }
+        if (this.frozen || (this.leadK ?? 0) > 0.3 || this.dancing || this.loop || (this.upper && !this.upper.stopping && this.sitS < 0.2) || (this.sleep ?? 0) > 0.3) { /* замерла, занята или спит */ }
         else if (lying) {
           // Лёжа: изредка поворачивает голову, вздыхает, потягивается корпусом.
           if (r < 0.6) this.playMotion(pickFresh(['lookAround', 'sigh', 'tiltHead', 'lieTurn']));

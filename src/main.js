@@ -2695,6 +2695,7 @@ function grabSample() {
 // Каждый кадр, пока тянешь точку, пишем позу; на повторе — проигрываем туда-обратно только то, что двигалось.
 function updateGrabLoops(dt) {
   if (!character) return;
+  character.ledNow = !!poseDrag?.grab; // её ведут за точку — сама почти не двигается (см. leadK)
   if (grab?.rec && poseDrag?.grab) { const smp = grabSample(); smp.t = (performance.now() - grab.rec.start) / 1000; grab.rec.S.push(smp); }
   if (!grabLoops.length) return;
   if (!autoMode || poseMode || autoState === 'sleep') { grabLoopsClear(); return; }
@@ -2774,6 +2775,7 @@ function grabStart(e0) {
   grab.rec = { start: performance.now(), S: [] }; // запись этого движения — для «Повторять»
   clearTimeout(grabAskTimer); grabAsk.style.display = 'none';
   stroking = null; petting = null; bgSwipe = null;
+  autoBendTarget = null; // свайп-наклон, начатый тем же касанием, дальше не действует: теперь ведут точку
   stopAuto(true);
   grabForce = hit;
   try { poseDragStart(e0); } finally { grabForce = null; }
@@ -4956,7 +4958,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 252;
+const WAIFU_BUILD = 253;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5086,7 +5088,7 @@ function showAutoStates(ms = 4500) {
   autoStatesTimer = setTimeout(() => autoStates.classList.remove('show'), ms);
 }
 {
-  let lp = null, held = null;
+  let lp = null, held = null, downState = null;
   const cancel = () => { if (lp) { clearTimeout(lp.t); lp = null; } };
   window.addEventListener('pointerdown', (e) => {
     cancel();
@@ -5095,6 +5097,7 @@ function showAutoStates(ms = 4500) {
     const clean = document.body.classList.contains('cleanscreen');
     if (!clean && !camOnly && !zoneAt(e, true)) return;
     const e0 = { clientX: e.clientX, clientY: e.clientY };
+    downState = character ? { sit: character.sit, rot: character.bodyOffset.hipsRotX } : null; // что было до касания — чтобы отменить свайп, если это окажется взятием точки
     // Только что водил её за точку — для следующего взятия хватит короткой задержки (0.2 с вместо 0.5), значки при
     // этом не всплывают. Сразу повёл палец — это обычный свайп (сесть, лечь, наклон), точка НЕ хватается.
     const quick = !clean && !camOnly && performance.now() - lastGrabAt < 9000;
@@ -5112,6 +5115,12 @@ function showAutoStates(ms = 4500) {
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
+      // Берёшь точку — отменяем то, что за эти доли секунды успел сделать обычный свайп (присела, наклонилась):
+      // иначе одно движение пальца срабатывало дважды — и как свайп, и как точка.
+      if (downState && touches.size === 1 && character) {
+        if (Math.abs(character.sit - downState.sit) > 0.002) { character.sit = downState.sit; character.sitRate = 3; }
+        if (Math.abs(character.bodyOffset.hipsRotX - downState.rot) > 0.002) character.bodyOffset.hipsRotX = downState.rot;
+      }
       const n = touches.size, ok = n === 1 && grabStart(h.e0);
       if (ok) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
       diag(ok ? 'взято: ' + (lastGrabKey ?? activeHandle ?? '?') : 'не взято: ' + (n !== 1 ? 'пальцев ' + n : poseMode ? 'режим позы' : grabWhy));
