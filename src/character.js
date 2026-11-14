@@ -3342,8 +3342,17 @@ export class Character {
       const hq = this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv);
       const front = new THREE.Vector3(0, 0, 1).applyQuaternion(hq);
       const thighTop = this.bones[`${side}UpperLeg`]?.getWorldPosition(new THREE.Vector3()) ?? hipsPos;
-      for (let t = 0; t <= 0.85 && sh.distanceTo(target) > reach; t += 0.12) {
-        target.copy(kneePos).lerp(thighTop, 0.3 + t).addScaledVector(front, 0.085 * this.scale).add(new THREE.Vector3(0, 0.02 * this.scale, 0));
+      // Плавно, без ступенек (раньше ладонь переставлялась по бедру шагами по 5 см и дёргалась при каждом движении таза).
+      {
+        const at = (t) => kneePos.clone().lerp(thighTop, 0.3 + t).addScaledVector(front, 0.085 * this.scale).add(new THREE.Vector3(0, 0.02 * this.scale, 0));
+        const blend = THREE.MathUtils.smoothstep(sh.distanceTo(target) - reach, -0.05 * this.scale, 0);
+        if (blend > 0) {
+          let lo = 0, hi = 0.85;
+          if (sh.distanceTo(at(0)) <= reach) hi = 0;
+          else if (sh.distanceTo(at(0.85)) > reach) lo = 0.85;
+          else for (let i = 0; i < 12; i++) { const m = (lo + hi) / 2; if (sh.distanceTo(at(m)) > reach) lo = m; else hi = m; }
+          target.lerp(at(hi === 0 ? 0 : (lo + hi) / 2 > 0.84 ? 0.85 : hi), blend);
+        }
       }
       // Откинулась так далеко, что и до бедра не достать, — опирается ладонями о пол позади себя (под плечами).
       {
