@@ -2752,13 +2752,19 @@ grabGlow.id = 'grab-glow';
 document.body.appendChild(grabGlow);
 const grabGlowV = new THREE.Vector3();
 var lastGrabAt = -1e9, lastGrabKey = null; // когда и за какую точку последний раз вели её (долгий тап)
+var grabWhy = '';
+const diagEl = document.createElement('div');
+diagEl.style.cssText = 'position:fixed;left:6px;top:6px;z-index:99;font:11px sans-serif;color:#fff;background:rgba(0,0,0,.45);padding:2px 6px;border-radius:6px;pointer-events:none;display:none';
+document.body.appendChild(diagEl);
+let diagT = 0;
+function diag(t) { diagEl.textContent = t; diagEl.style.display = 'block'; clearTimeout(diagT); diagT = setTimeout(() => { diagEl.style.display = 'none'; }, 4000); }
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
   // Только что вёл точку — та же точка берётся охотнее (продолжаешь то же движение, а не хватаешь соседнюю руку).
   const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
   let hit = nearestHandle(e0, 70, Object.keys(bias).length ? bias : null) ?? zoneAt(e0, true);
-  if (!hit) return false;
+  if (!hit) { grabWhy = 'мимо точек' + (performance.now() - lastCamMove < 450 ? ' (камера)' : ''); return false; }
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
   if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
   if (!grab) grab = { snap: character.exportTouchPose() };
@@ -2768,7 +2774,7 @@ function grabStart(e0) {
   stopAuto(true);
   grabForce = hit;
   try { poseDragStart(e0); } finally { grabForce = null; }
-  if (!poseDrag || poseDrag.kind === 'bg' || poseDrag.kind === 'sitdrag') { poseDrag = null; return false; }
+  if (!poseDrag || poseDrag.kind === 'bg' || poseDrag.kind === 'sitdrag') { grabWhy = 'вид ' + (poseDrag?.kind ?? 'нет') + ' зона ' + (hit.key ?? hit.zone); poseDrag = null; return false; }
   poseDrag.grab = true;
   lastGrabKey = hit.key ?? null; lastGrabAt = performance.now();
   try { navigator.vibrate?.(8); } catch { /* ignore */ }
@@ -4921,7 +4927,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 240;
+const WAIFU_BUILD = 241;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5066,11 +5072,13 @@ function showAutoStates(ms = 4500) {
     lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
-    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel();
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) { cancel(); diag('сдвиг до зажима'); }
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
-      if (touches.size === 1 && grabStart(h.e0)) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
+      const n = touches.size, ok = n === 1 && grabStart(h.e0);
+      if (ok) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
+      diag(ok ? 'взято: ' + (lastGrabKey ?? activeHandle ?? '?') : 'не взято: ' + (n !== 1 ? 'пальцев ' + n : poseMode ? 'режим позы' : grabWhy));
     }
   }, { capture: true, passive: true });
   for (const ev of ['pointerup', 'pointercancel']) window.addEventListener(ev, () => { cancel(); held = null; }, { capture: true, passive: true });
