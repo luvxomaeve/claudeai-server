@@ -966,7 +966,8 @@ export class Character {
     }
     const fwdCap = this.sitS > 0.3 && this.sitS < 1.0 ? this.bendScale : 1;
     let backK = 1;
-    { const v = this.bodyOffset.hipsRotX, sk = this.seatK ?? 0; if (v < -0.001 && sk > 0.01) { const lim = 0.32 * (this.seatLn ?? 1); backK = 1 + (lim * Math.tanh(-v / lim) / -v - 1) * sk; } }
+    const seatedK = (this.seatK ?? 0) * (1 - THREE.MathUtils.smoothstep(this.sitS, 0.55, 0.75)); // сидит на мебели (а не забралась на стол)
+    { const v = this.bodyOffset.hipsRotX, sk = seatedK; if (v < -0.001 && sk > 0.01) { const lim = 0.32 * (this.seatLn ?? 1); backK = 1 + (lim * Math.tanh(-v / lim) / -v - 1) * sk; } }
     this.seatBackK = backK;
     for (const key in this.bodyOffset) {
       if (key === 'hipsFwd') continue; // сдвиг таза вперёд-назад на полу — отдельно, см. plantFeet
@@ -979,7 +980,7 @@ export class Character {
       let val = this.bodyOffset[key];
       // На мебели назад откидывается в меру (таз остаётся на сиденье, ноги на полу, спина не висит в воздухе)
       if (key === 'hipsRotX' && val < 0) val *= backK;
-      if (key === 'spineX' && val < -0.001 && (this.seatK ?? 0) > 0.01) { const lm = 0.4 * (this.seatLn ?? 1); val *= 1 + (lm * Math.tanh(-val / lm) / -val - 1) * this.seatK; }
+      if (key === 'spineX' && val < -0.001 && seatedK > 0.01) { const lm = 0.4 * (this.seatLn ?? 1); val *= 1 + (lm * Math.tanh(-val / lm) / -val - 1) * seatedK; }
       pose[key] += val * w;
     }
     // На коленях прогиб назад глубже: к наклону таза добавляется прогиб спины (грудь раскрывается, плечи уходят назад),

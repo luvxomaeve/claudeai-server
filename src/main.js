@@ -2444,7 +2444,7 @@ try {
 } catch { /* ignore */ }
 if (!unlocked('lieStyles') && lieMode !== 'belly' && lieMode !== 'off') lieMode = 'belly'; // пока другие позы не открыты — на живот
 let allowLie = lieMode !== 'off';
-const sitMax = () => (character?.seat ? 0.5 : !unlocked('floor') ? 0.8 : allowLie ? 1.3 : 1.0); // на стуле/троне ниже сиденья не садится
+const sitMax = () => (character?.seat && !character.seat.lie ? 0.5 : !unlocked('floor') ? 0.8 : allowLie ? 1.3 : 1.0); // на стуле/троне ниже сиденья не садится
 const LIE_ICONS = {
   side: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11.5" r="1.8"/>',
   belly: '<path d="M14.5 4.5a6.5 6.5 0 1 0 5 10.5A7.5 7.5 0 0 1 14.5 4.5z"/><path d="M17 4h3l-3 3h3"/>',
@@ -4982,7 +4982,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 272;
+const WAIFU_BUILD = 273;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5002,10 +5002,11 @@ const FURN = [
   { id: 'none', icon: '🪑', name: 'Без мебели' },
   { id: 'pouf', icon: '🟣', name: 'Пуф', h: 0.42, back: 0.3 },
   { id: 'chair', icon: '🔮', name: 'Стеклянное кресло-шар', h: 0.44, back: 0.32, lean: 0.45 },
-  { id: 'table', icon: '🔷', name: 'Стеклянный стол', h: 0.66, back: 0.2 },
+  { id: 'table', icon: '🔷', name: 'Стеклянный стол', h: 0.66, back: 0.2, lie: true }, // на стол можно забраться и лечь
   { id: 'throne', icon: '👑', name: 'Трон', h: 0.48, back: 0.34, lean: 0.12 },
 ];
 var furnIdx = 0;
+const TABLE_R = 0.9, TABLE_CZ = TABLE_R - 0.16; // радиус столешницы и сдвиг её центра назад от края, где она сидит
 const furnGroup = new THREE.Group();
 furnGroup.visible = false;
 scene.add(furnGroup);
@@ -5042,12 +5043,13 @@ function buildFurn(f, S) {
     lathe([[0, 0], [0.24, 0], [0.24, 0.012], [0.05, 0.03], [0, 0.03]], steel, 0, cz);
     ring(0.24, 0.005, 0, 0.012, cz, e);
   } else if (f.id === 'table') {
-    // Стеклянный стол: круглая столешница на одной изящной ножке; она присаживается на край.
-    const g = glass(), e = edge();
-    lathe([[0, top - 0.02], [0.33, top - 0.02], [0.34, top - 0.01], [0.33, top], [0, top]], g, 0, -0.16);
-    ring(0.338, 0.005, 0, top - 0.01, -0.16, e);
-    lathe([[0, 0], [0.19, 0], [0.19, 0.012], [0.05, 0.03], [0.022, 0.12], [0.018, top - 0.1], [0.07, top - 0.02], [0, top - 0.02]], g, 0, -0.16);
-    ring(0.19, 0.004, 0, 0.008, -0.16, e);
+    // Стеклянный стол: большая круглая столешница на одной ножке; она присаживается на край, а ниже — забирается
+    // на стол целиком (колени, четвереньки, лёжа).
+    const g = glass(), e = edge(), R = TABLE_R, cz = -TABLE_CZ;
+    lathe([[0, top - 0.025], [R - 0.01, top - 0.025], [R, top - 0.012], [R - 0.01, top], [0, top]], g, 0, cz);
+    ring(R - 0.002, 0.006, 0, top - 0.012, cz, e);
+    lathe([[0, 0], [0.34, 0], [0.34, 0.014], [0.1, 0.04], [0.04, 0.16], [0.032, top - 0.14], [0.16, top - 0.025], [0, top - 0.025]], g, 0, cz);
+    ring(0.34, 0.005, 0, 0.01, cz, e);
   } else {
     // Трон — массивный, как в первой версии (он понравился больше): основание, бархатная подушка, высокая спинка
     // с бархатной вставкой, широкие подлокотники, золотая кайма; углы спинки — с золотыми шарами.
@@ -5067,7 +5069,7 @@ function applyFurn(sitNow = false) {
   const f = FURN[furnIdx];
   renderFurnPager();
   if (f.id === 'none') { character.seat = null; furnGroup.visible = false; return; }
-  character.seat = { h: f.h, back: f.back, lean: f.lean ?? 1 }; // lean — насколько можно откинуться назад (спинка мешает)
+  character.seat = { h: f.h, back: f.back, lean: f.lean ?? 1, lie: !!f.lie }; // lean — насколько можно откинуться назад (спинка мешает)
   const S = character.scale;
   buildFurn(f, S);
   // Ставим под неё: за ступнями на длину бедра, сиденьем к ней.
@@ -5103,7 +5105,7 @@ function updateFurnSlide(dt) {
     furnIdx = a.next;
     const f = FURN[furnIdx];
     if (f.id === 'none') { applyFurn(); if (character.sit > 0.01) sitBy(-character.sit / 0.004); showToast('Мебель убрана'); furnSlide = null; renderAutoStates(); return; }
-    if (character.sit > 0.5) character.sit = 0.5;
+    if (character.sit > 0.5) { character.sit = 0.5; character.sitRate = Math.max(character.sitRate ?? 0, 1.2); }
     applyFurn(true);
     showToast(`${f.icon} ${f.name}`);
     renderAutoStates();
@@ -5114,6 +5116,33 @@ function updateFurnSlide(dt) {
     furnGroup.position.copy(furnBase).addScaledVector(right, -a.dir * 1.6 * S * (1 - ease(a.t)));
     if (a.t >= 1) { furnGroup.position.copy(furnBase); furnSlide = null; }
   }
+}
+// «Сцена опускается»: когда она забирается на стол (ниже сидения), столешница становится её полом. Сама она считает
+// всё как на обычном полу (ничего в позах не меняется), а настоящий пол, стол и тени уезжают вниз на высоту стола,
+// и стол подъезжает под неё целиком.
+let stageK = 0;
+const stageC = new THREE.Vector3(), stageTmp = new THREE.Vector3();
+function updateStage(dt) {
+  if (!character) return;
+  const S = character.scale, f = FURN[furnIdx];
+  const want = f.lie && character.seat ? THREE.MathUtils.smoothstep(character.sitS, 0.52, 0.78) : 0;
+  stageK += (want - stageK) * (1 - Math.exp(-dt * 10));
+  if (stageK < 0.001 && !want) stageK = 0;
+  const drop = -(f.h ?? 0) * S * stageK;
+  floor.position.y = drop; floorDisc.position.y = 0.001 + drop;
+  if (!furnSlide && furnGroup.visible) furnGroup.position.copy(furnBase);
+  furnGroup.position.y = drop;
+  if (stageK > 0) {
+    // Центр стола — под серединой тела (между головой и ступнями), плавно.
+    const B = character.bones, a = B.head.getWorldPosition(stageTmp), hx = a.x, hz = a.z;
+    const l = B.leftFoot.getWorldPosition(stageTmp), lx = l.x, lz = l.z, r = B.rightFoot.getWorldPosition(stageTmp);
+    const cx = (hx + (lx + r.x) / 2) / 2, cz = (hz + (lz + r.z) / 2) / 2;
+    if (stageC.y === 0) { stageC.set(cx, 1, cz); } else { const k = 1 - Math.exp(-dt * 2.5); stageC.x += (cx - stageC.x) * k; stageC.z += (cz - stageC.z) * k; }
+    // где сейчас центр столешницы (в группе он сдвинут назад на TABLE_CZ)
+    const ry = furnGroup.rotation.y, ox = -Math.sin(ry) * TABLE_CZ * S, oz = -Math.cos(ry) * TABLE_CZ * S;
+    furnGroup.position.x += (stageC.x - (furnBase.x + ox)) * stageK;
+    furnGroup.position.z += (stageC.z - (furnBase.z + oz)) * stageK;
+  } else stageC.y = 0;
 }
 // Точки-указатель внизу: какая мебель выбрана. Там же её и листают — свайпом влево-вправо по нижней полоске экрана
 // (именно по ней, чтобы случайно не сменить, когда гладишь её или крутишь камеру).
@@ -6046,6 +6075,7 @@ function tick() {
     character.handPad = isPaint(wear.bottoms) ? 0.3 : 0;
     updateGrabLoops(dt);
     updateFurnSlide(dt);
+    updateStage(dt);
     autoWalk(dt);
     updateFlirt(dt);
     character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
