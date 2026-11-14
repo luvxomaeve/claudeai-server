@@ -2730,7 +2730,7 @@ function grabMakeLoop(rec) {
   grabStop.style.display = 'block';
   return true;
 }
-grabAsk.style.cssText = 'position:fixed;left:50%;top:13%;transform:translate(-50%,-50%);z-index:32;display:none;gap:8px;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
+grabAsk.style.cssText = 'position:fixed;left:50%;top:80%;transform:translate(-50%,-50%);z-index:32;display:none;gap:8px;align-items:center;padding:8px 12px;border-radius:999px;background:rgba(40,30,80,.72);backdrop-filter:blur(10px);color:#fff;font-weight:800;font-size:15px;box-shadow:0 6px 24px rgba(0,0,0,.35)';
 document.body.appendChild(grabAsk);
 for (const ev of ['pointerdown', 'touchstart']) grabAsk.addEventListener(ev, (e) => e.stopPropagation());
 let grabAskTimer = 0;
@@ -2755,13 +2755,9 @@ var lastGrabAt = -1e9, lastGrabKey = null; // когда и за какую то
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
-  // «Прилипание» к прошлой точке убрано: после колена или руки следующим касанием нельзя было взять ничего другого.
-  const bias = character.sitS > 0.3 ? { hips: 0.45 } : {};
-  // Палец на ней — берём ближайшую точку, как бы далеко она ни была на экране. Раньше искали только в 70 пикселях:
-  // при приближенной камере точки расходятся дальше, и вместо точки бралась «зона» — без свечения и с другим
-  // движением (присед вместо ноги). Мимо неё — по-прежнему только рядом с точкой.
-  const bz = Object.keys(bias).length ? bias : null, zone = zoneAt(e0, true);
-  let hit = nearestHandle(e0, zone ? 1e5 : 70, bz) ?? zone;
+  // Только что вёл точку — та же точка берётся охотнее (продолжаешь то же движение, а не хватаешь соседнюю руку).
+  const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
+  let hit = nearestHandle(e0, 70, Object.keys(bias).length ? bias : null) ?? zoneAt(e0, true);
   if (!hit) return false;
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
   if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
@@ -2916,13 +2912,6 @@ function poseDragMove(e) {
       }
       if (poseDrag.start0) dragPoint.sub(poseDrag.p0).add(poseDrag.start0);
       if (poseDrag.kind === 'knee' && character.sitS > 0.3) {
-        // На коленях и четвереньках колено стоит на полу: ведём саму точку опоры — ноги раздвигаются по полу.
-        const kp = character.kneePin, sd = poseDrag.side;
-        if (kp?.[sd] && kp.w > 0.5 && (character.kneelK ?? 0) > 0.5 && !character.footOffset[sd]) {
-          poseDrag.pin0 ??= kp[sd].clone(); poseDrag.foot0 ??= kp.foot?.[sd]?.clone() ?? null;
-          character.moveKnee(sd, poseDrag.pin0, poseDrag.foot0, dragPoint.clone().sub(poseDrag.kneeStart));
-          return;
-        }
         // На полу колено ведёт всю ногу: стопа сдвигается вместе с коленом.
         character.setFootTarget(poseDrag.side, poseDrag.footStart.clone().add(dragPoint.clone().sub(poseDrag.kneeStart)));
       } else if (poseDrag.kind === 'knee') {
@@ -3024,10 +3013,8 @@ function poseDragMove(e) {
       const k = clamp(o.hipsX / (lim * S), -1, 1);
       o.hipsZ = clamp(o.hipsX / S * 1.6, -0.36, 0.36);
       poseDrag.sp0 ??= { y: o.spineY + clamp(o.hipsX / (lim * S), -1, 1) * 0.42, z: o.spineZ - clamp(o.hipsX / (lim * S), -1, 1) * 0.16 }; // от уже выставленного скручивания
-      // В глубоком наклоне корпус скручиваем втрое слабее: там он горизонтален, и то же скручивание перекашивало плечи.
-      const tw = 1 - 0.7 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.45, 1.2);
-      o.spineY = clamp(poseDrag.sp0.y - k * 0.42 * tw, -1.3, 1.3);
-      o.spineZ = clamp(poseDrag.sp0.z + k * 0.16 * tw, -0.95, 0.95);
+      o.spineY = clamp(poseDrag.sp0.y - k * 0.42, -1.3, 1.3);
+      o.spineZ = clamp(poseDrag.sp0.z + k * 0.16, -0.95, 0.95);
       // Наклон таза — от того положения, в котором её взяли (в глубоком наклоне позу не сбрасываем), и не трогаем,
       // пока наклон ведёт повтор.
       poseDrag.rot0 ??= o.hipsRotX;
@@ -4934,7 +4921,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 238;
+const WAIFU_BUILD = 239;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5079,8 +5066,7 @@ function showAutoStates(ms = 4500) {
     lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
-    // Палец при удержании немного дрожит — допуск 18 px (было 10: долгий тап срывался, и точка не бралась).
-    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 18) cancel();
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) cancel();
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
@@ -5815,9 +5801,7 @@ function tick() {
     updateGrabLoops(dt);
     autoWalk(dt);
     updateFlirt(dt);
-    // Руки спокойны и пока ведёшь её за точку (таз, корпус, ногу), и ещё немного после — иначе во время движения таза
-    // она всплёскивала руками и поправляла волосы, и позу перекашивало.
-    character.handsQuiet = autoMode && (!!poseDrag?.auto || !!poseDrag?.grab || performance.now() - autoDragAt < 700 || performance.now() - lastGrabAt < 1500);
+    character.handsQuiet = autoMode && (!!poseDrag?.auto || performance.now() - autoDragAt < 700);
     character.update(dt);
     pieceWardrobe.sync(dt);
 
