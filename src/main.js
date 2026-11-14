@@ -4979,7 +4979,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 260;
+const WAIFU_BUILD = 261;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5241,8 +5241,9 @@ let autoBendTarget = null; // куда палец ведёт наклон; те�
 let autoLayer = null; // второй слой повтора: { kind: 'bend' | 'sit', S: [[t, v]…], dur, t }
 let autoLayerDrag = null; // сейчас рукой ведём второй слой ('bend' | 'sit')
 let autoDragAt = 0;
+let repOffDiagAt = 0;
 function autoRecNote() {
-  if (!repOffer) return;
+  if (!repOffer) { const t = performance.now(); if (t - repOffDiagAt > 6000) { repOffDiagAt = t; diag('повтор выключен — значок 🔁 в меню'); } return; }
   const now = performance.now();
   if (!autoRec || now - autoRec.last > 1600) autoRec = { start: now, samples: [], layerKind: reps.home.on ? autoLayerDrag : null };
   autoRec.last = now;
@@ -5474,12 +5475,15 @@ function autoRepCheck(now) {
   const n = autoSwipes.filter((t) => t >= rec.start - 50).length;
   autoSwipes = [];
   const S = rec.samples;
-  const no = () => { if (rec.layerKind) autoLayerRestore(); };
-  if ((rec.turns ?? 0) < 1 && n < 2) return no();
-  if (S.length < 8) return no();
+  const no = (why) => { if (why) diag('повтор не предложен: ' + why); if (rec.layerKind) autoLayerRestore(); };
+  if ((rec.turns ?? 0) < 1 && n < 2) return no(S.length > 20 ? 'нужно туда-обратно' : '');
+  if (S.length < 8) return no('');
   const rng = (k) => Math.max(...S.map((x) => x[k])) - Math.min(...S.map((x) => x[k]));
   // Предлагаем повторить, только если водил её хотя бы 3 секунды — на короткие движения не всплывает.
-  if (rec.layerKind ? (S[S.length - 1].t < 3 || rng(rec.layerKind) < (rec.layerKind === 'bend' ? 0.25 : 0.12)) : (S[S.length - 1].t < 3 || (rng('bend') < 0.25 && rng('sit') < 0.12))) return no();
+  // Предлагаем повторить, если водил её хотя бы 2 секунды (раньше — 3: короткие «туда-сюда» не засчитывались).
+  { const dur = S[S.length - 1].t, small = rec.layerKind ? rng(rec.layerKind) < (rec.layerKind === 'bend' ? 0.25 : 0.12) : (rng('bend') < 0.25 && rng('sit') < 0.12);
+    if (dur < 2) return no('коротко — ' + dur.toFixed(1) + ' с, нужно 2');
+    if (small) return no('маленький размах'); }
   autoRepOffer = rec;
   renderAutoRep();
   try { navigator.vibrate?.(12); } catch { /* ignore */ }
