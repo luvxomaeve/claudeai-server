@@ -3043,7 +3043,7 @@ function poseDragMove(e) {
     // На коленях и четвереньках таз вбок — в пределах, которые ноги держат без переступания (иначе колени и голени
     // перебирают на каждом качании); лёжа и сидя на полу — шире.
     const knL = (() => { const ph = character.sitPhases(); return ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); })();
-    const lim = floor ? 0.3 - 0.07 * knL : poseDrag.grab ? 0.2 + 0.12 * THREE.MathUtils.smoothstep(character.sitS, 0.05, 0.4) + 0.08 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.4, 1.2) : 0.17; // в наклоне таз тоже ходит шире
+    const lim = floor ? 0.36 - 0.08 * knL : poseDrag.grab ? 0.26 + 0.08 * THREE.MathUtils.smoothstep(character.sitS, 0.05, 0.4) + 0.08 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.4, 1.2) : 0.17; // шире (сборка 271): больше свободы крутить тазом // в наклоне таз тоже ходит шире
     // Взял за таз долгим тапом: жест идёт по одной оси — вбок ИЛИ вверх-вниз (иначе, двигая таз вбок, случайно
     // поднимал или усаживал её). На полу вверх-вниз — приподнять/опустить бёдра, а не встать.
     if (poseDrag.grab) {
@@ -3057,9 +3057,9 @@ function poseDragMove(e) {
       if (!poseDrag.free) { if (poseDrag.axis === 'y') dx = 0; else dy = 0; }
       if (floor) {
         // Вверх-вниз за таз на полу: бёдра поднимаются/опускаются и таз наклоняется вперёд-назад — с хорошим размахом.
-        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ { const ph0 = character.sitPhases(), kn0 = ph0.p2 * (1 - ph0.p3) * (1 - ph0.b4) * (1 - ph0.c3); /* лёжа на спине и животе таз поднимается высоко (мостик, «домик»); на коленях можно сесть ниже */ o.hipsY = clamp((o.hipsY ?? 0) - dy * (0.0015 + 0.001 * Math.max(back, ph0.b4)) * S, /* лёжа таз идёт за пальцем живее — полный подъём за короткий жест */ -(0.03 + 0.07 * kn0) * S, (0.17 + 0.13 * Math.max(back, ph0.b4)) * S * (1 - ph0.p4)); } /* на боку таз не поднимаем: иначе всё тело повисает над полом */ { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0045 * (1 - back) * (1 - tall), -0.8, 0.9); } }
+        if (dy) { const back = character.sitPhases().c4; /* на спине — мостик: только подъём таза, плечи на полу */ { const ph0 = character.sitPhases(), kn0 = ph0.p2 * (1 - ph0.p3) * (1 - ph0.b4) * (1 - ph0.c3); /* лёжа на спине и животе таз поднимается высоко (мостик, «домик»); на коленях можно сесть ниже */ o.hipsY = clamp((o.hipsY ?? 0) - dy * (0.0015 + 0.001 * Math.max(back, ph0.b4)) * S, /* лёжа таз идёт за пальцем живее — полный подъём за короткий жест */ -(0.03 + 0.07 * kn0) * S, (0.2 + 0.14 * Math.max(back, ph0.b4)) * S * (1 - ph0.p4)); } /* на боку таз не поднимаем: иначе всё тело повисает над полом */ { const ph = character.sitPhases(); const tall = ph.p2 * (1 - ph.p3) * (1 - ph.b3) * (1 - ph.c3); /* на коленях без рук — встаёт на колени прямо, а не валится вперёд */ o.hipsRotX = clamp(o.hipsRotX - dy * 0.0045 * (1 - back) * (1 - tall), -0.8, 0.9); } }
         // На коленях и четвереньках тот же жест перекатывает таз вперёд за колени (на руки) и назад на пятки.
-        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0022 * S * kn, -0.2 * S, 0.34 * S) * (kn > 0.5 ? 1 : 0); }
+        if (dy) { const ph = character.sitPhases(); const kn = ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); o.hipsFwd = clamp((o.hipsFwd ?? 0) - dy * 0.0022 * S * kn, -0.24 * S, 0.38 * S) * (kn > 0.5 ? 1 : 0); }
         dy = 0;
       }
     }
@@ -3078,7 +3078,7 @@ function poseDragMove(e) {
       // Наклон таза — от того положения, в котором её взяли (в глубоком наклоне позу не сбрасываем), и не трогаем,
       // пока наклон ведёт повтор.
       poseDrag.rot0 ??= o.hipsRotX;
-      if (dy && !reps.home.on) o.hipsRotX = clamp(o.hipsRotX + dy * 0.0032, Math.max(BEND_MIN, poseDrag.rot0 - 0.35), Math.min(BEND_MAX, poseDrag.rot0 + 0.45));
+      if (dy && !reps.home.on) o.hipsRotX = clamp(o.hipsRotX + dy * 0.0032, Math.max(BEND_MIN, poseDrag.rot0 - 0.6), Math.min(BEND_MAX, poseDrag.rot0 + 0.7));
     }
     if (poseDrag.grab && !dy) return; // только вбок — посадку не трогаем
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
@@ -4982,7 +4982,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 270;
+const WAIFU_BUILD = 271;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5174,7 +5174,7 @@ function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
   // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна всегда; «↺» — только когда есть выставленные точки.
-  for (const [id, icon, name] of [['home', '🏠', ''], ...(hasPoints() ? [['pts', '↺', 'Сбросить точки']] : []), ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['furn', FURN[furnIdx].id === 'none' ? '🪑' : FURN[furnIdx].icon, 'Мебель'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
+  for (const [id, icon, name] of [['home', '🏠', ''], ...(hasPoints() ? [['pts', '↺', 'Сбросить точки']] : []), ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
     if (id === 'cam') { const brk = document.createElement('span'); brk.className = 'brk'; autoStates.appendChild(brk); } // второй ряд — инструменты
     const b = document.createElement('button');
     const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : id === 'furn' ? FURN[furnIdx].id !== 'none' : autoState === id || (id === 'freeze' && autoState === 'hold');
