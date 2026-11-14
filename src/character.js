@@ -2620,7 +2620,7 @@ export class Character {
         if (fp && Math.abs(this.sitS - fp.sit) > 0.22) { this.footPin[side] = null; }
         else if (fp && footRaw) {
           const o = fp.p.clone().sub(target);
-          o.x = THREE.MathUtils.clamp(o.x, -0.45 * S, 0.45 * S); o.y = THREE.MathUtils.clamp(o.y, -0.1 * S, 0.6 * S); o.z = THREE.MathUtils.clamp(o.z, -0.5 * S, 0.5 * S);
+          o.x = THREE.MathUtils.clamp(o.x, -0.62 * S, 0.62 * S); o.y = THREE.MathUtils.clamp(o.y, -0.1 * S, 0.7 * S); o.z = THREE.MathUtils.clamp(o.z, -0.65 * S, 0.65 * S);
           this.footOffset[side].copy(o); footRaw = o;
         }
       }
@@ -3153,7 +3153,7 @@ export class Character {
     const kp = this.kneePin;
     if (!kp?.[side] || !pin0) return false;
     const S = this.scale, m = d.clone().setY(0);
-    if (m.length() > 0.38 * S) m.setLength(0.38 * S);
+    if (m.length() > 0.52 * S) m.setLength(0.52 * S); // колено по полу можно увести дальше (было 38 см)
     const P = pin0.clone().add(m);
     // Колено не заходит за середину (ноги не перекрещиваются).
     const other = kp[side === 'left' ? 'right' : 'left'], hx = this.bones.hips.getWorldPosition(new THREE.Vector3()).x;
@@ -3180,9 +3180,10 @@ export class Character {
     if (this.sitS > 0.3 && this.footBase?.[side]) {
       (this.footSetSit ??= {})[side] = this.sitS;
       const off = worldPoint.clone().sub(this.footBase[side]);
-      off.x = THREE.MathUtils.clamp(off.x, -0.45 * S, 0.45 * S);
-      off.y = THREE.MathUtils.clamp(off.y, -0.1 * S, 0.6 * S);
-      off.z = THREE.MathUtils.clamp(off.z, -0.5 * S, 0.5 * S);
+      // Пределы шире (сборка 263): ногу на полу можно отвести дальше.
+      off.x = THREE.MathUtils.clamp(off.x, -0.62 * S, 0.62 * S);
+      off.y = THREE.MathUtils.clamp(off.y, -0.1 * S, 0.7 * S);
+      off.z = THREE.MathUtils.clamp(off.z, -0.65 * S, 0.65 * S);
       this.footOffset[side] = off;
       // Ступню поставили — она держит это место на полу (в мире), пока двигаешь таз, а не едет вместе с ним.
       (this.footPin ??= {})[side] = { p: this.footBase[side].clone().add(off), sit: this.sitS };
@@ -3194,10 +3195,10 @@ export class Character {
     // Естественные пределы: вбок наружу до 25 см, внутрь — не дальше второй ноги,
     // вверх до 45 см, вперёд до 40 см, назад до 25 см.
     const out = Math.sign(rest.pos.x - this.restHips.x) || 1;
-    const lateral = THREE.MathUtils.clamp(off.x * out, -Math.abs(rest.pos.x - this.restHips.x) + 0.02 * S, 0.25 * S);
+    const lateral = THREE.MathUtils.clamp(off.x * out, -Math.abs(rest.pos.x - this.restHips.x) + 0.02 * S, 0.4 * S); // вбок шире (было 25 см)
     off.x = lateral * out;
-    off.y = THREE.MathUtils.clamp(off.y, 0, 0.45 * S);
-    off.z = THREE.MathUtils.clamp(off.z, -0.25 * S, 0.4 * S);
+    off.y = THREE.MathUtils.clamp(off.y, 0, 0.6 * S);
+    off.z = THREE.MathUtils.clamp(off.z, -0.38 * S, 0.5 * S);
     this.footOffset[side] = off;
   }
 
