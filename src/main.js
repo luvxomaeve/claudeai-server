@@ -2758,12 +2758,15 @@ diagEl.style.cssText = 'position:fixed;left:6px;top:6px;z-index:99;font:11px san
 document.body.appendChild(diagEl);
 let diagT = 0;
 function diag(t) { diagEl.textContent = t; diagEl.style.display = 'block'; clearTimeout(diagT); diagT = setTimeout(() => { diagEl.style.display = 'none'; }, 4000); }
+function grabPick(e, r) {
+  const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
+  return nearestHandle(e, r, Object.keys(bias).length ? bias : null);
+}
 function grabStart(e0) {
   if (!character || !autoMode || poseMode) return false;
   // На полу точки таза и живота на экране почти сливаются — таз берём охотнее (им двигают чаще).
   // Только что вёл точку — та же точка берётся охотнее (продолжаешь то же движение, а не хватаешь соседнюю руку).
-  const bias = { ...(character.sitS > 0.3 ? { hips: 0.45 } : {}), ...(lastGrabKey && performance.now() - lastGrabAt < 6000 ? { [lastGrabKey]: 0.35 } : {}) };
-  let hit = nearestHandle(e0, 70, Object.keys(bias).length ? bias : null) ?? zoneAt(e0, true);
+  let hit = grabPick(e0, 70) ?? zoneAt(e0, true);
   if (!hit) { grabWhy = 'мимо точек' + (performance.now() - lastCamMove < 450 ? ' (камера)' : ''); return false; }
   // Лёжа живот и таз — одно место под пальцем: берём таз (сдвиг и подъём бёдер), а не поворот корпуса.
   if (character.sitS > 1.1 && (hit.key === 'belly' || hit.zone === 'belly')) hit = { ...HANDLE_HIT.hips, key: 'hips' };
@@ -4927,7 +4930,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 244;
+const WAIFU_BUILD = 245;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5070,7 +5073,10 @@ function showAutoStates(ms = 4500) {
     // этом не всплывают. Сразу повёл палец — это обычный свайп (сесть, лечь, наклон), точка НЕ хватается.
     const quick = !clean && !camOnly && performance.now() - lastGrabAt < 9000;
     // Только что вёл эту же точку и снова взялся прямо за неё — берётся сразу, без задержки (елозишь тазом раз за разом).
-    if (quick && lastGrabKey && nearestHandle(e, 48)?.key === lastGrabKey) { held = { e0, x: e0.clientX, y: e0.clientY }; return; }
+    if (quick && lastGrabKey && grabPick(e, 48)?.key === lastGrabKey) { held = { e0, x: e0.clientX, y: e0.clientY }; return; }
+    // Расставляешь дальше (другая точка, пока не прошло 20 с): взялся прямо за точку и повёл спокойно — берётся сразу.
+    // Быстрый росчерк — по-прежнему свайп (сесть, лечь, встать).
+    if (!clean && !camOnly && performance.now() - lastGrabAt < 20000 && grabPick(e, 44)) { held = { e0, x: e0.clientX, y: e0.clientY, t0: performance.now() }; return; }
     lp = { x: e.clientX, y: e.clientY, tol: quick ? 34 : 14, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
@@ -5078,6 +5084,7 @@ function showAutoStates(ms = 4500) {
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
+      if (h.t0 && performance.now() - h.t0 < 45) { diag('быстрый свайп'); return; }
       const n = touches.size, ok = n === 1 && grabStart(h.e0);
       if (ok) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
       diag(ok ? 'взято: ' + (lastGrabKey ?? activeHandle ?? '?') : 'не взято: ' + (n !== 1 ? 'пальцев ' + n : poseMode ? 'режим позы' : grabWhy));

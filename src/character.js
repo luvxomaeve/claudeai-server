@@ -1844,7 +1844,7 @@ export class Character {
       // Свои позы рук на полу уже есть: лёжа, сидя на полу, опора сбоку.
       // Свои позы рук — только когда уже лежит (на боку, на животе, на спине). По дороге туда — на четвереньках
       // и полулёжа на спине — ладони ставит на пол опора: она стоит на руках, а не держит их в воздухе.
-      const own = Math.max(ph.p4, ph.b4, THREE.MathUtils.smoothstep(ph.c4, 0.75, 1) * (1 - (this.bridgeK ?? 0)), ph.c3 * (1 - THREE.MathUtils.smoothstep(ph.c4, 0.05, 0.3)), side === 'right' ? ph.p3 : 0);
+      const own = Math.max(ph.p4, ph.b4 * (1 - THREE.MathUtils.smoothstep(shoulder.y, 0.17 * S, 0.27 * S)) /* лёжа на животе грудь приподнялась (подняли таз) — ладони упираются в пол, а не висят */, THREE.MathUtils.smoothstep(ph.c4, 0.75, 1) * (1 - (this.bridgeK ?? 0)), ph.c3 * (1 - THREE.MathUtils.smoothstep(ph.c4, 0.05, 0.3)), side === 'right' ? ph.p3 : 0);
       // На четвереньках (наклон вперёд с колен, ещё не легла) вес на руках: жесты опору не перебивают.
       const four = ph.b3 * (1 - ph.b4);
       if (side === 'left') this.onHands = four;
