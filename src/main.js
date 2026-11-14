@@ -2444,7 +2444,7 @@ try {
 } catch { /* ignore */ }
 if (!unlocked('lieStyles') && lieMode !== 'belly' && lieMode !== 'off') lieMode = 'belly'; // пока другие позы не открыты — на живот
 let allowLie = lieMode !== 'off';
-const sitMax = () => (!unlocked('floor') ? 0.8 : allowLie ? 1.3 : 1.0);
+const sitMax = () => (character?.seat ? 0.5 : !unlocked('floor') ? 0.8 : allowLie ? 1.3 : 1.0); // на стуле/троне ниже сиденья не садится
 const LIE_ICONS = {
   side: '<path d="M3 18V8M3 14h18v4M21 14v-2.5a2.5 2.5 0 0 0-2.5-2.5H11v5"/><circle cx="7" cy="11.5" r="1.8"/>',
   belly: '<path d="M14.5 4.5a6.5 6.5 0 1 0 5 10.5A7.5 7.5 0 0 1 14.5 4.5z"/><path d="M17 4h3l-3 3h3"/>',
@@ -4981,7 +4981,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 266;
+const WAIFU_BUILD = 267;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4995,6 +4995,55 @@ const STANCES = [
   { icon: '🤸', name: 'Стойка: широко', w: 0.075, f: 0 },
   { icon: '💃', name: 'Стойка: нога вперёд', w: 0.015, f: 0.05 },
 ];
+// Мебель: стул и трон. Она садится на сиденье (вместо глубокого приседа): таз на высоте сиденья, бёдра горизонтально,
+// ступни на полу. Значок 🪑 в меню — по кругу: без мебели → стул → трон.
+const FURN = [
+  { id: 'none', icon: '🪑', name: 'Без мебели' },
+  { id: 'chair', icon: '🪑', name: 'Стул', h: 0.45, back: 0.33 },
+  { id: 'throne', icon: '👑', name: 'Трон', h: 0.48, back: 0.34 },
+];
+var furnIdx = 0;
+const furnGroup = new THREE.Group();
+furnGroup.visible = false;
+scene.add(furnGroup);
+function buildFurn(f, S) {
+  furnGroup.clear();
+  const mat = (color, rough = 0.7) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0.05 });
+  const box = (w, h, d, x, y, z, m) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w * S, h * S, d * S), m); o.position.set(x * S, y * S, z * S); furnGroup.add(o); return o; };
+  const top = f.h; // верх сиденья
+  if (f.id === 'chair') {
+    const wood = mat(0x8a5a3c), dark = mat(0x5e3b27);
+    box(0.44, 0.045, 0.44, 0, top - 0.0225, 0, wood);
+    for (const [x, z] of [[-0.19, -0.19], [0.19, -0.19], [-0.19, 0.19], [0.19, 0.19]]) box(0.04, top - 0.045, 0.04, x, (top - 0.045) / 2, z, dark);
+    box(0.04, 0.5, 0.04, -0.19, top + 0.25, -0.2, dark); box(0.04, 0.5, 0.04, 0.19, top + 0.25, -0.2, dark);
+    box(0.42, 0.16, 0.03, 0, top + 0.4, -0.2, wood); box(0.42, 0.05, 0.03, 0, top + 0.2, -0.2, wood);
+  } else {
+    const gold = mat(0xd9b45a, 0.35), velvet = mat(0x7a1f4d, 0.9), body = mat(0x3a2147, 0.6);
+    box(0.6, top - 0.06, 0.52, 0, (top - 0.06) / 2, 0, body); // основание
+    box(0.5, 0.06, 0.46, 0, top - 0.03, 0.02, velvet); // подушка
+    box(0.6, 1.0, 0.07, 0, top + 0.44, -0.27, body); box(0.46, 0.8, 0.03, 0, top + 0.42, -0.225, velvet); // спинка
+    box(0.64, 0.05, 0.09, 0, top + 0.96, -0.27, gold); // верх спинки
+    for (const sx of [-1, 1]) { box(0.07, 0.24, 0.5, sx * 0.3, top + 0.1, 0, body); box(0.09, 0.03, 0.52, sx * 0.3, top + 0.235, 0, gold); } // подлокотники
+    box(0.64, 0.03, 0.56, 0, 0.015, 0, gold); // кайма у пола
+  }
+}
+function applyFurn(sitNow = false) {
+  if (!character) return;
+  character.furnApplied = true;
+  const f = FURN[furnIdx];
+  if (f.id === 'none') { character.seat = null; furnGroup.visible = false; return; }
+  character.seat = { h: f.h, back: f.back };
+  const S = character.scale;
+  buildFurn(f, S);
+  // Ставим под неё: за ступнями на длину бедра, сиденьем к ней.
+  const hips = character.bones.hips, pq = hips.parent.getWorldQuaternion(new THREE.Quaternion());
+  const backDir = new THREE.Vector3(0, 0, -character.flip).applyQuaternion(pq).setY(0).normalize();
+  const rest = character.restHips;
+  furnGroup.position.set(rest.x + backDir.x * (f.back - 0.1) * S, 0, rest.z + backDir.z * (f.back - 0.1) * S);
+  furnGroup.rotation.y = Math.atan2(-backDir.x, -backDir.z);
+  furnGroup.visible = true;
+  if (sitNow) { const d = 0.5 - character.sit; if (Math.abs(d) > 0.01) sitBy(d / 0.004); }
+}
 var stanceIdx = 0;
 try { stanceIdx = Math.min(STANCES.length - 1, Math.max(0, +(localStorage.getItem('waifu-stance') ?? 0) || 0)); } catch { /* ignore */ }
 function applyStance() { if (character) { character.stanceW = STANCES[stanceIdx].w; character.stanceF = STANCES[stanceIdx].f; } }
@@ -5023,10 +5072,10 @@ function renderAutoStates() {
   autoStates.innerHTML = '';
   const lieName = { side: 'На бок', belly: 'На живот', back: 'На спину' }[lieMode] ?? 'На бок';
   // Слева — что она делает, справа (с промежутком) — инструменты. Поза сна видна всегда; «↺» — только когда есть выставленные точки.
-  for (const [id, icon, name] of [['home', '🏠', ''], ...(hasPoints() ? [['pts', '↺', 'Сбросить точки']] : []), ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
+  for (const [id, icon, name] of [['home', '🏠', ''], ...(hasPoints() ? [['pts', '↺', 'Сбросить точки']] : []), ['sleep', '😴', 'Спит'], ['lie', '🛏', lieName], ['freeze', autoState === 'hold' ? '⏸' : '🤫', autoState === 'hold' ? 'Стоп' : 'Замри'], ['cam', '🎥', 'Камера'], ['rep', '🔁', 'Повтор'], ['stance', STANCES[stanceIdx].icon, 'Стойка'], ['furn', FURN[furnIdx].id === 'none' ? '🪑' : FURN[furnIdx].icon, 'Мебель'], ['gaze', { follow: '👀', me: '💗', closed: '😌' }[gazeMode] ?? '👀', ''], ['dice', '🎲', 'Случайный наряд']]) {
     if (id === 'cam') { const brk = document.createElement('span'); brk.className = 'brk'; autoStates.appendChild(brk); } // второй ряд — инструменты
     const b = document.createElement('button');
-    const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : autoState === id || (id === 'freeze' && autoState === 'hold');
+    const on = id === 'cam' ? camOnly : id === 'rep' ? repOffer : id === 'furn' ? FURN[furnIdx].id !== 'none' : autoState === id || (id === 'freeze' && autoState === 'hold');
     b.className = (on ? 'active' : '') + (id === 'cam' ? ' sep' : '');
     // Без подписей: что включено, видно по самому значку (он меняется) и подсветке.
     b.innerHTML = id === 'lie' ? `<svg viewBox="0 0 24 24" aria-hidden="true">${LIE_ICONS[lieMode] ?? LIE_ICONS.side}</svg>` : `<i>${icon}</i>`;
@@ -5040,6 +5089,16 @@ function renderAutoStates() {
         return;
       }
       if (id === 'dice') { diceOutfit(); showAutoStates(3500); return; }
+      if (id === 'furn') {
+        // Мебель по кругу: без мебели → стул → трон. Выбрал — она садится; убрал — встаёт.
+        furnIdx = (furnIdx + 1) % FURN.length;
+        const f = FURN[furnIdx];
+        if (f.id === 'none') { applyFurn(); if (character.sit > 0.01) sitBy(-character.sit / 0.004); }
+        else { if (character.sit > 0.5) character.sit = 0.5; applyFurn(true); }
+        showToast(f.id === 'none' ? '🪑 Мебель убрана' : `${f.icon} ${f.name}: села`);
+        renderAutoStates(); showAutoStates(3500);
+        return;
+      }
       if (id === 'stance') {
         // Стойка по кругу: как сейчас → ступни шире → широко → одна нога вперёд.
         stanceIdx = (stanceIdx + 1) % STANCES.length;
@@ -5885,6 +5944,7 @@ function tick() {
     }
 
     if (character.stanceW == null) applyStance();
+    if (!character.furnApplied) applyFurn();
     character.handPad = isPaint(wear.bottoms) ? 0.3 : 0;
     updateGrabLoops(dt);
     autoWalk(dt);

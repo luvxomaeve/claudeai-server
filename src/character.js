@@ -742,6 +742,7 @@ export class Character {
     this.wakeT = Math.max(0, (this.wakeT ?? 0) - dt);
     // Пока ведёшь полосу (и пару секунд после) — ножками не болтает.
     this.slideHold = Math.max(0, (this.slideHold ?? 0) - dt);
+    this.seatK = (this.seatK ?? 0) + ((this.seat ? 1 : 0) - (this.seatK ?? 0)) * (1 - Math.exp(-dt * 4)); // мебель под ней появляется/уходит плавно
     this.leadK = (this.leadK ?? 0) + ((this.ledNow ? 1 : 0) - (this.leadK ?? 0)) * (1 - Math.exp(-dt * (this.ledNow ? 8 : 1.5))); // ведут пальцем прямо сейчас (ставит main.js каждый кадр)
     this.kickOn = (this.kickOn ?? 1) + ((this.slideHold > 0 ? 0 : 1) - (this.kickOn ?? 1)) * (1 - Math.exp(-dt * 2.5));
     // Сон: улеглась (на живот, на спину или на бок) — немного полежит (~10 с) и уснёт.
@@ -781,7 +782,8 @@ export class Character {
       const { p1, p2, p3 } = this.sitPhases(s);
       this.sitDropNow = this.sitDropFor(s);
       this.sitSideNow = 0.12 * p3 * this.scale; // сидя боком таз смещён к руке-опоре
-      this.sitBackNow = (0.12 * p1 * (1 - p2)) * this.scale;
+      // Сидит на мебели: таз уходит назад на длину бедра (ступни остаются на месте, голени вертикально).
+      this.sitBackNow = ((0.12 + ((this.seat?.back ?? 0.33) - 0.12) * (this.seatK ?? 0)) * p1 * (1 - p2)) * this.scale;
       // Таз опускаем напрямую (без отдельной пружины), чтобы он не отставал от ног.
       // Присед на каблуках: таз уходит назад и наклоняется вперёд, поясница прогибается,
       // корпус подаётся вперёд, грудь раскрыта. На коленях — прямая спина с лёгким прогибом.
@@ -816,9 +818,11 @@ export class Character {
       // корпус наклоняется вперёд примерно параллельно голени (угол голени
       // берём с прошлого кадра). Наклон делят таз (больше) и поясница (с прогибом).
       const lean = THREE.MathUtils.clamp(this.shinLean, 0, 1.0);
-      pose.hipsRotX += (0.68 * lean + 0.06) * squat + 0.18 * p2;
-      pose.spineX += (0.3 * lean - 0.14) * squat - 0.1 * p2; // прогиб поясницы; часть наклона — спиной
-      pose.headX -= 0.25 * squat + 0.05 * p2;
+      // На стуле/троне она сидит прямо: вес на сиденье, наклоняться для баланса не нужно.
+      const sk = 1 - 0.85 * (this.seatK ?? 0);
+      pose.hipsRotX += (0.68 * lean + 0.06) * squat * sk + 0.18 * p2;
+      pose.spineX += (0.3 * lean - 0.14) * squat * sk - 0.1 * p2; // прогиб поясницы; часть наклона — спиной
+      pose.headX -= 0.25 * squat * sk + 0.05 * p2;
       pose.hipsZ *= Math.max(0, 1 - s);
       pose.hipsX *= Math.max(0, 1 - s);
       if (p3 > 0) {
@@ -3436,7 +3440,8 @@ export class Character {
     const restY = this.restHips.y;
     // Глубокий присед: таз опускается почти к пяткам (ниже модель не идёт — упирается в пределы суставов).
     // Отсюда на колени таз почти не меняет высоту: колени просто уходят вперёд на пол.
-    const squatY = restY * 0.40;
+    // Сидит на мебели (стул, трон): вместо глубокого приседа таз опускается на высоту сиденья.
+    const squatY = THREE.MathUtils.lerp(restY * 0.40, ((this.seat?.h ?? 0.45) + 0.09) * this.scale, this.seatK ?? 0);
     const floorY = 0.36 * this.scale; // на коленях, таз над пятками
     const sideY = 0.15 * this.scale; // сидит боком прямо на полу
     const { p1, p2, p3, p4 } = this.sitPhases(s);
