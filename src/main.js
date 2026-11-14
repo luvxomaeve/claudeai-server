@@ -2997,6 +2997,7 @@ function poseDragMove(e) {
     // Взял за таз долгим тапом: жест идёт по одной оси — вбок ИЛИ вверх-вниз (иначе, двигая таз вбок, случайно
     // поднимал или усаживал её). На полу вверх-вниз — приподнять/опустить бёдра, а не встать.
     if (poseDrag.grab) {
+      character.slideHold = 3; // ведёшь за таз — она не болтает ножками и не перебивает движение своими
       poseDrag.ax ??= 0; poseDrag.ay ??= 0; poseDrag.ax += Math.abs(dx); poseDrag.ay += Math.abs(dy);
       if (!poseDrag.axis && poseDrag.ax + poseDrag.ay > 14) poseDrag.axis = poseDrag.ax >= poseDrag.ay ? 'x' : 'y';
       if (!poseDrag.axis) return;
@@ -4930,7 +4931,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 247;
+const WAIFU_BUILD = 248;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

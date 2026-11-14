@@ -2355,7 +2355,12 @@ export class Character {
       // Лёжа на животе колени тоже лежат на полу. Пока таз на полу — ноги свободны (болтает ножками); подняли таз —
       // колени становятся опорой, как на четвереньках: таз идёт вверх по дуге вокруг них, голени остаются на полу
       // (раньше ноги оставались прямыми и висели в воздухе вместе с тазом).
-      const liftK = THREE.MathUtils.smoothstep(Math.max(0, this.bodyOffset.hipsY ?? 0) / S, 0.015, 0.07);
+      let liftK = THREE.MathUtils.smoothstep(Math.max(0, this.bodyOffset.hipsY ?? 0) / S, 0.015, 0.07);
+      // Пока её ведут за таз, режим ног не переключается туда-сюда: подняли таз — колени остаются опорой, пока жест
+      // не закончится и таз не ляжет обратно (иначе на каждом качании ноги дёргались, переходя из режима в режим).
+      if (liftK > 0.5) this.liftLatch = true;
+      else if (!((this.slideHold ?? 0) > 0) && liftK < 0.05) this.liftLatch = false;
+      if (this.liftLatch) liftK = 1;
       // Включается и уходит плавно (иначе при сбросе позы ноги дёргались одним кадром).
       if (this.liftTick !== this.time) { this.liftTick = this.time; this.liftKS = (this.liftKS ?? 0) + (liftK - (this.liftKS ?? 0)) * Math.min(1, (this.lastDt ?? 0.016) * 7); }
       const wLie = 1 - ph0.b4 * (1 - this.liftKS);
@@ -2717,11 +2722,10 @@ export class Character {
       // Стоит на руках (четвереньки, упор): пределы суставов после расчёта могли оторвать ладонь от пола —
       // возвращаем её на своё место на полу (как ступни), рука доворачивается локтем.
       const sw = this.supW?.[side] ?? 0, pl = this.plant?.[side];
-      if (sw > 0.5 && pl && !this.handTargets[side] && v.y > pl.y + 0.03 * S) {
+      if (sw > 0.5 && pl && !this.handTargets[side] && (v.y > pl.y + 0.03 * S || Math.hypot(v.x - pl.x, v.z - pl.z) > 0.02 * S)) {
         const k = THREE.MathUtils.smoothstep(sw, 0.5, 0.9);
         const tgt = v.clone().lerp(pl, k);
-        const sx = side === 'left' ? 1 : -1;
-        const pole = lower.getWorldPosition(new THREE.Vector3()); pole.y += 0.25 * S;
+        const pole = lower.getWorldPosition(new THREE.Vector3()); // локоть — где его оставили пределы суставов
         const hq = hand.getWorldQuaternion(new THREE.Quaternion());
         this.twoBoneIK(upper, lower, hand, tgt, pole);
         this.setWorldQuat(hand, hq);
