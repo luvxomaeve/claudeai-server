@@ -3043,7 +3043,7 @@ function poseDragMove(e) {
     // На коленях и четвереньках таз вбок — в пределах, которые ноги держат без переступания (иначе колени и голени
     // перебирают на каждом качании); лёжа и сидя на полу — шире.
     const knL = (() => { const ph = character.sitPhases(); return ph.p2 * (1 - ph.p3) * (1 - ph.b4) * (1 - ph.c3); })();
-    const lim = floor ? 0.36 - 0.08 * knL : poseDrag.grab ? 0.26 + 0.08 * THREE.MathUtils.smoothstep(character.sitS, 0.05, 0.4) + 0.08 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.4, 1.2) : 0.17; // шире (сборка 271): больше свободы крутить тазом // в наклоне таз тоже ходит шире
+    const lim = floor ? 0.43 - 0.09 * knL : poseDrag.grab ? 0.32 + 0.08 * THREE.MathUtils.smoothstep(character.sitS, 0.05, 0.4) + 0.08 * THREE.MathUtils.smoothstep(Math.abs(o.hipsRotX), 0.4, 1.2) : 0.17; // шире (сборка 271): больше свободы крутить тазом // в наклоне таз тоже ходит шире
     // Взял за таз долгим тапом: жест идёт по одной оси — вбок ИЛИ вверх-вниз (иначе, двигая таз вбок, случайно
     // поднимал или усаживал её). На полу вверх-вниз — приподнять/опустить бёдра, а не встать.
     if (poseDrag.grab) {
@@ -3078,7 +3078,7 @@ function poseDragMove(e) {
       // Наклон таза — от того положения, в котором её взяли (в глубоком наклоне позу не сбрасываем), и не трогаем,
       // пока наклон ведёт повтор.
       poseDrag.rot0 ??= o.hipsRotX;
-      if (dy && !reps.home.on) o.hipsRotX = clamp(o.hipsRotX + dy * 0.0032, Math.max(BEND_MIN, poseDrag.rot0 - 0.6), Math.min(BEND_MAX, poseDrag.rot0 + 0.7));
+      if (dy && !reps.home.on) o.hipsRotX = clamp(o.hipsRotX + dy * 0.0032, Math.max(BEND_MIN, poseDrag.rot0 - 0.8), Math.min(BEND_MAX, poseDrag.rot0 + 0.9)); // размах наклона за один захват — шире (274)
     }
     if (poseDrag.grab && !dy) return; // только вбок — посадку не трогаем
     // Вверх-вниз за точку бёдер — как правая полоса: сесть / лечь / встать.
@@ -4982,7 +4982,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 273;
+const WAIFU_BUILD = 274;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

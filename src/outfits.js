@@ -2133,6 +2133,9 @@ function installSheen(mesh) {
   }
 }
 const HIP_DQS = globalThis.__dq ?? [1.5, 0]; // [сила в зоне ягодиц, сила в зоне между ног (0 — выкл.)]: там при широкой стойке с наклоном сетка сминалась в комок // сила смешивания «сгиба без потери объёма» в зоне ягодиц (0 — выключено)
+// Покачивание ягодиц при движении: смещение (в координатах сетки) для левой и правой стороны, считает character.js
+// пружинкой от ускорения таза. В покое — ноль, форма не меняется.
+export const HIP_JIG = { value: [new THREE.Vector3(), new THREE.Vector3()] };
 function patchBulge(mat, dqs = false) {
   if (!mat || mat.userData.bulgePatched) return;
   mat.userData.bulgePatched = true;
@@ -2140,7 +2143,12 @@ function patchBulge(mat, dqs = false) {
   mat.onBeforeCompile = (sh, r) => {
     prev?.call(mat, sh, r);
     sh.uniforms.hipFlex = HIP_FLEX;
-    sh.vertexShader = 'attribute vec2 hipBulge;\nattribute vec3 hipDir;\nuniform vec2 hipFlex;\n' + sh.vertexShader;
+    sh.uniforms.hipJig = HIP_JIG;
+    sh.vertexShader = 'attribute vec2 hipBulge;\nattribute vec3 hipDir;\nuniform vec2 hipFlex;\nuniform vec3 hipJig[2];\n' + sh.vertexShader;
+    if (sh.vertexShader.includes('#include <skinning_vertex>')) {
+      sh.vertexShader = sh.vertexShader.replace('#include <skinning_vertex>',
+        '#include <skinning_vertex>\n  transformed += hipJig[0] * min( hipBulge.x, 1.0 ) + hipJig[1] * min( hipBulge.y, 1.0 );');
+    }
     if (sh.vertexShader.includes('#include <begin_vertex>')) {
       sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>',
         '#include <begin_vertex>\n  transformed += hipDir * dot(hipBulge, hipFlex);');
@@ -2187,7 +2195,7 @@ void main() {`).replace('#include <skinning_vertex>', `#include <skinning_vertex
     }
   };
   const prevKey = mat.customProgramCacheKey?.bind(mat);
-  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2dq${dqs ? HIP_DQS.join('_') : 0}`;
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge3dq${dqs ? HIP_DQS.join('_') : 0}`;
   mat.needsUpdate = true;
 }
 export function shapeHips(vrm, amount = 0.036) {

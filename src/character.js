@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { tuneSkirt, shapeHips, HIP_FLEX, SQUAT_FLEX, CROTCH_LIFT } from './outfits.js';
+import { tuneSkirt, shapeHips, HIP_FLEX, HIP_JIG, SQUAT_FLEX, CROTCH_LIFT } from './outfits.js';
 const HEAD_LEAN_SIGN = -1; // знак наклона головы «к пальцу» (проверено тестом)
 
 const EXPRESSIONS = ['happy', 'angry', 'sad', 'relaxed', 'surprised'];
@@ -1531,6 +1531,34 @@ export class Character {
       };
       const amt = 0.038 * (this.scale ?? 1);
       HIP_FLEX.value.set(flexVol('left') * amt, flexVol('right') * amt);
+      // Покачивание ягодиц: мягкая «пружинка» отстаёт от движения таза и догоняет с затуханием. В покое смещение ноль.
+      {
+        const S = this.scale ?? 1, W = 19, C = 2 * 0.28 * W, MAX = 0.02 * S;
+        const back = new THREE.Vector3(0, 0, -this.flip).applyQuaternion(hq);
+        const sq = this.vrm.scene.getWorldQuaternion(new THREE.Quaternion()).invert(), ss = 1 / (this.vrm.scene.getWorldScale(new THREE.Vector3()).x || 1);
+        this.jig ??= [null, null];
+        ['left', 'right'].forEach((side, i) => {
+          const up = b[`${side}UpperLeg`];
+          if (!up) return;
+          const a = up.getWorldPosition(new THREE.Vector3()).addScaledVector(back, 0.07 * S);
+          let j = this.jig[i];
+          if (!j || j.p.distanceTo(a) > 0.25 * S) j = this.jig[i] = { p: a.clone(), v: new THREE.Vector3(), a0: a.clone() };
+          // Считаем мелкими шагами (при низкой частоте кадров пружинка не «взрывается»), опора едет от прошлого места к новому.
+          const dtr = Math.min(this.lastDt ?? 0.016, 0.12), n = Math.max(1, Math.ceil(dtr / 0.012)), h = dtr / n;
+          const av = a.clone().sub(j.a0).divideScalar(Math.max(dtr, 1e-3)), an = new THREE.Vector3(), off = new THREE.Vector3();
+          for (let q = 1; q <= n; q++) {
+            an.lerpVectors(j.a0, a, q / n); off.copy(j.p).sub(an);
+            j.v.addScaledVector(off, -W * W * h).addScaledVector(off.copy(j.v).sub(av), -C * h);
+            j.p.addScaledVector(j.v, h);
+          }
+          j.a0.copy(a);
+          off.copy(j.p).sub(a);
+          const len = off.length();
+          if (len > MAX * 1.5) { off.setLength(MAX * 1.5); j.p.copy(a).add(off); }
+          if (len > 1e-6) off.setLength(MAX * Math.tanh(len / MAX)); // мягкий предел
+          HIP_JIG.value[i].copy(off).applyQuaternion(sq).multiplyScalar(ss * (globalThis.__jigK ?? 1));
+        });
+      }
       SQUAT_FLEX.value = (flex('left') + flex('right')) / 2; // правка сетки между ног в приседе (см. outfits.js)
       { const upK = THREE.MathUtils.smoothstep(new THREE.Vector3(0, 1, 0).applyQuaternion(hq).y, 0.15, 0.8); CROTCH_LIFT.value = SQUAT_FLEX.value * 0.0; /* втягивание выключено: его работу делает привязка к бёдрам (см. installCrotchFix) */ void upK; } /* Втягивание теперь слабое и одинаковое во всех позах: после того как стороны стали выходить наружу при сгибе, прежнее (полное) тянуло середину вверх и открывало щель при широких ногах; без него там торчит бугор. 0.22 подобрано по картинкам сзади-снизу: узкий и широкий присед, четвереньки. */ /* таз горизонтально (четвереньки) — втягивание слабее: по картинкам сзади при полном там рваное пятно, при 0.6 — чистый шов */ // по замеру ровности: втягивание равно сгибу ног в любой позе (ослабление давало бугор)
     }
