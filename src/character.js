@@ -2776,7 +2776,7 @@ export class Character {
       // Выставленная рука со своим местом: пределы суставов могли сдвинуть её с точки — возвращаем (локоть остаётся
       // там, куда его поставили пределы, поэтому рука не выворачивается).
       {
-        const hp = this.handTargets[side] ? this.handPin?.[side] : null;
+        const hp = this.handTargets[side] && !this.handAnchor?.[side] ? this.handPin?.[side] : null;
         if (hp && v.distanceTo(hp.p) > 0.02 * S) {
           const pole = lower.getWorldPosition(new THREE.Vector3());
           const hq = hand.getWorldQuaternion(new THREE.Quaternion());
@@ -2802,10 +2802,21 @@ export class Character {
   // Ладонь, стоящая на полу, лежит плашмя и смотрит туда, куда её поставили. Пределы суставов, возврат ладони на
   // место и сглаживание рук меняли её поворот уже после расчёта — пальцы разворачивало на 120° и задирало вверх.
   palmFix() {
-    if (!this.palmQ || this.mixer) return;
+    if (this.mixer) return;
+    this.palmQ ??= {};
     for (const side of ['left', 'right']) {
-      const pq = this.palmQ[side], hand = this.bones[`${side}Hand`];
-      if (!pq || !hand || this.handTargets[side]) continue;
+      let pq = this.palmQ[side]; const hand = this.bones[`${side}Hand`];
+      if (!hand) continue;
+      // Рука, выставленная пальцем на пол, тоже лежит ладонью плашмя, пальцами туда, куда смотрела, когда её поставили
+      // (раньше кисть оставалась повёрнутой как попало — «мялась» и выворачивалась при движении таза).
+      if (this.handTargets[side]) {
+        const hp = !this.handAnchor?.[side] ? this.handPin?.[side] : null;
+        if (!hp || hp.air || hp.yaw == null) continue;
+        const sx = side === 'left' ? 1 : -1;
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), hp.yaw).multiply(this.rootRestQ ?? new THREE.Quaternion()).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -sx * Math.PI / 2));
+        pq = { q, w: 0.85 };
+      }
+      if (!pq) continue;
       const cur = hand.getWorldQuaternion(new THREE.Quaternion());
       this.setWorldQuat(hand, cur.slerp(pq.q, pq.w));
       hand.updateWorldMatrix(false, true);
@@ -3113,8 +3124,16 @@ export class Character {
     return p.add(new THREE.Vector3(a.off[0] * this.flip, a.off[1], a.off[2] * this.flip).multiplyScalar(this.scale).applyQuaternion(q));
   }
 
+  // Куда сейчас смотрит тело по горизонтали (угол вокруг вертикали).
+  bodyYawNow() {
+    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(this.bones.hips.getWorldQuaternion(new THREE.Quaternion()).multiply(this.hipsRestInv));
+    return Math.atan2(f.x, f.z);
+  }
+
   setHandAnchor(side, a) {
     (this.handAnchor ??= { left: null, right: null })[side] = a ? { bone: a.bone, off: [...a.off] } : null;
+    // Рука примагничена к телу (поясница, голова, бедро) — держится за эту часть тела, а не за место в пространстве.
+    if (a && this.handPin) this.handPin[side] = null;
   }
 
   setHandTarget(side, worldPoint) {
@@ -3125,7 +3144,7 @@ export class Character {
     this.handTargets[side] = chest.worldToLocal(worldPoint.clone());
     // Руку поставили на пол (на полу, низко) — она опора: остаётся на этом месте пола, когда двигаешь таз и корпус,
     // а не едет вместе с грудью. Выше пола — как раньше, рука держит позу относительно тела.
-    (this.handPin ??= {})[side] = this.sitS > 0.3 ? { p: worldPoint.clone().setY(Math.max(worldPoint.y, 0.05 * this.scale)), sit: this.sitS, air: worldPoint.y >= 0.14 * this.scale } : null;
+    (this.handPin ??= {})[side] = this.sitS > 0.3 ? { p: worldPoint.clone().setY(Math.max(worldPoint.y, 0.05 * this.scale)), sit: this.sitS, air: worldPoint.y >= 0.14 * this.scale, yaw: this.handPin?.[side]?.yaw ?? this.bodyYawNow() } : null;
   }
 
   // Колено на полу (на коленях, четвереньках) взяли и повели — переставляем саму точку опоры колена вместе со ступнёй:
@@ -3260,10 +3279,10 @@ export class Character {
       const anc = this.handAnchor?.[side];
       const ap = anc && this.handTargets[side] ? this.anchorPoint(anc) : null;
       // Рука-опора на полу: держится за своё место; посадка сильно изменилась (встала, легла) — отпускает.
-      let hw = this.handTargets[side] ? this.handPin?.[side] : null;
+      let hw = this.handTargets[side] && !ap ? this.handPin?.[side] : null;
       if (hw && Math.abs(this.sitS - hw.sit) > 0.22) { this.handPin[side] = null; hw = null; }
       // Выставленная рука без места (после загрузки позы, смены посадки) — берёт место там, где сейчас стоит.
-      if (!hw && this.handTargets[side] && !ap && this.sitS > 0.3) { const wp = chest.localToWorld(this.handTargets[side].clone()); hw = (this.handPin ??= {})[side] = { p: wp.setY(Math.max(wp.y, 0.05 * this.scale)), sit: this.sitS, air: wp.y >= 0.14 * this.scale }; }
+      if (!hw && this.handTargets[side] && !ap && this.sitS > 0.3) { const wp = chest.localToWorld(this.handTargets[side].clone()); hw = (this.handPin ??= {})[side] = { p: wp.setY(Math.max(wp.y, 0.05 * this.scale)), sit: this.sitS, air: wp.y >= 0.14 * this.scale, yaw: this.bodyYawNow() }; }
       if (hw) {
         // Не дотягивается — ладонь по полу подшагивает к плечу ровно настолько, чтобы достать.
         const up0 = this.bones[`${side}UpperArm`], r0 = up0 ? this.limbRest.get(up0.uuid) : null;
@@ -3412,7 +3431,10 @@ export class Character {
     let w = THREE.MathUtils.smoothstep(this.sitS, 0.22, 0.45);
     // Руки в выбранной позе (или примагничены) — так и остаются, когда она садится;
     // берём руку только для опоры о пол, когда она сидит боком или лежит.
-    if (this.armPreset[side] || this.poseName !== 'stand') {
+    // Руку поставили на тело (талия, поясница) — она остаётся там в любом положении, в том числе на четвереньках
+    // и лёжа (раньше опора о пол перебивала выбор, и «зона не прилипала»).
+    if (this.armPreset[side]) return;
+    if (this.poseName !== 'stand') {
       // Руки позы остаются и лёжа на боку (только правая — опора на локоть);
       // на живот руки уходят под голову.
       const ph = this.sitPhases();

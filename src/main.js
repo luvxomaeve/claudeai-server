@@ -4979,7 +4979,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 261;
+const WAIFU_BUILD = 262;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -4998,7 +4998,9 @@ try { stanceIdx = Math.min(STANCES.length - 1, Math.max(0, +(localStorage.getIte
 function applyStance() { if (character) { character.stanceW = STANCES[stanceIdx].w; character.stanceF = STANCES[stanceIdx].f; } }
 // 🔁 Предлагать «Повторить» после того, как её подвигал. Выключил — она просто слушается пальца, без записи.
 var repOffer = true;
-try { repOffer = localStorage.getItem('waifu-repoffer') !== '0'; } catch { /* ignore */ }
+// Один раз включаем предложение повтора всем, у кого оно оказалось выключено (значком 🔁): запись амплитуд без него
+// не появляется, а выключалось оно незаметно. Дальше выбор значком сохраняется.
+try { if (!localStorage.getItem('waifu-repoffer-on1')) { localStorage.setItem('waifu-repoffer-on1', '1'); localStorage.removeItem('waifu-repoffer'); } repOffer = localStorage.getItem('waifu-repoffer') !== '0'; } catch { /* ignore */ }
 const autoStates = document.createElement('div');
 autoStates.id = 'auto-states';
 document.body.appendChild(autoStates);
