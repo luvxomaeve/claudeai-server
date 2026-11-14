@@ -4982,7 +4982,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 271;
+const WAIFU_BUILD = 272;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5001,9 +5001,9 @@ const STANCES = [
 const FURN = [
   { id: 'none', icon: '🪑', name: 'Без мебели' },
   { id: 'pouf', icon: '🟣', name: 'Пуф', h: 0.42, back: 0.3 },
-  { id: 'chair', icon: '🔮', name: 'Стеклянное кресло-шар', h: 0.44, back: 0.32 },
+  { id: 'chair', icon: '🔮', name: 'Стеклянное кресло-шар', h: 0.44, back: 0.32, lean: 0.45 },
   { id: 'table', icon: '🔷', name: 'Стеклянный стол', h: 0.66, back: 0.2 },
-  { id: 'throne', icon: '👑', name: 'Трон', h: 0.48, back: 0.34 },
+  { id: 'throne', icon: '👑', name: 'Трон', h: 0.48, back: 0.34, lean: 0.12 },
 ];
 var furnIdx = 0;
 const furnGroup = new THREE.Group();
@@ -5067,7 +5067,7 @@ function applyFurn(sitNow = false) {
   const f = FURN[furnIdx];
   renderFurnPager();
   if (f.id === 'none') { character.seat = null; furnGroup.visible = false; return; }
-  character.seat = { h: f.h, back: f.back };
+  character.seat = { h: f.h, back: f.back, lean: f.lean ?? 1 }; // lean — насколько можно откинуться назад (спинка мешает)
   const S = character.scale;
   buildFurn(f, S);
   // Ставим под неё: за ступнями на длину бедра, сиденьем к ней.

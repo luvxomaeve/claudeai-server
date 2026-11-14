@@ -744,7 +744,7 @@ export class Character {
     this.slideHold = Math.max(0, (this.slideHold ?? 0) - dt);
     this.seatK = (this.seatK ?? 0) + ((this.seat ? 1 : 0) - (this.seatK ?? 0)) * (1 - Math.exp(-dt * 4)); // мебель под ней появляется/уходит плавно
     // Высота и глубина сиденья тоже меняются плавно — при смене мебели она пересаживается, а не прыгает.
-    if (this.seat) { const k = this.seatHs == null ? 1 : 1 - Math.exp(-dt * 5); this.seatHs = (this.seatHs ?? this.seat.h) + (this.seat.h - (this.seatHs ?? this.seat.h)) * k; this.seatBs = (this.seatBs ?? this.seat.back) + (this.seat.back - (this.seatBs ?? this.seat.back)) * k; }
+    if (this.seat) { const k = this.seatHs == null ? 1 : 1 - Math.exp(-dt * 5); this.seatHs = (this.seatHs ?? this.seat.h) + (this.seat.h - (this.seatHs ?? this.seat.h)) * k; this.seatBs = (this.seatBs ?? this.seat.back) + (this.seat.back - (this.seatBs ?? this.seat.back)) * k; const ln = this.seat.lean ?? 1; this.seatLn = (this.seatLn ?? ln) + (ln - (this.seatLn ?? ln)) * k; }
     this.leadK = (this.leadK ?? 0) + ((this.ledNow ? 1 : 0) - (this.leadK ?? 0)) * (1 - Math.exp(-dt * (this.ledNow ? 8 : 1.5))); // ведут пальцем прямо сейчас (ставит main.js каждый кадр)
     this.kickOn = (this.kickOn ?? 1) + ((this.slideHold > 0 ? 0 : 1) - (this.kickOn ?? 1)) * (1 - Math.exp(-dt * 2.5));
     // Сон: улеглась (на живот, на спину или на бок) — немного полежит (~10 с) и уснёт.
@@ -965,6 +965,9 @@ export class Character {
       this.bendScale = THREE.MathUtils.clamp((this.bendScale ?? 1) + want * dt * (want < 0 ? 1.2 : 0.35), 0.25, 1);
     }
     const fwdCap = this.sitS > 0.3 && this.sitS < 1.0 ? this.bendScale : 1;
+    let backK = 1;
+    { const v = this.bodyOffset.hipsRotX, sk = this.seatK ?? 0; if (v < -0.001 && sk > 0.01) { const lim = 0.32 * (this.seatLn ?? 1); backK = 1 + (lim * Math.tanh(-v / lim) / -v - 1) * sk; } }
+    this.seatBackK = backK;
     for (const key in this.bodyOffset) {
       if (key === 'hipsFwd') continue; // сдвиг таза вперёд-назад на полу — отдельно, см. plantFeet
       let w = key === 'hipsRotX' ? this.bendW : key.startsWith('hips') ? this.hipsOffK() : 1;
@@ -973,7 +976,11 @@ export class Character {
       if (key === 'hipsY') w *= THREE.MathUtils.smoothstep(this.sitS, 0.5, 0.7);
       if (key === 'spineX' && this.bodyOffset.spineX > 0) w *= fwdLie;
       if ((key === 'spineX' || key === 'hipsRotX') && this.bodyOffset[key] > 0) w *= fwdCap;
-      pose[key] += this.bodyOffset[key] * w;
+      let val = this.bodyOffset[key];
+      // На мебели назад откидывается в меру (таз остаётся на сиденье, ноги на полу, спина не висит в воздухе)
+      if (key === 'hipsRotX' && val < 0) val *= backK;
+      if (key === 'spineX' && val < -0.001 && (this.seatK ?? 0) > 0.01) { const lm = 0.4 * (this.seatLn ?? 1); val *= 1 + (lm * Math.tanh(-val / lm) / -val - 1) * this.seatK; }
+      pose[key] += val * w;
     }
     // На коленях прогиб назад глубже: к наклону таза добавляется прогиб спины (грудь раскрывается, плечи уходят назад),
     // голова при этом не запрокидывается следом. Гибкость спины, а не только поворот таза.
@@ -1048,7 +1055,7 @@ export class Character {
     // поворачиваются обратно, кисти смотрят вниз, а не торчат вперёд или в стороны.
     {
       const pitch = (this.bodyOffset.hipsRotX * this.bendW + this.bodyOffset.spineX) * Math.max(this.offK, 0.6 * this.bendW);
-      const hang = THREE.MathUtils.clamp(pitch, -0.9, 1.6) * 0.75;
+      const hang = THREE.MathUtils.clamp(pitch * (pitch < 0 ? backK : 1), -0.9, 1.6) * 0.75;
       pose.lUpperX -= hang;
       pose.rUpperX -= hang;
       // Руки чуть отводятся от тела в наклоне/прогибе и сидя — не проходят сквозь бёдра и бока.
