@@ -2132,6 +2132,7 @@ function installSheen(mesh) {
     m.needsUpdate = true;
   }
 }
+const HIP_DQS = globalThis.__dq ?? [1.5]; // сила смешивания «сгиба без потери объёма» в зоне ягодиц (0 — выключено)
 function patchBulge(mat) {
   if (!mat || mat.userData.bulgePatched) return;
   mat.userData.bulgePatched = true;
@@ -2144,9 +2145,48 @@ function patchBulge(mat) {
       sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>',
         '#include <begin_vertex>\n  transformed += hipDir * dot(hipBulge, hipFlex);');
     }
+    // Зона ягодиц сгибается «без потери объёма» (смешивание поворотов костей как двойных кватернионов): при обычном
+    // сгибе вершины между тазом и бедром стягиваются к суставу — форма плющится, а выталкивание поправкой даёт
+    // складки. Здесь вершина идёт по дуге вокруг сустава и остаётся на том же расстоянии, что стоя. Вес — по hipBulge.
+    if (HIP_DQS[0] > 0 && sh.vertexShader.includes('#include <skinning_vertex>')) {
+      sh.vertexShader = sh.vertexShader.replace('void main() {', `
+vec4 hipQuatOf( mat3 m ) {
+  m[0] = normalize( m[0] ); m[1] = normalize( m[1] ); m[2] = normalize( m[2] );
+  float tr = m[0][0] + m[1][1] + m[2][2]; vec4 q;
+  if ( tr > 0.0 ) { float s = sqrt( tr + 1.0 ) * 2.0; q = vec4( ( m[1][2] - m[2][1] ) / s, ( m[2][0] - m[0][2] ) / s, ( m[0][1] - m[1][0] ) / s, 0.25 * s ); }
+  else if ( m[0][0] > m[1][1] && m[0][0] > m[2][2] ) { float s = sqrt( 1.0 + m[0][0] - m[1][1] - m[2][2] ) * 2.0; q = vec4( 0.25 * s, ( m[1][0] + m[0][1] ) / s, ( m[2][0] + m[0][2] ) / s, ( m[1][2] - m[2][1] ) / s ); }
+  else if ( m[1][1] > m[2][2] ) { float s = sqrt( 1.0 + m[1][1] - m[0][0] - m[2][2] ) * 2.0; q = vec4( ( m[1][0] + m[0][1] ) / s, 0.25 * s, ( m[2][1] + m[1][2] ) / s, ( m[2][0] - m[0][2] ) / s ); }
+  else { float s = sqrt( 1.0 + m[2][2] - m[0][0] - m[1][1] ) * 2.0; q = vec4( ( m[2][0] + m[0][2] ) / s, ( m[2][1] + m[1][2] ) / s, 0.25 * s, ( m[0][1] - m[1][0] ) / s ); }
+  return q;
+}
+vec4 hipQMul( vec4 a, vec4 b ) { return vec4( a.w * b.xyz + b.w * a.xyz + cross( a.xyz, b.xyz ), a.w * b.w - dot( a.xyz, b.xyz ) ); }
+void main() {`).replace('#include <skinning_vertex>', `#include <skinning_vertex>
+  #ifdef USE_SKINNING
+  {
+    float hipW = clamp( max( hipBulge.x, hipBulge.y ) * ${HIP_DQS[0].toFixed(2)}, 0.0, 1.0 );
+    if ( hipW > 0.002 ) {
+      vec4 sv = bindMatrix * vec4( position, 1.0 );
+      vec4 q0 = hipQuatOf( mat3( boneMatX ) ), q1 = hipQuatOf( mat3( boneMatY ) ), q2 = hipQuatOf( mat3( boneMatZ ) ), q3 = hipQuatOf( mat3( boneMatW ) );
+      float w0 = skinWeight.x, w1 = skinWeight.y * ( dot( q0, q1 ) < 0.0 ? -1.0 : 1.0 ), w2 = skinWeight.z * ( dot( q0, q2 ) < 0.0 ? -1.0 : 1.0 ), w3 = skinWeight.w * ( dot( q0, q3 ) < 0.0 ? -1.0 : 1.0 );
+      vec4 d0 = 0.5 * hipQMul( vec4( boneMatX[3].xyz, 0.0 ), q0 ), d1 = 0.5 * hipQMul( vec4( boneMatY[3].xyz, 0.0 ), q1 ), d2 = 0.5 * hipQMul( vec4( boneMatZ[3].xyz, 0.0 ), q2 ), d3 = 0.5 * hipQMul( vec4( boneMatW[3].xyz, 0.0 ), q3 );
+      vec4 qr = w0 * q0 + w1 * q1 + w2 * q2 + w3 * q3, qd = w0 * d0 + w1 * d1 + w2 * d2 + w3 * d3;
+      float ln = length( qr );
+      if ( ln > 1e-5 ) {
+        qr /= ln; qd /= ln;
+        float sc = length( boneMatX[0].xyz );
+        vec3 pp = sv.xyz * sc;
+        vec3 rp = pp + 2.0 * cross( qr.xyz, cross( qr.xyz, pp ) + qr.w * pp );
+        vec3 tp = 2.0 * ( qr.w * qd.xyz - qd.w * qr.xyz + cross( qr.xyz, qd.xyz ) );
+        vec3 dq = ( bindMatrixInverse * vec4( rp + tp, 1.0 ) ).xyz;
+        transformed = mix( transformed, dq, hipW );
+      }
+    }
+  }
+  #endif`);
+    }
   };
   const prevKey = mat.customProgramCacheKey?.bind(mat);
-  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2`;
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2dq${HIP_DQS[0]}`;
   mat.needsUpdate = true;
 }
 export function shapeHips(vrm, amount = 0.036) {
