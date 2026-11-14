@@ -4930,7 +4930,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 245;
+const WAIFU_BUILD = 246;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5073,18 +5073,19 @@ function showAutoStates(ms = 4500) {
     // этом не всплывают. Сразу повёл палец — это обычный свайп (сесть, лечь, наклон), точка НЕ хватается.
     const quick = !clean && !camOnly && performance.now() - lastGrabAt < 9000;
     // Только что вёл эту же точку и снова взялся прямо за неё — берётся сразу, без задержки (елозишь тазом раз за разом).
-    if (quick && lastGrabKey && grabPick(e, 48)?.key === lastGrabKey) { held = { e0, x: e0.clientX, y: e0.clientY }; return; }
-    // Расставляешь дальше (другая точка, пока не прошло 20 с): взялся прямо за точку и повёл спокойно — берётся сразу.
-    // Быстрый росчерк — по-прежнему свайп (сесть, лечь, встать).
-    if (!clean && !camOnly && performance.now() - lastGrabAt < 20000 && grabPick(e, 44)) { held = { e0, x: e0.clientX, y: e0.clientY, t0: performance.now() }; return; }
+    if (quick && lastGrabKey && grabPick(e, 48)?.key === lastGrabKey) {
+      held = { e0, x: e0.clientX, y: e0.clientY };
+      // Держишь палец на месте — значки меню всё равно появляются.
+      lp = { x: e.clientX, y: e.clientY, tol: 12, t: setTimeout(() => { lp = null; showAutoStates(); }, 480) };
+      return;
+    }
     lp = { x: e.clientX, y: e.clientY, tol: quick ? 34 : 14, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
-    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > lp.tol) { cancel(); diag('сдвиг до зажима'); }
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > lp.tol) cancel();
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
-      if (h.t0 && performance.now() - h.t0 < 45) { diag('быстрый свайп'); return; }
       const n = touches.size, ok = n === 1 && grabStart(h.e0);
       if (ok) { autoStates.classList.remove('show'); clearTimeout(autoStatesTimer); }
       diag(ok ? 'взято: ' + (lastGrabKey ?? activeHandle ?? '?') : 'не взято: ' + (n !== 1 ? 'пальцев ' + n : poseMode ? 'режим позы' : grabWhy));
