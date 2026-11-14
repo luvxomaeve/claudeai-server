@@ -4927,7 +4927,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 242;
+const WAIFU_BUILD = 243;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).
@@ -5068,11 +5068,13 @@ function showAutoStates(ms = 4500) {
     const e0 = { clientX: e.clientX, clientY: e.clientY };
     // Только что водил её за точку — для следующего взятия хватит короткой задержки (0.2 с вместо 0.5), значки при
     // этом не всплывают. Сразу повёл палец — это обычный свайп (сесть, лечь, наклон), точка НЕ хватается.
-    const quick = !clean && !camOnly && performance.now() - lastGrabAt < 5000;
-    lp = { x: e.clientX, y: e.clientY, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
+    const quick = !clean && !camOnly && performance.now() - lastGrabAt < 9000;
+    // Только что вёл эту же точку и снова взялся прямо за неё — берётся сразу, без задержки (елозишь тазом раз за разом).
+    if (quick && lastGrabKey && nearestHandle(e, 48)?.key === lastGrabKey) { held = { e0, x: e0.clientX, y: e0.clientY }; return; }
+    lp = { x: e.clientX, y: e.clientY, tol: quick ? 34 : 14, t: setTimeout(() => { lp = null; try { navigator.vibrate?.(10); } catch { /* ignore */ } if (clean) setCleanScreen(false); if (!quick) showAutoStates(); if (!clean && !camOnly) held = { e0, x: e0.clientX, y: e0.clientY }; }, quick ? 200 : 480) };
   }, { capture: true, passive: true });
   window.addEventListener('pointermove', (e) => {
-    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 14) { cancel(); diag('сдвиг до зажима'); }
+    if (lp && Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > lp.tol) { cancel(); diag('сдвиг до зажима'); }
     // Долгий тап сработал, палец не отпустил и повёл — берём её за ближайшую точку (значки прячем).
     if (held && Math.hypot(e.clientX - held.x, e.clientY - held.y) > 12) {
       const h = held; held = null;
