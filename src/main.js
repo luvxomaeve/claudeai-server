@@ -3012,8 +3012,10 @@ function poseDragMove(e) {
     // назад для баланса, ноги на полу) и немного в спине; вверх — прогиб назад.
     const o = character.bodyOffset;
     if (!repPlaying()) { // наклон ведёт повтор — не спорим с ним
-      o.hipsRotX = clamp(o.hipsRotX + dy * 0.0035, -0.2, 1.0);
-      o.spineX = clamp(o.spineX + dy * 0.002, -0.5, 0.6);
+      // Размах как у свайпа по груди (глубокий наклон и прогиб назад), и за пальцем корпус идёт живее: раньше за точку
+      // груди наклон был до 1.0, прогиб всего до −0.2 — в приседе и на коленях корпусом почти не подвигать.
+      o.hipsRotX = clamp(o.hipsRotX + dy * 0.006, BEND_MIN, 1.7);
+      o.spineX = bendSpine(o.hipsRotX);
     }
     o.spineZ = clamp(o.spineZ - dx * 0.006 * facing, -0.95, 0.95); // вбок корпусом — шире
   } else if (poseDrag.kind === 'twist') {
@@ -4979,7 +4981,7 @@ window.addEventListener('pointerdown', (e) => { if (e.target !== autoHelp && !au
 autoBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
 autoBtn.addEventListener('click', (e) => { e.stopPropagation(); setAutoMode(true); });
 autoExit.addEventListener('pointerdown', (e) => e.stopPropagation());
-const WAIFU_BUILD = 264;
+const WAIFU_BUILD = 265;
 // ---------- Простой вид: состояния (значки внизу) и чистый экран ----------
 // 🧍 Живая — сама двигается и реагирует. 😴 Спит — ложится и спит, касания не будят. 🤫 Замри — держит позу,
 // сама не двигается. 🎥 Камера — палец только крутит камеру (удобно вблизи: её не задеваешь).

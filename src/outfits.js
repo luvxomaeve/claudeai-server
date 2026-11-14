@@ -2132,7 +2132,7 @@ function installSheen(mesh) {
     m.needsUpdate = true;
   }
 }
-const HIP_DQS = globalThis.__dq ?? [1.5]; // сила смешивания «сгиба без потери объёма» в зоне ягодиц (0 — выключено)
+const HIP_DQS = globalThis.__dq ?? [1.5, 0]; // [сила в зоне ягодиц, сила в зоне между ног (0 — выкл.)]: там при широкой стойке с наклоном сетка сминалась в комок // сила смешивания «сгиба без потери объёма» в зоне ягодиц (0 — выключено)
 function patchBulge(mat, dqs = false) {
   if (!mat || mat.userData.bulgePatched) return;
   mat.userData.bulgePatched = true;
@@ -2164,6 +2164,7 @@ void main() {`).replace('#include <skinning_vertex>', `#include <skinning_vertex
   #ifdef USE_SKINNING
   {
     float hipW = clamp( max( hipBulge.x, hipBulge.y ) * ${HIP_DQS[0].toFixed(2)}, 0.0, 1.0 );
+    ${sh.vertexShader.includes('attribute float aCrotch') && (HIP_DQS[1] ?? 0) > 0 ? `hipW = max( hipW, clamp( aCrotch * ${(HIP_DQS[1]).toFixed(2)}, 0.0, 1.0 ) );` : ''}
     if ( hipW > 0.002 ) {
       vec4 sv = bindMatrix * vec4( position, 1.0 );
       vec4 q0 = hipQuatOf( mat3( boneMatX ) ), q1 = hipQuatOf( mat3( boneMatY ) ), q2 = hipQuatOf( mat3( boneMatZ ) ), q3 = hipQuatOf( mat3( boneMatW ) );
@@ -2186,7 +2187,7 @@ void main() {`).replace('#include <skinning_vertex>', `#include <skinning_vertex
     }
   };
   const prevKey = mat.customProgramCacheKey?.bind(mat);
-  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2dq${dqs ? HIP_DQS[0] : 0}`;
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey() : ''}|bulge2dq${dqs ? HIP_DQS.join('_') : 0}`;
   mat.needsUpdate = true;
 }
 export function shapeHips(vrm, amount = 0.036) {
